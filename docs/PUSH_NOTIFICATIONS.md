@@ -106,7 +106,7 @@ salted hash. A client must not undermine these — in particular it must **never
 
 ### 2.2 The server, end to end
 
-```
+```text
    app ──POST /api/register {trade_pubkey, token, platform, mostro_pubkey}──▶ server
                                                                               │ stores in memory (48 h TTL, lost on restart)
    daemon / peer ──kind 14, p = trade_pubkey──▶ relay ──────────────────────▶ server: first p tag ∈ registered? ──▶ FCM ──▶ device
@@ -410,12 +410,16 @@ against an imagined typed payload and must be retired, not built on.
    never decrypts. Every state change comes from the one Rust core, in the foreground,
    through the resume-resync path. Phase 5 may revisit this deliberately; until then a
    review rule and a test enforce it.
-3. **Register what the DM filter covers, no more.** The set of registered pubkeys is
-   derived from the same facts the kind-14 filter is built from: the trade keys of
-   non-terminal trade rows, the `trade_index` of non-terminal payout claims, and the
-   keys of trades with a live dispute. A key drops off when its row turns hard-terminal
-   (plus a grace period, §7.1). Never "all keys `1..=trade_key_index`": the server keeps
-   one token per pubkey and every registration costs a request.
+3. **Register what the DM filter covers, no more — and make the filter cover what is
+   registered.** The set of registered pubkeys is derived from the same facts the
+   kind-14 filter is built from: the trade keys of non-terminal trade rows, the
+   `trade_index` of non-terminal payout claims, and the keys of trades with a live
+   dispute. A key drops off when its row turns hard-terminal (plus a grace period,
+   §7.1). Never "all keys `1..=trade_key_index`": the server keeps one token per
+   pubkey and every registration costs a request. The converse holds too: a wake for a
+   key whose daemon the filter no longer listens to is a wake the app cannot act on,
+   so the filter's `authors` must include the **issuing node of every registered
+   key**, not only the active node and the claim nodes it pins today (§7.1).
 4. **Re-registration is periodic and idempotent, not event-driven.** The server forgets
    silently (§2.5); the client re-registers on start, on resume after a threshold, on
    token refresh, and on a timer, and treats every `200` as an overwrite. Failures
@@ -448,19 +452,27 @@ against an imagined typed payload and must be retired, not built on.
 push-enabled setting, the active node pubkey, and the **registration set** computed in
 Rust:
 
-```
+```text
 wanted = { trade key of every trade row whose order.status is not hard-terminal }
        ∪ { key(trade_index) of every BondClaim whose phase is not terminal }
        ∪ { trade key of every trade with an open dispute }
-       ∪ { keys whose row turned terminal less than GRACE (24 h) ago }
 ```
 
-The grace covers what still arrives after a terminal status: `rate-received`, a late
-`bond-slashed`, an admin outcome, the daemon's `Success` after `SettledHoldInvoice`.
+plus, from the registration state itself, every key that left that set less than
+**GRACE (24 h)** ago. The grace covers what still arrives after a terminal status:
+`rate-received`, a late `bond-slashed`, an admin outcome, the daemon's `Success` after
+`SettledHoldInvoice`. Its clock is **not** the trade row: `TradeInfo.completed_at` is
+never written by the status syncs, and a terminal timestamp added to every write
+path would be one more thing to keep atomic. Instead the registration records when
+the key first went unwanted (`unwanted_since`, below); a key seen unwanted for longer
+than the grace is unregistered and forgotten. Restart-safe, because the registration
+map is persisted. A key that turned terminal before this feature existed has no
+timestamp and gets the full grace from the first reconcile that sees it.
 
 **State.** Per pubkey, persisted: `registered_at` (server time of the last `200`),
-`token_hash` (which token it was registered with), `attempts` and `next_attempt_at` for
-backoff. Settings key `push_registrations` (one JSON map), plus `push_token` /
+`token_hash` (which token it was registered with), `mostro_pubkey` (the issuing node
+it was filed under), `unwanted_since` (when it first dropped out of the wanted set,
+`None` while wanted), `attempts` and `next_attempt_at` for backoff. Settings key `push_registrations` (one JSON map), plus `push_token` /
 `push_platform` (so a restart can unregister before the device hands a token over
 again) and `push_enabled`.
 
@@ -470,21 +482,57 @@ again) and `push_enabled`.
 2. For each `wanted` pubkey: register if never registered, registered with another
    token, or `registered_at` older than **REFRESH = 12 h** (a quarter of the server
    TTL), or `next_attempt_at` has passed after a failure.
-3. For each registered pubkey not in `wanted` (grace expired): unregister, then forget.
-4. Every request: 10 s timeout, lowercase hex, `mostro_pubkey` = the node that issued
-   the trade (`order.creator_pubkey` for a taken order; the active node for a maker
-   order and for claims — the field only gates the operator's whitelist, it does not
-   route). Backoff on failure: 1 min → 5 → 30 → 2 h, capped; `429` honours
-   `Retry-After`; `403` marks the node **refused** and stops registering for it until
-   the node changes (§9).
+3. For each registered pubkey not in `wanted`: set `unwanted_since` if unset; once
+   `now − unwanted_since > GRACE`, unregister, then forget. A key that comes back
+   into `wanted` (a restore, a re-taken order on the same key) clears the timestamp.
+4. Every request: 10 s timeout, lowercase hex, `mostro_pubkey` = the **issuing node
+   of that key**, read from the owning row or claim: `order.creator_pubkey` for a
+   trade row, `claim.node_pubkey` for a claim. The field only gates the operator's
+   whitelist, it does not route — but a registration filed under the wrong node is
+   refused, or accepted, under the wrong policy, and a refusal must be recorded
+   against the node that earned it. Backoff on failure: 1 min → 5 → 30 → 2 h, capped;
+   `429` honours `Retry-After`; `403` marks **that node** refused and stops
+   registering its keys until the node's policy is re-read (§9).
+
+**The issuing node is on the row.** A taken order's row already carries the node in
+`order.creator_pubkey` (the 38383 author, #334). A maker's row does **not** today:
+`create_order` and the restore placeholder write an empty `creator_pubkey`, and a
+maker trade on node A becomes anonymous after a switch to B — its daemon events are
+then unreachable, push or no push. T1.2 therefore seeds `creator_pubkey` with the
+active node on both paths (consistent with the book, where the user's own order is
+also authored by the node) and treats a legacy row with an empty `creator_pubkey` as
+the active node's. The same value feeds the DM filter's `authors` (next paragraph).
 
 **Triggers.** App start (after the DB and identity are up), `set_push_token`,
 `set_push_enabled(true)`, every trade row write that changes `wanted` (take, create
 confirmation, restore, terminal status, claim upsert), resume (Flow 2), and a timer
 every 6 h while the app runs. Coalesced: a burst of triggers runs one reconcile.
 
-**Node switch.** `wanted` is node-agnostic (a claim from node A stays wanted after a
-switch to B, exactly like the DM filter keeps A). Nothing is unregistered on a switch.
+**The refresh must outlive the process.** None of those triggers fires while the app
+is suspended or not running, and the OS suspends Dart timers with it. The server
+forgets a token 48 h after its last registration; a user who does not open the app
+for two days is then unreachable for every later event — including a payout claim
+whose window is 15 days. That defeats the "not running" case the whole feature
+exists for, so the refresh gets an **OS-scheduled job** (T1.5): `workmanager` on
+Android (periodic, ≥ 15 min granularity, run every 12 h), `BGAppRefreshTask` on iOS
+(opportunistic; the OS decides, so the 12 h is a request). The job does one thing:
+re-POST every registration in the persisted map with the persisted token. It does
+**not** boot the Rust core, open the database or touch protocol state — it reads a
+small JSON mirror Rust writes next to the settings store (`push_registrations` and
+`push_token`, nothing else) and calls the same HTTP endpoints. That keeps principle 2
+intact: the job is HTTP plumbing, not a second writer. Until T1.5 lands, the
+limitation is stated in Settings (*"Pushes stop 48 h after the app was last
+opened"*) and in §14; the durable fix is a longer server TTL or persistence, which
+is an upstream ask (§14 item 10).
+
+**Node switch.** `wanted` is node-agnostic: a trade or claim from node A stays wanted
+after a switch to B, and nothing is unregistered on a switch. For that to mean
+anything the DM filter must still hear A. Today `replace_global_dm_filter` pins
+`authors` to the active node plus the nodes with open claims (`orders.rs`), so a
+non-terminal trade from A is deaf after a switch — a wake for it would land on a
+subscription that drops A's events. T1.2 extends `authors` with the issuing node of
+every non-terminal trade row (the same set `wanted` is built from), so registration
+and delivery coverage are computed from one source and cannot drift.
 
 ### 7.2 Flow 2 — A wake, per app state
 
@@ -555,6 +603,8 @@ pub struct PushRegistration {
     pub trade_pubkey: String,     // 64 lowercase hex
     pub registered_at: i64,       // unix seconds of the last 200
     pub token_hash: String,       // blake3/sha256 of the token it was registered with
+    pub mostro_pubkey: String,    // the issuing node it was filed under
+    pub unwanted_since: Option<i64>, // first reconcile that found it unwanted; the grace clock
     pub attempts: u32,
     pub next_attempt_at: i64,
 }
@@ -667,9 +717,12 @@ while the process is alive. Neither ever names an order, an amount or a counterp
   Startup runs reconcile after identity and DB init and **after** the DM filter is
   seeded, never before (a registration for a key the filter does not cover is a wake
   the app cannot act on).
-- **Server restart / TTL:** the 12 h refresh bounds the blind window to 12 h in the
-  worst case; the resume trigger shortens it to "the next time the app is opened".
-  Both are invisible to the user.
+- **Server restart / TTL:** the 12 h refresh bounds the blind window to 12 h while
+  the app runs; the resume trigger shortens it to "the next time the app is opened";
+  the OS-scheduled job of T1.5 keeps it bounded while the app is suspended or not
+  running, within what the OS grants. A server restart is the one case nothing
+  shortens: every registration is gone until the next refresh, whichever fires
+  first. All of it is invisible to the user.
 - **Server down at startup:** no `/api/health` gate (v1 gap #8). Reconcile fails
   its first request, backs off, and the app trades normally.
 - **Duplicate and stale pushes:** `wake_pending` is a flag, not a counter; ten pushes
@@ -714,15 +767,19 @@ shows the new status without a restart; the same on web after a throttled tab.
 
 | Task | Scope | Files |
 |---|---|---|
-| T1.1 | `mostro/push.rs`: `PushRegistration`, `wanted_pubkeys`, `plan`, `backoff`, `notify_allowed`, settings keys; unit tests for every rule in §7.1 (grace, refresh, token change, 403 refusal, node-agnostic wanted set) | `rust/src/mostro/push.rs`, `rust/src/db/mod.rs` |
-| T1.2 | `api/push.rs`: `PushServer` trait + `reqwest` impl (10 s timeout, lowercase hex, `mostro_pubkey`, `Retry-After`), wasm stub; `reconcile_push` single-flight with the triggers of §7.1 (trade row writes, claim upserts, restore, timer); `set_push_token`, `clear_push_token`, `set_push_enabled`, `get_push_status`, `on_push_status_changed`; `delete_identity` unregisters first; `resync()` calls reconcile | `rust/src/api/push.rs`, `rust/src/api/orders.rs`, `rust/src/api/bond.rs`, `rust/src/api/identity.rs` |
+| T1.1 | `mostro/push.rs`: `PushRegistration` (with `mostro_pubkey`, `unwanted_since`), `wanted_pubkeys`, `plan`, `backoff`, `notify_allowed`, settings keys; unit tests for every rule in §7.1 (grace from `unwanted_since` and its reset, legacy key with no timestamp, refresh, token change, per-node 403 refusal, node-agnostic wanted set, `mostro_pubkey` from the owning row or claim) | `rust/src/mostro/push.rs`, `rust/src/db/mod.rs` |
+| T1.2 | `api/push.rs`: `PushServer` trait + `reqwest` impl (10 s timeout, lowercase hex, `mostro_pubkey`, `Retry-After`), wasm stub; `reconcile_push` single-flight with the triggers of §7.1 (trade row writes, claim upserts, restore, timer); `set_push_token`, `clear_push_token`, `set_push_enabled`, `get_push_status`, `on_push_status_changed`; `delete_identity` unregisters first; `resync()` calls reconcile. **Issuing node on every row**: `create_order` and the restore placeholder seed `order.creator_pubkey` with the active node, an empty legacy value reads as the active node; **DM filter `authors`** extended with the issuing node of every non-terminal trade row, so a registered key is always one the filter can hear; the JSON mirror of §7.1 written on every reconcile | `rust/src/api/push.rs`, `rust/src/api/orders.rs`, `rust/src/api/bond.rs`, `rust/src/api/identity.rs` |
 | T1.3 | Dart: `PushNotificationService` reduced to the device side; `set_push_token` on token and refresh; delete `routeFromPayload`, `_typeFromString`, `_isTypeEnabled`, `registerToken`, `unregisterToken`, the in-memory set; push server URL moves to Rust config (`PUSH_SERVER_URL`, default the Fly host — §14 item 1) | `lib/features/notifications/services/push_notification_service.dart`, `rust/src/config.rs` |
 | T1.4 | `contracts/nostr.md`: replace `register_push_token`; new `contracts/push.md`; `data-model.md` settings keys | `specs/004-mostro-p2p-client/` |
+
+| T1.5 | OS-scheduled refresh that outlives the process (§7.1): `workmanager` periodic task on Android and `BGAppRefreshTask` on iOS, both re-POSTing the persisted registration map with the persisted token from the JSON mirror, no Rust core, no database; a test asserts the job's file imports no bridge or database code; the Settings limitation copy is removed when it lands | `lib/features/notifications/services/push_refresh_job.dart`, `android/app/src/main/AndroidManifest.xml`, `ios/Runner/Info.plist` (`BGTaskSchedulerPermittedIdentifiers`), `pubspec.yaml` |
 
 - **PR-1a** — T1.1 (Rust, pure). One PR: the rules are the reviewable content.
 - **PR-1b** — T1.2 (Rust, I/O). Requires `frb-generate.sh`.
 - **PR-1c** — T1.3 + T1.4 (Dart + docs). Justification: the docs describe exactly the
   surface this PR starts calling.
+- **PR-1d** — T1.5 (Dart + platform config). One task, one PR: the background-job
+  boundary is the reviewable content.
 
 Acceptance: on an Android device, taking an order registers its trade pubkey (visible in
 the server log as a hashed pubkey and in `get_push_status`); killing the server makes no
@@ -899,6 +956,15 @@ matrix.
    (`crypto/`), 281-byte format as in the server's `crypto/mod.rs`. Not before.
 9. **`flutter_local_notifications ^17`** is two majors behind v1's 19; check the channel
    API before T2.1 and bump if needed (CI Flutter is 3.38.2).
+10. **Server TTL and persistence.** The 48 h in-memory TTL is what forces T1.5 and
+    what a server restart defeats regardless. Propose upstream a longer TTL
+    (registrations are idempotent, so the cost of a stale one is a wasted push) or a
+    persisted map; either would let T1.5 become a safety net rather than the
+    mechanism.
+11. **Background refresh grants.** Android's `workmanager` honours a 12 h period on
+    stock builds but restrictive OEMs may stretch it; iOS grants `BGAppRefreshTask`
+    on its own judgement of usage. Measure the real cadence on both during T1.5 and
+    record it here; the Settings copy must promise no more than what was measured.
 
 ---
 

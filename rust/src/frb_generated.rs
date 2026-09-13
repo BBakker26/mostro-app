@@ -49,7 +49,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1486587886;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 582614352;
 
 // Section: executor
 
@@ -5245,6 +5245,41 @@ fn wire__crate__api__orders__restart_orders_subscription_impl(
         },
     )
 }
+fn wire__crate__api__nostr__resync_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "resync",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::nostr::resync().await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__orders__send_fiat_sent_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7964,6 +7999,20 @@ impl SseDecode for crate::api::types::RelayStatus {
     }
 }
 
+impl SseDecode for crate::api::types::ResyncOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_online = <bool>::sse_decode(deserializer);
+        let mut var_flushed = <u32>::sse_decode(deserializer);
+        let mut var_coalesced = <bool>::sse_decode(deserializer);
+        return crate::api::types::ResyncOutcome {
+            online: var_online,
+            flushed: var_flushed,
+            coalesced: var_coalesced,
+        };
+    }
+}
+
 impl SseDecode for crate::api::types::SellerStep {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8545,65 +8594,66 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        131 => wire__crate__api__orders__send_fiat_sent_impl(port, ptr, rust_vec_len, data_len),
-        132 => wire__crate__api__messages__send_file_impl(port, ptr, rust_vec_len, data_len),
-        133 => wire__crate__api__orders__send_invoice_impl(port, ptr, rust_vec_len, data_len),
-        134 => wire__crate__api__messages__send_message_impl(port, ptr, rust_vec_len, data_len),
-        135 => wire__crate__api__settings__set_active_mostro_node_impl(
+        131 => wire__crate__api__nostr__resync_impl(port, ptr, rust_vec_len, data_len),
+        132 => wire__crate__api__orders__send_fiat_sent_impl(port, ptr, rust_vec_len, data_len),
+        133 => wire__crate__api__messages__send_file_impl(port, ptr, rust_vec_len, data_len),
+        134 => wire__crate__api__orders__send_invoice_impl(port, ptr, rust_vec_len, data_len),
+        135 => wire__crate__api__messages__send_message_impl(port, ptr, rust_vec_len, data_len),
+        136 => wire__crate__api__settings__set_active_mostro_node_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        136 => wire__crate__api__escrow__set_cashu_mint_url_override_impl(
+        137 => wire__crate__api__escrow__set_cashu_mint_url_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        137 => wire__crate__api__settings__set_default_fiat_code_impl(
+        138 => wire__crate__api__settings__set_default_fiat_code_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        138 => wire__crate__api__settings__set_default_lightning_address_impl(
+        139 => wire__crate__api__settings__set_default_lightning_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        139 => wire__crate__api__escrow__set_escrow_mode_override_impl(
+        140 => wire__crate__api__escrow__set_escrow_mode_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        140 => wire__crate__api__settings__set_language_impl(port, ptr, rust_vec_len, data_len),
-        141 => {
+        141 => wire__crate__api__settings__set_language_impl(port, ptr, rust_vec_len, data_len),
+        142 => {
             wire__crate__api__settings__set_logging_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        142 => {
+        143 => {
             wire__crate__api__reputation__set_privacy_mode_impl(port, ptr, rust_vec_len, data_len)
         }
-        143 => wire__crate__api__settings__set_test_order_expiry_impl(
+        144 => wire__crate__api__settings__set_test_order_expiry_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        144 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
-        145 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
+        145 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
+        146 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        146 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
-        147 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
-        148 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
-        149 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
-        150 => {
+        147 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
+        148 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
+        149 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
+        150 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
+        151 => {
             wire__crate__api__invoice__trade_step_started_at_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -10136,6 +10186,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::RelayStatus>
     for crate::api::types::RelayStatus
 {
     fn into_into_dart(self) -> crate::api::types::RelayStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::types::ResyncOutcome {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.online.into_into_dart().into_dart(),
+            self.flushed.into_into_dart().into_dart(),
+            self.coalesced.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::types::ResyncOutcome
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::types::ResyncOutcome>
+    for crate::api::types::ResyncOutcome
+{
+    fn into_into_dart(self) -> crate::api::types::ResyncOutcome {
         self
     }
 }
@@ -12006,6 +12078,15 @@ impl SseEncode for crate::api::types::RelayStatus {
             },
             serializer,
         );
+    }
+}
+
+impl SseEncode for crate::api::types::ResyncOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.online, serializer);
+        <u32>::sse_encode(self.flushed, serializer);
+        <bool>::sse_encode(self.coalesced, serializer);
     }
 }
 

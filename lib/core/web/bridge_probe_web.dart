@@ -23,6 +23,12 @@ const kBridgeReadyFlag = 'mostroBridgeReady';
 /// Set to the error string when that call threw instead.
 const kBridgeErrorFlag = 'mostroBridgeError';
 
+/// Set to a JSON summary of the bond rows read back through the bridge.
+const kStoreProbeFlag = 'mostroStoreProbe';
+
+/// Set to the error string when reading those rows threw instead.
+const kStoreProbeErrorFlag = 'mostroStoreProbeError';
+
 /// Publishes a successful Rust bridge round-trip to the page.
 void markBridgeReady() {
   globalContext.setProperty(kBridgeReadyFlag.toJS, true.toJS);
@@ -34,4 +40,15 @@ void markBridgeReady() {
 /// non-fatal — but a build that reaches here is not deployable.
 void markBridgeFailed(Object error) {
   globalContext.setProperty(kBridgeErrorFlag.toJS, error.toString().toJS);
+}
+
+/// Publishes what the persistent store handed back through the bridge, as
+/// JSON, so the smoke test can compare it with the rows it seeded.
+void markStoreProbe(String json) {
+  globalContext.setProperty(kStoreProbeFlag.toJS, json.toJS);
+}
+
+/// Publishes a failed store read, with [error] for the CI log.
+void markStoreProbeFailed(Object error) {
+  globalContext.setProperty(kStoreProbeErrorFlag.toJS, error.toString().toJS);
 }

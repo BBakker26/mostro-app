@@ -1,6 +1,6 @@
 # Anti-Abuse Bond — Client Implementation Spec & Phased Plan
 
-**Status:** Draft — planning document for epic [#145](https://github.com/MostroP2P/app/issues/145)
+**Status:** Implemented — every phase in §10 has landed (PR-5 closes epic [#145](https://github.com/MostroP2P/app/issues/145)); kept as the design reference for bond support in this client
 **Goal:** let this client trade against a `mostrod` node that requires an anti-abuse bond, on every side the node enforces it (taker, maker, or both), including the payout claim and the forfeiture notice
 **Audience:** contributors implementing bond support in this client (appv2), human and AI reviewers of the PRs that land it
 **Upstream reference:** [`MostroP2P/mostro` — `docs/ANTI_ABUSE_BOND.md`](https://github.com/MostroP2P/mostro/blob/main/docs/ANTI_ABUSE_BOND.md) (the daemon-side spec, the single source of truth for the protocol)
@@ -795,9 +795,20 @@ single Close button. Errors via `localizedDaemonError` with new markers.
 - `add-bond-invoice` (new claim): "You can claim N sats from a slashed bond" → claim
   screen.
 - `bond-payout-completed`: "Bond payout of N sats received".
-- Push notifications: routed through the existing push pipeline only if the trade
-  update path already produces pushes; otherwise deferred (tracked as an open item,
-  §13).
+- Push notifications: **not routed — the pipeline cannot carry these events** (T5.2,
+  verified in PR-5). The push server watches relays for kind 14 p-tagged to a
+  registered trade pubkey and sends a content-free wake-up (`contracts/nostr.md`,
+  `register_push_token`). It cannot decrypt the message, so no payload can say
+  `add-bond-invoice` or `bond-payout-completed`; the typed `type` / `orderId`
+  payloads `push_notification_service.dart` routes on have no producer for any
+  action today. Two more gaps stand in the way: nothing in the app registers a
+  trade pubkey with the server yet (`registerToken` has no caller), and a claim is
+  addressed to the slashed attempt's trade key, which may belong to a wiped trade.
+  Bond notices therefore come from the in-app notifications the kind-14
+  subscription feeds while the app runs. Background delivery belongs to the push
+  pipeline itself (a wake-up, then local fetch and decryption), and once that
+  exists bond actions need no routing of their own: they are decrypted and
+  dispatched like every other daemon message.
 
 ---
 
@@ -962,6 +973,19 @@ between `add-bond-invoice` and the submission loses nothing.
 
 **PR-5** — T5.1 + T5.2 + T5.3 grouped: docs and test plumbing, no protocol change.
 
+What PR-5 found and did:
+
+- **T5.1** — the CI smoke run sets `SMOKE_BOND_STORE=1`. It seeds a `Pending` claim
+  and two trades, one at `WaitingTakerBond` and one at `WaitingMakerBond`, into the
+  IndexedDB database the first load created. It then reloads and requires the app to
+  read all three back through the bridge (`lib/core/web/store_probe.dart`). The seed
+  file is decoded by a Rust unit test, and the self-test holds the check down with a
+  passing fixture, one that loses the rows, and one without the stores.
+- **T5.2** — documented gap, not routing: see §8.5.
+- **T5.3** — `CLAUDE.md` gotchas, `specs/004` contracts and data model, this status
+  line, and 69 l10n keys no code referenced (none bond-related) removed from all five
+  locales.
+
 ### Issue mapping
 
 | Issue | Phase / PRs |
@@ -1079,7 +1103,8 @@ trades, the pre-take/pre-create estimate, and web parity of the claim store.
 4. **Amount seeding for a seller-as-taker.** The existing `PayInvoice` arm seeds
    `order.amount_sats` from the payload; confirm the `PayBondInvoice` payload's
    `amount` (the bond) is never used for that seeding (T1.1 test).
-5. **Push pipeline capability** for data-only bond events (T5.2).
+5. **Push pipeline capability** for data-only bond events (T5.2). *Resolved in PR-5:*
+   the pipeline is content-free by design, so it cannot carry them; see §8.5.
 6. **Concurrent-bond visibility**: after a lost race the local book must show the order
    as available again only if the wire still says `pending`; the existing
    `settle_after_lost_take` path is expected to cover this — confirm in T1.2 tests.

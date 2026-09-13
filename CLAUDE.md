@@ -63,6 +63,8 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   a **Rust bridge call returned**, and nothing errored. The bridge signal comes from
   `lib/core/web/bridge_probe.dart`, which `main()` sets after its first successful Rust call
   (no-op off web) — rename that flag on one side only and the check silently never fires.
+  The CI run also sets `SMOKE_BOND_STORE=1`: it seeds bond rows (`test/web/smoke/seed/`) into
+  IndexedDB, reloads, and compares them with what `lib/core/web/store_probe.dart` read back.
 
 ## Code Style
 
@@ -182,5 +184,19 @@ bridged by flutter_rust_bridge.
   means "taken, real state unknown", and a trade's status comes from daemon messages only
   (`wire_status_applies` guards both ingest paths). Treating it as `Active` offers actions the
   daemon rejects with `CantDo` (#203).
+- **Bond statuses never reach the wire book.** `WaitingTakerBond` publishes as `pending` (the
+  order stays takeable by others until a bond locks) and `WaitingMakerBond` publishes nothing
+  (the order is invisible until the maker's bond locks). Both exist only on the local trade row,
+  learned from daemon messages. Never derive them from Kind 38383, and never read a `pending`
+  book entry as "nobody is paying a bond on it" (`docs/ANTI_ABUSE_BOND.md` §2.7–2.8).
+- **Bond payout claims are independent of trades.** A `BondClaim` lives in its own
+  `bond_claims` store keyed `node:order`. It outlives the trade row (completed, canceled or
+  wiped) and is always submitted to the node that issued it, even after a node switch: the
+  kind-14 filter keeps that node as an author while a claim is open, and for its claim window
+  after the user switches away. Don't look a claim up through a trade, and don't delete one
+  with it (§6.4).
+- **Push cannot carry bond events.** The push server only sees kind 14 p-tagged to a trade
+  pubkey and sends a content-free wake-up, so no payload can name `add-bond-invoice` or
+  `bond-payout-completed`. Bond notices are in-app, from the kind-14 subscription (§8.5).
 
 <!-- MANUAL ADDITIONS END -->

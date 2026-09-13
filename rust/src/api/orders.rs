@@ -9211,8 +9211,8 @@ mod tests {
 
     /// `classify_take_reply` goes by payload shape: `PaymentRequest` carries
     /// the hold invoice (seller flow), `Order` carries the calculated sats
-    /// (buyer flow), `pay-bond-invoice` maps to a stable BondRequired
-    /// rejection, and action-only replies are still acceptances.
+    /// (buyer flow), `pay-bond-invoice` is an acceptance parked at
+    /// `WaitingTakerBond`, and action-only replies are still acceptances.
     #[test]
     fn classify_take_reply_maps_payload_shapes() {
         use mostro_core::message::{Action, Payload};

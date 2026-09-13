@@ -10,6 +10,7 @@
 //   1. the page is cross-origin isolated  (no SharedArrayBuffer → no wasm threads)
 //   2. the Flutter engine mounted         (the view element exists)
 //   3. a Rust bridge call returned        (the FRB worker pool survived)
+//  3b. seeded bond rows read back         (opt-in: SMOKE_BOND_STORE=1)
 //   4. nothing errored along the way      (console + uncaught page errors)
 //   5. every asset the page asked for was served (catches --base-href breakage)
 //
@@ -128,6 +129,45 @@ function serveBundle(misses) {
     server.on('error', fail);
     server.listen(0, '127.0.0.1', () => ok(server));
   });
+}
+
+/**
+ * Runs in the page: writes each seeded document into its store as a string,
+ * which is how rust/src/db/indexeddb.rs stores them. Returns true, or why it
+ * could not.
+ *
+ * Opens the database without a version, so it never triggers an upgrade of
+ * its own: the stores must already exist, created by the app's first load.
+ * A bundle that no longer creates them fails here, with the store it lacks.
+ */
+async function seedStores({ database, stores }) {
+  const request = (req) =>
+    new Promise((ok, fail) => {
+      req.onsuccess = () => ok(req.result);
+      req.onerror = () => fail(req.error);
+    });
+  const db = await request(indexedDB.open(database));
+  try {
+    const names = Object.keys(stores);
+    const absent = names.filter((name) => !db.objectStoreNames.contains(name));
+    if (absent.length) {
+      return `database "${database}" (version ${db.version}) has no ${absent.join(', ')} store`;
+    }
+    const tx = db.transaction(names, 'readwrite');
+    for (const [name, docs] of Object.entries(stores)) {
+      for (const [key, doc] of Object.entries(docs)) {
+        tx.objectStore(name).put(typeof doc === 'string' ? doc : JSON.stringify(doc), key);
+      }
+    }
+    await new Promise((ok, fail) => {
+      tx.oncomplete = ok;
+      tx.onerror = () => fail(tx.error);
+      tx.onabort = () => fail(tx.error);
+    });
+    return true;
+  } finally {
+    db.close();
+  }
 }
 
 async function main() {
@@ -323,6 +363,57 @@ async function main() {
     const bridgeError = await page.evaluate(() => globalThis.mostroBridgeError);
     if (bridgeError) await fail(`Rust bridge call failed: ${bridgeError}`);
     console.log('✓ Rust bridge call returned');
+
+    // 3b. Bond rows survive the persistent store (docs/ANTI_ABUSE_BOND.md T5.1).
+    //
+    //     Opt-in: only the release bundle has a store to read. A bridge that
+    //     answers says nothing about IndexedDB, and the bond rows in it — a
+    //     payout claim, trades parked at WaitingTakerBond / WaitingMakerBond —
+    //     reach the UI only through a serde decode in the wasm core and an FRB
+    //     decode in Dart. A build that breaks either one shows an empty My
+    //     Trades and logs nothing this script would catch.
+    //
+    //     So seed the rows into the database the first load created, reload so
+    //     the app reads them at startup, and compare what it publishes
+    //     (lib/core/web/store_probe.dart) with what was seeded. The seed file is
+    //     decoded by a Rust unit test too, so it cannot drift from the types.
+    if (process.env.SMOKE_BOND_STORE === '1') {
+      const seed = JSON.parse(await readFile(join(here, 'seed', 'bond_store.json'), 'utf8'));
+      const seeded = await page
+        .evaluate(seedStores, { database: seed.database, stores: seed.stores })
+        .catch((err) => `seeding threw: ${err.message}`);
+      if (seeded !== true) await fail(`could not seed the bond rows: ${seeded}`);
+
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
+      await page
+        .waitForFunction(
+          () =>
+            typeof globalThis.mostroStoreProbe === 'string' ||
+            typeof globalThis.mostroStoreProbeError === 'string',
+          undefined,
+          { timeout: TIMEOUT_MS },
+        )
+        .catch(() => fail('the app never published what it read from the store (mostroStoreProbe)'));
+      const probeError = await page.evaluate(() => globalThis.mostroStoreProbeError);
+      if (probeError) await fail(`reading the bond rows back failed: ${probeError}`);
+
+      const probe = JSON.parse(await page.evaluate(() => globalThis.mostroStoreProbe));
+      const same = (want, got) => Object.entries(want).every(([k, v]) => got[k] === v);
+      const missing = [
+        ...seed.expect.claims.filter((want) => !probe.claims.some((got) => same(want, got))),
+        ...seed.expect.trades.filter((want) => !probe.trades.some((got) => same(want, got))),
+      ];
+      if (missing.length) {
+        await fail(
+          `seeded bond rows were not read back: ${JSON.stringify(missing)}\n` +
+            `  the app read: ${JSON.stringify(probe)}`,
+        );
+      }
+      console.log(
+        `✓ bond rows read back (${seed.expect.claims.length} claim, ` +
+          `${seed.expect.trades.length} trades)`,
+      );
+    }
 
     // 4/5. Anything the page complained about, and anything it asked for that
     //      this server could not serve.

@@ -108,6 +108,15 @@ off, which the protocol allows.
 
 **Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`.
 
+**Anti-abuse bond (maker).** A node that requires a maker bond answers the
+create with `pay-bond-invoice` instead of `new-order`. The order then has its
+daemon id but no kind 38383 event until the bond is paid: `create_order`
+returns it at `WaitingMakerBond`, and persists the maker row with `bond` set
+(`role = Maker`, `state = Requested`, the bolt11 and its decoded expiry). The
+later `new-order` for that id is the only sign the bond locked; it moves the
+row to `Pending` with the bond `Locked`. The daemon refuses a cancel in this
+window, so walking away is `abandon_bonded_order` (see `contracts/bond.md`).
+
 ---
 
 ### take_order(order_id: String, role: TradeRole, fiat_amount: f64?) → TradeInfo
@@ -163,9 +172,18 @@ on). The durable half applies to backends with a trades store — on web
 (#233) the write is a stub and only the session and the returned struct
 carry the peer.
 
+**Anti-abuse bond (taker).** A node that requires a taker bond answers the
+take with `pay-bond-invoice`. That is an acceptance, not an error:
+`take_order` returns the trade at `WaitingTakerBond` with `bond` set
+(`role = Taker`, `state = Requested`), and the bond's amount never seeds
+`order.amount_sats`. Publicly the order stays `pending` and takeable by
+others until a bond locks; the first trade-flow message after the request
+marks the bond `Locked`. A `canceled` in this window is a lost race or a
+cancel, never a trade outcome, and wipes the row
+(`docs/ANTI_ABUSE_BOND.md` §6.1).
+
 **Errors**: `OrderNotFound`, `CannotTakeOwnOrder`, `OrderAlreadyTaken`,
 `InvalidRole`, `FiatAmountRequired`/`OutOfRange` (range orders),
-`BondRequired` (daemon requires an anti-abuse bond — not supported yet),
 `NoDaemonResponse`, plus daemon `CantDo` reasons passed through as errors.
 
 ---
@@ -448,6 +466,10 @@ what rebuilds sessions after one.
 | `CooperativeCancelAccepted`        | (status sync)                                       | `status → CooperativelyCanceled`                                                 |
 | `AdminSettled` / `AdminCanceled`   | (status sync)                                       | `status → SettledByAdmin` / `CanceledByAdmin`                                    |
 | `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |
+| `PayBondInvoice`                   | `Payload::PaymentRequest(small_order, bolt11, _)`   | A bond bolt11 no take or create is waiting for (the daemon's idempotent re-send, a replay): refreshes `bond.invoice` and its expiry on an existing bond-window row, never creates one |
+| `BondSlashed`                      | `Payload::Order(small_order)`                       | Informational: the payload amount is the **slashed bond**, never written to the order. Marks `bond.state → Slashed` when the row still exists (winning over a provisional `Released`), infers the cause from the row's status, emits `on_bond_slashed`. Exempt from the generation gate |
+| `AddBondInvoice`                   | `Payload::BondPayoutRequest { order, slashed_at }`  | No trade row involved: upserts a payout claim for (`sender`, order) per the §6.4 table (`contracts/bond.md`). Our own `PaymentRequest` echo is ignored |
+| `BondInvoiceAccepted` / `BondPayoutCompleted` | (none)                                   | Claim phase → `Acknowledged` / `Completed` for the sending node's claim; no trade row involved |
 
 Two rules gate every status sync in the table, and both exist for the
 same reason: the global kind-14 subscription carries no `since`, so every

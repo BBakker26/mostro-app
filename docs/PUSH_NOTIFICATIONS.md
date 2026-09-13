@@ -74,15 +74,18 @@ The client does not decide:
 - **Encrypted token registration** (MIP-05 style ECDH + ChaCha20-Poly1305). The server
   has the decryptor as dead code, publishes `encryption_enabled: false` and no public
   key; there is nothing to encrypt to yet (§14).
-- **Web Push.** The server rejects any `platform` but `android` / `ios`, so a web token
-  cannot be registered at all today; #133 (the VAPID key) is moot until the server
-  accepts a web platform. The web service worker stays a placeholder.
+- **Web Push without the server.** Web is in scope (§2.6, T4.5), but it is the one
+  platform that cannot ship from this repository alone: the server must accept
+  `platform: web` and answer the browser's CORS preflight (§3.5). The client work is
+  specified and built behind that; until the server lands, web shows the same
+  "not available" row desktop does.
 - **Desktop.** No push transport exists for Linux, macOS or Windows; those builds keep
   their foreground subscriptions, as today.
 - **UnifiedPush.** The server supports it behind an opt-in flag that is off in
   production. Listed as an optional extension (§11, Phase 6), not a goal.
-- **Server changes.** Where the server would need to change (a web platform, encrypted
-  tokens, a solver wake path), this document records the gap and stops.
+- **Server changes.** Where the server would need to change (encrypted tokens, a
+  solver wake path), this document records the gap and stops. The two web changes
+  (§3.5) are the exception: small, listed precisely, and asked for upstream.
 
 ---
 
@@ -172,6 +175,56 @@ dispute chat is now a documented gap rather than a working path.
   therefore periodic and idempotent (§7.1), not event-driven.
 - **One token per pubkey.** Registering a trade pubkey from a second device evicts the
   first. Multi-device is out of scope; a restore on a new device simply takes over.
+
+### 2.6 Web
+
+The browser is the one platform where the doorbell can ring with the app closed
+**and** something can answer it: a service worker. FCM Web Push delivers through the
+browser's push service (VAPID-keyed), to `web/firebase-messaging-sw.js`, whether the
+tab is open, backgrounded or closed. What the worker may do is narrow by design:
+
+- **Visible push (`trade_update`).** The Firebase SDK in the worker shows the
+  server's `notification` block as an OS notification when no tab has focus; a
+  focused tab receives `onMessage` instead, like the foreground case on mobile.
+- **Silent push (`chat_wake`).** Data-only reaches the worker with no `notification`
+  block, and Chrome requires a push event to end in a visible notification or it
+  revokes the subscription after a few silent ones. The worker therefore shows its own
+  content-free "New message" for `chat_wake` — the one place the client renders a push
+  itself.
+- **Tap.** The worker focuses an existing tab (or opens one) at the app's
+  notifications route under the deployed base path (`/app/#/notifications`), and
+  the tab's resume path does the rest. The worker never routes on payload fields:
+  there are none (§2.3), and the current worker's `routeFromPayload` mirror is dead
+  code to delete.
+- **Never a courier.** The worker never loads the wasm core, never opens IndexedDB,
+  never decrypts. Principle 2 holds on web exactly as on mobile; the tab, when it
+  next runs, resyncs (§10).
+
+Three facts shape the plan:
+
+- **Token = Firebase token.** A web token is an ordinary FCM registration token; the
+  server sends to it with the same v1 API call. What the server lacks is only the
+  `platform` value and the CORS headers a browser needs to reach `/api/*` at all
+  (§3.5).
+- **The page is cross-origin isolated** (`SharedArrayBuffer`, `CLAUDE.md`). Every
+  `fetch` from the page to the push server runs under COEP `require-corp`, so the
+  server's responses must carry CORS headers for the app's origin; the worker's
+  `importScripts` from `gstatic.com` are worker-scoped and not subject to the
+  document's COEP, but this is one of the things T4.5 verifies against the real
+  bundle rather than assumes. The worker also coexists with the isolation shim
+  (`coi-serviceworker.min.js`): Firebase registers its own worker under its own scope
+  (`firebase-cloud-messaging-push-scope`), and the shim's `clients.claim()` claims
+  pages, not other workers — verified the same way.
+- **No OS job.** There is no `workmanager` on the web. `periodicSync` exists in
+  Chromium only, for installed PWAs, at the browser's discretion, so the refresh of
+  §7.1 that outlives the process has nothing to run on. A web registration lives
+  48 h past the last time a tab ran the app; the Settings copy on web says so.
+
+Browser support: Chrome, Edge and Firefox on desktop and Android; Safari 16.4+ on
+macOS and iOS only for an installed (home-screen) PWA, which the deployed bundle is
+not today (`--pwa-strategy=none`). Safari is therefore "not available" until that
+changes, and the capability check reads the `Notification` and `PushManager` APIs,
+not the user agent.
 
 ---
 
@@ -273,8 +326,25 @@ Consequences the client must design around:
 |---|---|---|
 | Android | FCM (`google-services.json` for `foundation.mostro.app` is committed) | full |
 | iOS | APNs via FCM — needs an APNs key in the Firebase project, `aps-environment`, `GoogleService-Info.plist` | full, once configured (T4.4) |
-| Web | FCM Web Push — server rejects `platform = web` | none; documented gap |
+| Web | FCM Web Push (VAPID) via `web/firebase-messaging-sw.js`; Chrome, Edge, Firefox; Safari only as an installed PWA | full for the visible wake and the chat wake, once the server accepts `web` and answers CORS (§3.5, T4.5); no refresh outlives the tab |
 | Linux / macOS / Windows | — | none; foreground subscriptions only |
+
+### 3.5 Server changes web needs
+
+Both are small, and both are prerequisites this client cannot work around. Proposed
+upstream as one issue (§14 item 7):
+
+1. **Accept `platform: "web"`** in `/api/register` (`Platform` enum, the
+   `android`/`ios` validation in `routes.rs`, the `/api/status` counts). The FCM v1
+   send is unchanged; optionally add a `webpush` block with
+   `notification.tag = "mostro-trade"` so repeated pushes collapse in the browser
+   the way `apns-collapse-id` does on iOS.
+2. **CORS for the app's origin** on `/api/register`, `/api/unregister` and
+   `/api/notify`: answer `OPTIONS` preflights and send `Access-Control-Allow-Origin`
+   for `https://mostro.network` (and a configurable list for forks and local runs),
+   with `Content-Type` as an allowed header. Without it the browser blocks the call
+   before it leaves, and the isolated page's COEP makes the block absolute. The
+   server today has no CORS layer (`actix-web` without `actix-cors`).
 
 ---
 
@@ -388,7 +458,7 @@ Verified on `main` at the time of writing.
 | Area | State | Where |
 |---|---|---|
 | Firebase deps | `firebase_core ^3.6`, `firebase_messaging ^15.1`, `flutter_local_notifications ^17.2` (unused) | `pubspec.yaml` |
-| Firebase config | `lib/firebase_options.dart` generated; `android/app/google-services.json` for `foundation.mostro.app` committed; **no** iOS plist, entitlements or APNs; web SW and VAPID are `REPLACE_ME` placeholders (#133) | `lib/`, `android/app/`, `web/firebase-messaging-sw.js` |
+| Firebase config | `lib/firebase_options.dart` generated; `android/app/google-services.json` for `foundation.mostro.app` committed; **no** iOS plist, entitlements or APNs; `firebase_options.dart` carries real **web** options (`1:375342057498:web:…`) but `web/firebase-messaging-sw.js` has `REPLACE_ME` config, a `routeFromPayload` mirror for fields the server never sends, and no base-path awareness, and the VAPID key is a placeholder (#133) | `lib/`, `android/app/`, `web/firebase-messaging-sw.js` |
 | Init | `Firebase.initializeApp` in `app_bootstrap.dart` (failure logged, push disabled); `PushNotificationService.initialize()` after the first frame in `app.dart` | `lib/core/app_bootstrap.dart:56-64`, `lib/core/app.dart:30-36` |
 | Permission | `requestPermission` in `initialize()`; denied-banner + retry via `notificationPermissionDeniedProvider` (10d) | `push_notification_service.dart`, `notification_permission_provider.dart` |
 | Token | `getToken()` on Android/iOS, skipped on web (placeholder VAPID); refresh → `reRegisterAllTokens()` over an **in-memory set** | `push_notification_service.dart:75-110` |
@@ -563,6 +633,8 @@ and delivery coverage are computed from one source and cannot drift.
 | Background, process alive | `onBackgroundMessage` (`trade_update` also rendered by the OS) | handler is **display-only**: record `wake_pending = true` in prefs; nothing else. On resume the lifecycle service runs `resync()` (§10) and hydrates. The OS notification is the user's cue. |
 | Not running | OS renders the visible push; tap launches the app | cold start → normal startup already replays everything; the launch-from-notification is consumed as "open `/notifications`" after the first frame. |
 | `chat_wake` while backgrounded | silent; may not start a dead process | same as above minus the OS cue: `wake_pending`, resync on resume. If the process is alive and Android allows it, the handler may show a **local** "New message" notification — still content-free (Phase 3). |
+| **Web**, tab focused | `onMessage` | as Foreground. |
+| **Web**, tab open but hidden, or closed | the service worker's push event | the worker shows the OS notification (`trade_update`: the server's block; `chat_wake`: its own content-free "New message"); a tap focuses or opens the app at `/app/#/notifications`; the tab's `hidden → resumed` (or cold start) resyncs. Nothing is written by the worker. |
 
 Tap routing: with no payload to route on, a tap opens the app on **`/notifications`**
 (cold) or brings it to the foreground (warm); the in-app notifications list — fed by the
@@ -594,10 +666,12 @@ user's own evidence sends do not need a wake (the solver is not a push client).
 - **OS permission denied** (10d banner, exists): no token is requested; the Rust side
   sees no token and keeps nothing registered. When the user grants it in system
   settings, the existing `retryInitialize()` path produces a token and reconcile runs.
-- **Unsupported platform** (desktop, web): `set_push_token` is never called; the
-  settings screen shows the unsupported state instead of the toggle. Capability is a
-  **Dart fact** (the platform), read from `PushNotificationService.isSupported`
-  (made public), never inferred from "no token": a denied permission also yields no
+- **Unsupported platform** (desktop; web when the browser lacks `Notification` /
+  `PushManager`, or until the server accepts `web`): `set_push_token` is never
+  called; the settings screen shows the unsupported state instead of the toggle.
+  Capability is a **Dart fact** (the platform, and on web the APIs the browser
+  exposes), read from `PushNotificationService.isSupported` (made public), never
+  inferred from "no token": a denied permission also yields no
   token and must show the denied banner, not unsupported copy.
 
 ### 7.5 Flow 5 — Token refresh
@@ -633,7 +707,7 @@ pub struct PushRegistration {
     pub next_attempt_at: i64,
 }
 
-pub enum PushPlatform { Android, Ios }
+pub enum PushPlatform { Android, Ios, Web }   // Web: wire value "web" (§3.5)
 
 /// What Settings shows (docs/PUSH_NOTIFICATIONS.md §9).
 pub struct PushStatus {
@@ -712,9 +786,11 @@ first row and the contract is rewritten (T1.4).
   `PushServerUnreachable` (*"Push server unreachable — retrying"*), `PushNodeRefused`
   (*"This Mostro node is not accepted by the push server"*), `PushRateLimited`.
 - The **denied banner** (exists) is unchanged.
-- **Unsupported platform** (desktop/web, from `isSupported`, checked first): the
-  master row is replaced by an info row *"Push notifications are not available on
-  this platform"*; the event rows stay. Checked before permission and before the
+- **Unsupported platform** (desktop, or a browser without push, from `isSupported`,
+  checked first): the master row is replaced by an info row *"Push notifications are
+  not available on this platform"*; the event rows stay. On a supported browser the
+  row is the normal toggle, with one extra line: *"Stops 48 h after this tab last
+  ran Mostro"* — the refresh has nothing to run on when the tab is closed (§2.6). Checked before permission and before the
   token, so a denied permission on a phone keeps its banner and a phone that has
   not handed a token over yet shows the toggle, not unsupported copy.
 - The **privacy footnote** (exists) is kept and extended with the one true sentence
@@ -759,8 +835,11 @@ while the process is alive. Neither ever names an order, an amount or a counterp
   its first request, backs off, and the app trades normally.
 - **Duplicate and stale pushes:** `wake_pending` is a flag, not a counter; ten pushes
   cost one resync.
-- **Web:** `resync()` runs on `visibilitychange` through the same lifecycle events; no
-  push, but the resume resync still heals a throttled tab (#308 scenario 4).
+- **Web:** `resync()` runs on `visibilitychange` through the same lifecycle events,
+  which is also what runs after a notification tap focuses the tab. The service
+  worker rings the bell and shows the notification; the tab does every write. A
+  closed tab has no refresh (§2.6): the registration ages out 48 h after the last
+  run, and the next run re-registers.
 
 ---
 
@@ -853,11 +932,15 @@ current on resume without a restart.
 | T4.1 | Master toggle row + status line + unsupported-platform row on 10d; header copy of the event rows corrected; footnote extended; `PushStatus` markers mapped in `daemon_errors.dart`-style; 5 locales | `notification_settings_screen.dart`, providers, l10n |
 | T4.2 | Opt-out flow end to end (§7.4): toggle off unregisters all + `deleteToken`; toggle on re-acquires and reconciles; widget tests with a fake bridge | same, `push_notification_service.dart` |
 | T4.3 | Golden for the settings screen states (enabled, disabled, refused, unsupported, denied) | `test/features/settings/goldens/` |
-| T4.4 | iOS: APNs key in the Firebase project (operator task, documented), `Runner.entitlements` `aps-environment`, `GoogleService-Info.plist`, `FirebaseApp` registration in `AppDelegate`; `docs/firebase-setup.md` updated; web section states the server gap and #133 is re-scoped | `ios/Runner/`, `docs/firebase-setup.md` |
+| T4.4 | iOS: APNs key in the Firebase project (operator task, documented), `Runner.entitlements` `aps-environment`, `GoogleService-Info.plist`, `FirebaseApp` registration in `AppDelegate`; `docs/firebase-setup.md` updated | `ios/Runner/`, `docs/firebase-setup.md` |
+| T4.5 | Web (closes #133), behind the server's `web` platform and CORS (§3.5): real VAPID key read from a build-time define (`--dart-define=FCM_VAPID_KEY`, documented for forks), `firebase-messaging-sw.js` rewritten — real config from the same source as `firebase_options.dart`, no payload routing, `chat_wake` shown as a content-free "New message", tap focuses or opens `<base>#/notifications` — and registered through `getToken(serviceWorkerScriptPath:)` under the deployed base path; `PushPlatform::Web`; `isSupported` on web reads `Notification` + `PushManager` and a `pushWebEnabled` flag that stays off until the server ships; `pages_bundle_test.dart` guards the worker's placement next to the isolation shim, the base path and the absence of payload routing; the smoke test asserts the worker registers on the isolated page without errors and that `coi-serviceworker` still isolates; Settings copy for the 48 h limitation | `web/firebase-messaging-sw.js`, `web/index.html`, `push_notification_service.dart`, `rust/src/api/push.rs`, `test/web/`, `.github/workflows/web-build.yml`, l10n |
 
 - **PR-4a** — T4.1 + T4.2 + T4.3 (Dart). Justification: one screen, one provider,
   its goldens.
 - **PR-4b** — T4.4 (platform config + docs), orthogonal.
+- **PR-4c** — T4.5 (web), orthogonal to 4b; mergeable before the server change lands
+  because the capability flag keeps web on the "not available" row until then, and
+  the smoke test exercises registration of the worker, not of a token.
 
 ### Phase 5 — Rich background notifications (deliberate, conditional)
 
@@ -884,7 +967,7 @@ Only if field feedback says the generic OS notification is not enough. Not sched
 |---|---|
 | #308 app lifecycle | Phase 0 (PR-0a, 0b) |
 | #147 background wake-up | Phase 2 (PR-2) for the mobile half; the desktop half stays open |
-| #133 web VAPID key | re-scoped in Phase 4 (PR-4b): blocked on the server accepting a web platform |
+| #133 web VAPID key | Phase 4 (PR-4c); the flag flips when the server accepts `web` and answers CORS (§3.5) |
 | new epic (to open) | closed by PR-6 |
 
 ---
@@ -926,6 +1009,17 @@ PR adds the tests for its own tasks; coverage target 80 % on new code.
   `deleteToken`; goldens.
 - Launch-from-notification lands on `/notifications` once, not on every frame.
 
+**Web:**
+
+- `pages_bundle_test.dart`: the messaging worker is referenced from `index.html`
+  after the isolation shim, under the base path; it contains no `routeFromPayload`
+  mirror and no `REPLACE_ME`; the VAPID define is wired.
+- `smoke.mjs` (opt-in like the store probe): on the isolated page the worker
+  registers, `navigator.serviceWorker.getRegistrations()` lists both the shim and
+  the messaging worker, and `crossOriginIsolated` is still `true` afterwards.
+- Unit: the worker's `notificationclick` handler (pure function extracted for the
+  test) resolves to `<base>#/notifications` for every payload.
+
 **Manual, per phase:** one Android device with the production server (or a local
 `mostro-push-server` with `FCM_ENABLED=true` and a test Firebase service account), one
 counterparty. Take an order, background the app, drive the trade from the other side,
@@ -955,6 +1049,7 @@ Checked item by item against `MostroP2P/mobile` after drafting the above.
 | Sound/vibration toggles | §9.1 | Not ported (dead in v1); the OS channel owns them |
 | Privacy copy claims encrypted tokens | §9.1 | Copy states only what is true |
 | iOS unconfigured | §3.4, T4.4 | Configured in Phase 4 or explicitly unsupported |
+| Web: gated out entirely (`isSupported = !kIsWeb`) | §2.6, T4.5 | In scope: the worker rings and renders, the tab resyncs; needs two server changes |
 | `mostro_pubkey` on register | §7.1 | Sent from the first PR (the issuing node), so the whitelist flag is a no-op |
 
 Items v1 did not have that this spec adds: the persisted registration model, the
@@ -986,8 +1081,13 @@ matrix.
 6. **iOS provisioning.** Needs an Apple Developer account with an APNs key uploaded to
    the `mostro-mobile` Firebase project — an operator task outside this repo. Phase 4
    ships the client side either way and states iOS as pending if the key is missing.
-7. **Web platform on the server.** A one-line change on the server (`platform: web`)
-   would unblock #133; propose it upstream, do not work around it.
+7. **Web on the server.** Two changes (§3.5): accept `platform: "web"`, and CORS for
+   the app's origin. Propose them upstream as one issue before PR-4c; do not work
+   around either (a proxy would put a third party between the browser and the
+   token). Verify against the real bundle, not in isolation: the worker's
+   `importScripts` from `gstatic.com` under the isolated page, its coexistence with
+   `coi-serviceworker` (scopes, `clients.claim()`), and registration under the
+   `/app/` base path through `serviceWorkerScriptPath`.
 8. **Encrypted token registration.** When `/api/info` reports `encryption_enabled:
    true` and a public key, add the ECDH + HKDF + ChaCha20-Poly1305 client in Rust
    (`crypto/`), 281-byte format as in the server's `crypto/mod.rs`. Not before.

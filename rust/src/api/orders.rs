@@ -7585,7 +7585,6 @@ mod tests {
             orders_subscription_id(),
             recent_orders_subscription_id(),
             relay_list_subscription_id(),
-            mostro_dm_subscription_id(),
         ] {
             let per_relay = client.subscription(&id).await;
             assert!(!per_relay.is_empty(), "{id} has no live subscription");
@@ -7596,6 +7595,21 @@ mod tests {
                     "{id} is still pinned to the previous node"
                 );
             }
+        }
+        // `mostro-dm` also lists the nodes owed payout-claim traffic
+        // (docs/ANTI_ABUSE_BOND.md §6.4) — a process-wide set other tests
+        // fill concurrently — so it is checked for the switch itself: the
+        // new node is in, the previous one is out.
+        let id = mostro_dm_subscription_id();
+        let per_relay = client.subscription(&id).await;
+        assert!(!per_relay.is_empty(), "{id} has no live subscription");
+        for filter in per_relay.values().flatten() {
+            let authors = filter.authors.clone().unwrap_or_default();
+            assert!(authors.contains(&next), "{id} does not follow the new node");
+            assert!(
+                !authors.contains(&previous),
+                "{id} is still pinned to the previous node"
+            );
         }
     }
 

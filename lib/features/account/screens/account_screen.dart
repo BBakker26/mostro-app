@@ -31,11 +31,18 @@ import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 /// taps `Show words` and are masked again when the screen is left; revealing
 /// them asks for no confirmation, since the backup flow already took it.
 class AccountScreen extends ConsumerStatefulWidget {
-  const AccountScreen({super.key, @visibleForTesting this.debugWords});
+  const AccountScreen({
+    super.key,
+    @visibleForTesting this.debugWords,
+    @visibleForTesting this.debugPublicKey,
+  });
 
   /// Test-only word source for `Show words`, so widget tests do not reach the
   /// Rust bridge. Never set in production.
   final List<String>? debugWords;
+
+  /// Test seam: the public key the readout shows, instead of the bridge's.
+  final Future<String?> Function()? debugPublicKey;
 
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
@@ -60,9 +67,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
   Future<void> _loadPublicKey() async {
     try {
-      final info = await identity_api.getIdentity();
+      final key =
+          widget.debugPublicKey != null
+              ? await widget.debugPublicKey!()
+              : (await identity_api.getIdentity())?.publicKey;
       if (!mounted) return;
-      setState(() => _publicKey = info?.publicKey);
+      setState(() => _publicKey = key);
     } catch (e) {
       debugPrint('[account] public key unavailable: $e');
     }
@@ -148,45 +158,60 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       // navigation bar.
       body: SafeArea(
         top: false,
-        child: BackupFillViewport(
-          gap: 11,
-          blocks: [
-            // One pixel, not zero: a zero-size box has no semantics node,
-            // and the readout lives in the accessibility tree only.
-            const SizedBox(width: 1, height: 1).withAutomationId(
-              AutomationIds.keysPublicKey,
-              label: _publicKey ?? '',
+        // The public-key readout is automation-only: the design shows no
+        // key card, but the contract keeps `keys.public_key`. It sits over
+        // the viewport, not in its spaced block list (which would move
+        // every card down by the gap), paints nothing, and exists only once
+        // the key is loaded — a driver that finds it reads the full key,
+        // never an empty label.
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            BackupFillViewport(
+              gap: 11,
+              blocks: [
+                if (backedUp)
+                  _SecretWordsCard(
+                    words: _words,
+                    loading: _loadingWords,
+                    copied: _copied,
+                    onReveal: _revealWords,
+                    onHide: _hideWords,
+                    onCopy: _copyWords,
+                  )
+                else
+                  _BackupBanner(onTap: () => showBackupTriggerSheet(context)),
+                _PrivacyCard(
+                  privacyMode: privacyMode,
+                  onSelect:
+                      (enabled) => ref
+                          .read(privacyModeProvider.notifier)
+                          .setPrivacyMode(enabled),
+                  onInfo:
+                      () => _showInfoDialog(
+                        context,
+                        l10n.privacyModesInfoTitle,
+                        l10n.privacyModesInfoContent,
+                      ),
+                ),
+              ],
+              footer: _AccountActions(
+                onGenerate: () => _confirmGenerateNewUser(context),
+                onImport: () => _showImportDialog(context),
+                onRefresh: () => _confirmRefresh(context),
+              ),
             ),
-            if (backedUp)
-              _SecretWordsCard(
-                words: _words,
-                loading: _loadingWords,
-                copied: _copied,
-                onReveal: _revealWords,
-                onHide: _hideWords,
-                onCopy: _copyWords,
-              )
-            else
-              _BackupBanner(onTap: () => showBackupTriggerSheet(context)),
-            _PrivacyCard(
-              privacyMode: privacyMode,
-              onSelect:
-                  (enabled) => ref
-                      .read(privacyModeProvider.notifier)
-                      .setPrivacyMode(enabled),
-              onInfo:
-                  () => _showInfoDialog(
-                    context,
-                    l10n.privacyModesInfoTitle,
-                    l10n.privacyModesInfoContent,
-                  ),
-            ),
+            if (_publicKey case final key?)
+              Positioned(
+                left: 0,
+                top: 0,
+                // One pixel, not zero: a zero-size box has no semantics node.
+                child: const SizedBox(
+                  width: 1,
+                  height: 1,
+                ).withAutomationId(AutomationIds.keysPublicKey, label: key),
+              ),
           ],
-          footer: _AccountActions(
-            onGenerate: () => _confirmGenerateNewUser(context),
-            onImport: () => _showImportDialog(context),
-            onRefresh: () => _confirmRefresh(context),
-          ),
         ),
       ),
     );

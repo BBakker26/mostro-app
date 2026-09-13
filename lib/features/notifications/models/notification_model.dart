@@ -245,6 +245,13 @@ class NotificationModel {
   static const _claimStatePaid = 'paid';
 
   bool get _isBondSlashed => type == NotificationType.bondSlashed;
+
+  /// The sats the daemon reported forfeited in a bond-slashed notice — the
+  /// slice actually lost, which for a partially filled range order is less
+  /// than the bond locked (docs/ANTI_ABUSE_BOND.md §2.8). Null for other
+  /// types or a record without it.
+  int? get bondSlashedAmountSats =>
+      _isBondSlashed ? int.tryParse(detail?[_bondAmountKey] ?? '') : null;
   bool get _isBondClaim => type == NotificationType.bondClaim;
   bool get _claimPaid => detail?[_claimStateKey] == _claimStatePaid;
 

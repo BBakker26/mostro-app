@@ -2947,6 +2947,14 @@
   "@lightningInvoiceQrLabel": {
     "description": "Accessibility label for the Lightning invoice QR code image"
   },
+  "bondSlashedViewPolicy": "View policy",
+  "@bondSlashedViewPolicy": {"description": "Bond-slashed dialog button: opens the About screen with the node's bond policy"},
+  "bondSlashedViewTrade": "View trade",
+  "@bondSlashedViewTrade": {"description": "Bond-slashed dialog button: opens the trade"},
+  "bondSlashedTradeNoticeDispute": "The node slashed your {sats}-sat bond in this dispute.",
+  "@bondSlashedTradeNoticeDispute": {"description": "Trade detail durable notice after a dispute-cause slash; sats formatted", "placeholders": {"sats": {"type": "String"}}},
+  "bondSlashedTradeNoticeTimeout": "The node slashed your {sats}-sat bond after a step timed out.",
+  "@bondSlashedTradeNoticeTimeout": {"description": "Trade detail durable notice after a timeout slash; sats formatted", "placeholders": {"sats": {"type": "String"}}},
   "bondSlashedTitle": "Bond slashed",
   "@bondSlashedTitle": {
     "description": "Title of the notification shown when the user's anti-abuse bond is slashed"

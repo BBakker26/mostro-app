@@ -63,6 +63,7 @@ fails the build when an identifier is declared and attached to nothing.
 | `bond.claim.amount` | The share of a slashed bond on offer to this user, in sats (`docs/ANTI_ABUSE_BOND.md` §6.4). |
 | `bond.claim.status` | The claim's phase as the screen renders it: `pending`, `submitted`, `acknowledged`, `completed`, `expired` (a pending claim past its window reads `expired`). |
 | `bond.claim.order_id` | The exact order ID shown in the claim screen's app bar. |
+| `trade.bondSlashed` | The durable line on the trade detail once this user's own bond was slashed, labelled with the cause (`dispute` / `timeout`); absent otherwise. |
 | `invoice.nwc.text` | The buyer invoice NWC generated, for payment correlation. |
 | `invoice.error` | The reason the daemon refused the last submitted buyer invoice. Present only after a rejection, until the next submission; the manual form stays open behind it. In the wallet-generated (NWC) branch, which has no form, the readout comes with `invoice.manual` so the buyer can switch to manual entry. |
 | `settings.relays.item.<url>` | The relay's URL. |
@@ -121,6 +122,13 @@ this window. On that screen `bond.cancel` reads `Don't publish the order` and
 drops the order locally (nothing was published, nothing charged); a taker's
 reads `Don't take the order` and is a daemon cancel. Once the deposit is
 paid the daemon publishes the order and `/my_order` reads `pending`.
+
+**A slashed bond is explained on tap.** Tapping a bond-slashed notification opens a
+dialog with the cause, the amount and the order; `bond.slashed.viewPolicy` (`View policy`)
+leads to the About screen, `bond.slashed.viewTrade` (`View trade`) opens the trade
+detail and is present only while the trade row still exists (a timeout slash wipes
+it), `bond.slashed.close` dismisses it. The trade keeps `trade.bondSlashed`
+afterwards.
 
 **A claimable share reaches the user from three places.** The trade detail
 carries `trade.bondClaim` (labelled with the claim's phase) with

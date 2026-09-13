@@ -185,6 +185,17 @@ class AutomationIds {
   /// Readout: the payout claim banner on the trade detail, labelled with the
   /// claim's phase (docs/ANTI_ABUSE_BOND.md §8.3); absent without a claim.
   static const String tradeBondClaim = 'trade.bondClaim';
+
+  /// Readout: the durable slash notice on the trade detail, labelled with
+  /// the cause (`dispute` / `timeout`); absent unless this user's bond was
+  /// slashed.
+  static const String tradeBondSlashed = 'trade.bondSlashed';
+  static const String bondSlashedViewPolicy = 'bond.slashed.viewPolicy';
+
+  /// Present only while the slashed trade's row still exists (a timeout
+  /// slash wipes it): opens the trade detail.
+  static const String bondSlashedViewTrade = 'bond.slashed.viewTrade';
+  static const String bondSlashedClose = 'bond.slashed.close';
   static const String tradeBondClaimOpen = 'trade.bondClaim.open';
   static const String tradeAddInvoice = 'trade.addInvoice';
   static const String tradeFiatSent = 'trade.fiatSent';

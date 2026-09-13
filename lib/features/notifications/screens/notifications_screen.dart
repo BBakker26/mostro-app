@@ -8,6 +8,7 @@ import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/features/account/providers/backup_reminder_provider.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/features/notifications/widgets/bond_slashed_dialog.dart';
 import 'package:mostro/features/notifications/widgets/notification_group_card.dart';
 import 'package:mostro/features/notifications/widgets/system_notification_banner.dart';
 
@@ -228,6 +229,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         n.orderId != null
             ? context.push(AppRoute.bondPayoutPath(n.orderId!))
             : noId();
+      case NotificationType.bondSlashed:
+        BondSlashedDialog.show(context, n);
       default:
         n.orderId != null
             ? context.push(AppRoute.tradeDetailPath(n.orderId!))

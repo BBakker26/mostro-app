@@ -6,6 +6,7 @@ import 'package:mostro/features/trades/models/trade_view.dart';
 /// one lime button when the user acts, none when they wait; chat only once
 /// the trade is active; dispute never before the escrow is locked (#203).
 void main() {
+  bondWindowTests();
   TradeView view(
     TradeStatus status, {
     required bool isBuyer,
@@ -182,6 +183,28 @@ void main() {
           reason: '$status',
         );
       }
+    }
+  });
+}
+
+/// `docs/ANTI_ABUSE_BOND.md` Phase 1: the bond window is the user's turn —
+/// pay the deposit — and a taker may still back out (the daemon releases
+/// their bond). The maker variant (no cancel) is Phase 2.
+void bondWindowTests() {
+  group('waiting for the anti-abuse bond', () {
+    for (final isBuyer in [true, false]) {
+      test('pay the deposit, or back out (isBuyer: $isBuyer)', () {
+        final v = TradeView.of(
+          status: TradeStatus.waitingBond,
+          isBuyer: isBuyer,
+          canRate: true,
+        );
+        expect(v.chip, TradeChip.yourTurn);
+        expect(v.primary, TradePrimaryAction.payBond);
+        expect(v.secondary, [TradeSecondaryAction.cancel]);
+        expect(v.showsChat, isFalse);
+        expect(v.timer, TradeTimerOwner.none);
+      });
     }
   });
 }

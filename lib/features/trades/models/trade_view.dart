@@ -8,6 +8,9 @@ enum TradeChip { none, waiting, active, yourTurn, dispute }
 enum TradePrimaryAction {
   none,
   addInvoice,
+
+  /// The anti-abuse deposit the node asks for before the trade starts.
+  payBond,
   payHoldInvoice,
   fiatSent,
   release,
@@ -147,6 +150,22 @@ class TradeView {
           secondary: cancelOnly,
           timer: isBuyer ? TradeTimerOwner.counterpart : TradeTimerOwner.user,
           note: TradeTimerNote.expiresCancels,
+          isCompleted: false,
+        );
+      case TradeStatus.waitingBond:
+        // The bond window precedes the trade flow: the user owes the deposit
+        // (docs/ANTI_ABUSE_BOND.md §6.1). Phase 1 only ever parks a taker's
+        // row here, and the daemon accepts a taker's cancel during the
+        // window; the maker variant (no cancel, local abandon) is Phase 2.
+        return const TradeView(
+          step: 1,
+          chip: TradeChip.yourTurn,
+          showsChat: false,
+          showsReputation: false,
+          primary: TradePrimaryAction.payBond,
+          secondary: cancelOnly,
+          timer: TradeTimerOwner.none,
+          note: TradeTimerNote.none,
           isCompleted: false,
         );
       case TradeStatus.inProgress:

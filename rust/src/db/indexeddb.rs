@@ -508,15 +508,19 @@ impl Storage for IndexedDbStorage {
     }
 
     async fn delete_trade_by_order_id(&self, order_id: &str) -> Result<()> {
-        // `trades.id` is a fresh UUID for takers, so the document is found
-        // through the order id stored inside it. Messages stay untouched.
+        // `trades.id` is a fresh UUID for takers, so documents are found
+        // through the order id stored inside them — every one of them, as
+        // SQLite's `DELETE … WHERE` does: `take_order` relies on this to leave
+        // one row per order after a retake. Messages stay untouched.
         // Serialised with the patches so a delete never races one.
         let _section = self.exclusive(TRADES_LOCK).await;
-        let Some(doc) = self.trade_document_by_order_id(order_id).await? else {
-            return Ok(());
-        };
-        if let Some(id) = doc.get("id").and_then(serde_json::Value::as_str) {
-            self.delete_key(TRADES_STORE, id).await?;
+        for doc in self.trade_documents().await? {
+            if trade_json::order_id_of(&doc) != Some(order_id) {
+                continue;
+            }
+            if let Some(id) = doc.get("id").and_then(serde_json::Value::as_str) {
+                self.delete_key(TRADES_STORE, id).await?;
+            }
         }
         Ok(())
     }
@@ -552,6 +556,15 @@ impl Storage for IndexedDbStorage {
             trade_json::set_peer_reputation(doc, rating, reviews, days)
         })
         .await
+    }
+
+    async fn update_trade_bond(
+        &self,
+        order_id: &str,
+        bond: &crate::api::types::BondInfo,
+    ) -> Result<()> {
+        self.patch_trade_by_order_id(order_id, |doc| trade_json::set_bond(doc, bond))
+            .await
     }
 
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()> {

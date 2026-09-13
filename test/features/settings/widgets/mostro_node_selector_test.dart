@@ -16,7 +16,8 @@ import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/src/rust/api/node_stats.dart';
-import 'package:mostro/src/rust/api/types.dart' show MostroNodeEntry;
+import 'package:mostro/src/rust/api/types.dart'
+    show BondPolicy, BondPolicyInfo, MostroNodeEntry;
 import '../../../support/fake_trades.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../../support/provider_harness.dart';
@@ -67,8 +68,15 @@ MostroNodeStats _stats(
   acceptedCurrencies: accepted,
   escrowMode: escrowMode,
   cashuMintUrl: mint,
+  bond: BondPolicyInfo(
+    policy: switch (bondRequired) {
+      true => BondPolicy.enabled,
+      false => BondPolicy.disabled,
+      null => BondPolicy.unsupported,
+    },
+  ),
   bondRequired: bondRequired,
-  bondPct: null,
+  bondPct: bondRequired == true ? 2 : null,
   ordersByFiat: [
     for (final e in orders.entries)
       FiatOrderCount(fiatCode: e.key, count: e.value),
@@ -360,7 +368,7 @@ void main() {
       });
     });
 
-    testWidgets('a node that requires a bond is not selectable', (
+    testWidgets('a node that requires a bond is selectable and says so', (
       tester,
     ) async {
       await withClock(Clock.fixed(_now), () async {
@@ -376,16 +384,11 @@ void main() {
             ),
           },
         );
-        expect(find.text('Bond: not supported'), findsOneWidget);
+        expect(find.text('Bond 2%'), findsOneWidget);
+        expect(find.text('Bond: not supported'), findsNothing);
         await tester.tap(find.text('Kmbalache 🇨🇺'));
         await _settleSelection(tester);
-        expect(notifier.selected, isEmpty);
-        expect(
-          find.text(
-            'This node requires a bond, which this app does not support yet',
-          ),
-          findsOneWidget,
-        );
+        expect(notifier.selected, [_cubaPubkey]);
       });
     });
 

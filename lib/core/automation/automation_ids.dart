@@ -48,7 +48,6 @@ class AutomationIds {
   // readout would put the seed phrase in the accessibility tree, where any
   // accessibility service on the device can read it, and no Mortsom scenario
   // needs it: identities are generated in the app, never transcribed.
-  static const String keysPublicKey = 'keys.public_key';
 
   // Settings
   static const String settingsMostroNode = 'settings.mostro_node';
@@ -89,7 +88,10 @@ class AutomationIds {
   static String nodeItem(String pubkey) => 'node.item.$pubkey';
 
   // Wallet / NWC
-  static const String walletSettingsConnect = 'wallet.settings.connect';
+  //
+  // Handoff 10c folded the connect and settings screens into one, so there is
+  // no separate "connect from wallet settings" control any more: the single
+  // connect CTA is [walletNwcConnect].
   static const String walletSettingsDisconnect = 'wallet.settings.disconnect';
   static const String walletNwcUri = 'wallet.nwc.uri';
   static const String walletNwcPaste = 'wallet.nwc.paste';
@@ -148,6 +150,10 @@ class AutomationIds {
   static const String orderCreateCancel = 'order.create.cancel';
   static const String orderConfirmHome = 'order.confirm.home';
 
+  /// My Order while the maker's anti-abuse deposit is outstanding: opens
+  /// the pay-bond screen.
+  static const String myOrderPayBond = 'order.payBond';
+
   /// Row of an order in the public order book.
   static String orderBookItem(String orderId) => 'order.book.item.$orderId';
 
@@ -174,6 +180,7 @@ class AutomationIds {
   static const String orderId = 'order.id';
   static const String orderStatus = 'order.status';
   static const String tradePayInvoice = 'trade.payInvoice';
+  static const String tradePayBond = 'trade.payBond';
   static const String tradeAddInvoice = 'trade.addInvoice';
   static const String tradeFiatSent = 'trade.fiatSent';
   static const String tradeRelease = 'trade.release';
@@ -207,6 +214,13 @@ class AutomationIds {
   static const String invoiceError = 'invoice.error';
   static const String invoiceCancel = 'invoice.cancel';
   static const String payInvoiceText = 'pay.invoice.text';
+
+  // Anti-abuse bond (docs/ANTI_ABUSE_BOND.md, handoff 14a/14b)
+  /// Readout: the bond bolt11, otherwise only drawn as a QR code.
+  static const String bondInvoiceText = 'bond.invoice.text';
+  static const String bondOrderId = 'bond.order_id';
+  static const String bondExplainer = 'bond.explainer';
+  static const String bondCancel = 'bond.cancel';
   static const String payOrderId = 'pay.order_id';
   static const String payNwc = 'pay.nwc';
   static const String payCancel = 'pay.cancel';

@@ -20,7 +20,6 @@ import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
-import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 
 /// Detail screen for an order created by the current user (handoff 6a/6b).
 ///
@@ -54,8 +53,11 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
 
     setState(() => _cancelling = true);
     try {
-      await orders_api.cancelOrder(orderId: widget.orderId);
-      // Force the trades list to reload from DB so the Canceled status shows.
+      await ref.read(cancelOrderActionProvider)(widget.orderId);
+      // Reload the trades list now. A pending order never went active, so
+      // the row is not marked Canceled locally: the daemon's Canceled or its
+      // public `canceled`, whichever lands first, wipes it, and the
+      // TradeUpdate that follows reloads the list again.
       ref.invalidate(rawTradesProvider);
       if (!mounted) return;
       showOrderDetailSnackBar(
@@ -93,6 +95,9 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
       return;
     }
     final shouldNavigate = switch (liveStatus) {
+      // The maker's own bond window: this screen names it and offers the
+      // pay-bond screen; it is not a trade.
+      OrderStatus.waitingMakerBond ||
       OrderStatus.waitingBuyerInvoice ||
       OrderStatus.waitingPayment ||
       OrderStatus.expired ||
@@ -220,7 +225,17 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
                 onPressed: _close,
               ).withAutomationId(AutomationIds.orderConfirmHome),
             ),
-            if (canCancelOrder(status)) ...[
+            if (awaitsMakerBond(status)) ...[
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 12,
+                child: OrderPrimaryButton(
+                  label: l10n.tradeVerbPayBond,
+                  onPressed:
+                      () => context.push(AppRoute.payBondPath(widget.orderId)),
+                ).withAutomationId(AutomationIds.myOrderPayBond),
+              ),
+            ] else if (canCancelOrder(status)) ...[
               const SizedBox(width: 10),
               Expanded(
                 flex: 10,

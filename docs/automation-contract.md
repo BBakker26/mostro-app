@@ -51,13 +51,15 @@ fails the build when an identifier is declared and attached to nothing.
 
 | Identifier | Value |
 |---|---|
-| `order.status` | The kebab-case name of `TradeStatus`: `loading`, `pending`, `waiting-invoice`, `waiting-payment`, `in-progress`, `active`, `fiat-sent`, `payout-pending`, `completed`, `cancelled`, `disputed`, `pending-rating`, `rated`. Never the localized chip copy. |
+| `order.status` | The kebab-case name of `TradeStatus`: `loading`, `pending`, `waiting-invoice`, `waiting-payment`, `waiting-bond`, `in-progress`, `active`, `fiat-sent`, `payout-pending`, `completed`, `cancelled`, `disputed`, `pending-rating`, `rated`. Never the localized chip copy. `waiting-bond` is the anti-abuse bond window (`docs/ANTI_ABUSE_BOND.md`): the daemon is waiting for the user's bond bolt11 before the trade flow starts. |
 | `order.id` | The full order id, where the visible text is shortened. |
 | `keys.public_key` | The identity's full public key. |
 | `settings.mostro_node.pubkey` | The active daemon's full public key, where the visible subtitle is truncated. |
 | `wallet.connection` | `connected` or `disconnected`. |
 | `pay.invoice.text` | The hold invoice (`bolt11`), which is otherwise only drawn as a QR code or paid directly by the wallet. |
 | `pay.order_id` | The exact order ID shown in the seller invoice screen's app bar, including while its invoice is loading. |
+| `bond.invoice.text` | The anti-abuse bond bolt11 (`docs/ANTI_ABUSE_BOND.md`), otherwise only drawn as a QR code or paid by the wallet. |
+| `bond.order_id` | The exact order ID shown in the pay-bond screen's app bar. |
 | `invoice.nwc.text` | The buyer invoice NWC generated, for payment correlation. |
 | `invoice.error` | The reason the daemon refused the last submitted buyer invoice. Present only after a rejection, until the next submission; the manual form stays open behind it. In the wallet-generated (NWC) branch, which has no form, the readout comes with `invoice.manual` so the buyer can switch to manual entry. |
 | `settings.relays.item.<url>` | The relay's URL. |
@@ -102,6 +104,20 @@ stays but reads as disabled (`No longer available`); the screen never
 navigates away on its own. Taking a range order asks its amount in a dialog
 (`order.take.amount`, `order.take.amount.confirm`) right after
 `order.take.confirm`; a fixed order never shows the dialog.
+
+**A take parked on the anti-abuse bond offers `trade.payBond` (`Pay deposit`)
+and `trade.cancel`.** While `order.status` reads `waiting-bond`
+(`docs/ANTI_ABUSE_BOND.md`), `trade.payBond` opens `/pay_bond/:orderId`; the
+My Trades row carries the same verb and files the trade under "your turn".
+
+**An order parked on the maker's own deposit is not published yet.** While
+`order.status` reads `waiting-bond` on `/my_order` (`docs/ANTI_ABUSE_BOND.md`
+§6.2), the screen offers `order.payBond` (`Pay deposit`), which opens
+`/pay_bond/:orderId`, and no `trade.cancel`: the daemon refuses a cancel in
+this window. On that screen `bond.cancel` reads `Don't publish the order` and
+drops the order locally (nothing was published, nothing charged); a taker's
+reads `Don't take the order` and is a daemon cancel. Once the deposit is
+paid the daemon publishes the order and `/my_order` reads `pending`.
 
 **The maker's own order ends on `order.confirm.home` (`Close`) and
 `trade.cancel`.** `trade.cancel` opens a confirmation sheet whose affirmative

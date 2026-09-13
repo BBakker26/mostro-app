@@ -26,12 +26,15 @@ Future<void> _pump(
   WidgetTester tester, {
   required OrderItem order,
   OrderStatus liveStatus = OrderStatus.pending,
+  Future<void> Function(String)? cancelOrder,
 }) async {
   tester.view.physicalSize = const Size(360, 760);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   final container = createContainer(
     overrides: [
+      if (cancelOrder != null)
+        cancelOrderActionProvider.overrideWithValue(cancelOrder),
       orderBookProvider.overrideWith((ref) => Stream.value([order])),
       tradeStatusProvider.overrideWith((ref, id) => Stream.value(liveStatus)),
       fiatCurrenciesProvider.overrideWith(
@@ -200,6 +203,30 @@ void main() {
         expect(find.text('Waiting for a taker'), findsOneWidget);
       });
     });
+
+    testWidgets('a confirmed cancel goes through cancelOrderActionProvider', (
+      tester,
+    ) async {
+      // The one seam for the cancel, shared with the trade screen, so this
+      // call site can be driven without Rust too.
+      final cancelled = <String>[];
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(),
+          cancelOrder: (id) async => cancelled.add(id),
+        );
+
+        await tester.tap(_byId(AutomationIds.tradeCancel));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(_byId(AutomationIds.tradeCancelConfirm));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+      });
+
+      expect(cancelled, [_id]);
+    });
   });
 
   group('MyOrderScreen after the order moved on', () {
@@ -221,6 +248,26 @@ void main() {
         expect(find.text('23:12'), findsNothing);
         expect(find.textContaining('Published'), findsNothing);
         // The daemon refuses a maker cancel once a taker is in.
+        expect(find.text('Cancel'), findsNothing);
+      });
+    });
+
+    testWidgets('names the maker bond window and offers the deposit screen', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(status: OrderStatus.waitingMakerBond),
+          liveStatus: OrderStatus.waitingMakerBond,
+        );
+        expect(
+          find.text('Waiting for your deposit — not published yet'),
+          findsOneWidget,
+        );
+        expect(_byId(AutomationIds.myOrderPayBond), findsOneWidget);
+        expect(find.text('Pay deposit'), findsOneWidget);
+        // The daemon refuses a cancel during the bond window.
         expect(find.text('Cancel'), findsNothing);
       });
     });

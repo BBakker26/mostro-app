@@ -53,6 +53,21 @@ successfully sent messages.
 
 **Preconditions**: At least one relay connected.
 
+### resync() → ResyncOutcome
+Bring the core back in step with the relays after the process was suspended
+(`docs/PUSH_NOTIFICATIONS.md` §10, issue #308); the Dart lifecycle service
+calls it on every `paused → resumed` transition. One pass, in order: a
+reconnect nudge (`connect()` spawns a task for every relay without one, and
+the wait is bounded to 5 s), the bulk kind-14 filter re-issued under its
+stable id (the relay replaces it in place; the replay is ordered by the
+per-order status cursors), the order-book loop, peer chats and dispute chats
+re-armed (each a no-op while its task is alive), and the outbox flushed.
+Single-flight: calls that arrive while a pass runs wait for it and report
+its outcome with `coalesced = true`. Idempotent over a healthy core. Before
+the pool exists it reports `online = false` and does nothing.
+`ResyncOutcome { online, flushed, coalesced }`. **Errors**: none — every
+step is best-effort and logged.
+
 ## Streams
 
 ### on_connection_state_changed() → Stream<ConnectionState>

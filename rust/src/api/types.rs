@@ -131,6 +131,18 @@ pub enum ConnectionState {
     Reconnecting,
 }
 
+/// What one `resync` pass found and did (docs/PUSH_NOTIFICATIONS.md §10).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ResyncOutcome {
+    /// The pool reported `Online` once the reconnect nudge settled.
+    pub online: bool,
+    /// Queued outgoing events published by this pass.
+    pub flushed: u32,
+    /// This call did no work of its own: a pass that was already running
+    /// when it arrived finished meanwhile, and its result is what it reports.
+    pub coalesced: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QueuedMessageStatus {
     Pending,

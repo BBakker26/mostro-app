@@ -14,6 +14,8 @@ import 'package:mostro/core/font_licenses.dart';
 import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/core/test_environment.dart';
+import 'package:mostro/core/lifecycle/app_lifecycle_service.dart';
+import 'package:mostro/core/lifecycle/resume_resync.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/core/web/store_probe.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
@@ -214,6 +216,13 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
 
   _consumeBondSlashed(bondSlashedStream, container);
   _consumeBondClaims(bondClaimStream, container);
+
+  // Resume = resync in Rust, then re-hydrate every notifier from the bridge
+  // (issue #308, docs/PUSH_NOTIFICATIONS.md §10). Attached before runApp so
+  // the first suspension is observed too.
+  AppLifecycleService(
+    onResume: ResumeResync(container: container).run,
+  ).attach();
 
   runApp(
     UncontrolledProviderScope(container: container, child: const MostroApp()),

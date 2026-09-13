@@ -2,6 +2,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mostro/features/notifications/services/push_refresh_job.dart';
 import 'package:mostro/src/rust/api/push.dart' as push_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -96,6 +97,10 @@ class PushNotificationService {
     FirebaseMessaging.onMessage.listen((message) {
       debugPrint('[push] foreground message: ${message.data['type']}');
     });
+
+    // 5. The refresh that outlives the process: the OS re-POSTs the
+    //    registrations Rust mirrored, every 12 h, app running or not.
+    await schedulePushRefresh();
   }
 
   Future<void> _handOverToken() async {

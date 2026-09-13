@@ -13803,11 +13803,14 @@ mod tests {
                 crate::api::types::BondClaimPhase::Completed,
             ]
         );
-        // A paid claim keeps its node off the filter.
-        assert!(!crate::mostro::bond_claims::is_claim_node(&node) || {
-            // unless another test's open claim on the same node is live
-            db.list_bond_claims().await.unwrap().iter().any(|c| c.node_pubkey == node && !c.phase.is_terminal())
-        });
+        // A paid claim keeps its node off the filter. Judged on this claim
+        // alone: the process-wide node set unions every test's open claims
+        // and the retained nodes, so reading it here races other tests.
+        let paid = db.get_bond_claim(&node, &order_id).await.unwrap().unwrap();
+        assert!(
+            !crate::mostro::bond_claims::claim_nodes_of(std::slice::from_ref(&paid))
+                .contains(&node)
+        );
     }
 
     /// Our own reply (`PaymentRequest` shape) echoed back is not a request.

@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:clock/clock.dart';
 
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
+import 'package:mostro/features/order/models/bond_rules.dart'
+    show selectClaimsByOrder;
 import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
@@ -98,8 +100,11 @@ final tradeRowsProvider = Provider<AsyncValue<List<TradeRow>>>((ref) {
   // are.
   final claims = ref.watch(bondClaimsProvider).valueOrNull ?? const [];
   final now = clock.now().millisecondsSinceEpoch ~/ 1000;
+  // One claim per order — the open one when several nodes issued one — so
+  // an older expired claim never masks a newer pending badge.
+  final selected = selectClaimsByOrder(claims, now);
   final badges = <String, TradeClaimBadge>{
-    for (final claim in claims)
+    for (final claim in selected.values)
       claim.orderId: tradeClaimBadge(
         phase: claim.phase,
         deadlineAt: platformInt64ToInt(claim.deadlineAt),
@@ -117,7 +122,7 @@ final tradeRowsProvider = Provider<AsyncValue<List<TradeRow>>>((ref) {
         ),
     ];
     final held = {for (final row in rows) row.orderId};
-    for (final claim in claims) {
+    for (final claim in selected.values) {
       if (held.contains(claim.orderId)) continue;
       final badge = badges[claim.orderId] ?? TradeClaimBadge.none;
       if (badge == TradeClaimBadge.none) continue;

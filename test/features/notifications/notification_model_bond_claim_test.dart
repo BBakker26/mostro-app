@@ -19,12 +19,14 @@ void main() {
       () {
         final n = NotificationModel.bondClaim(
           orderId: 'order-1',
+          nodePubkey: 'node-a',
+          slashedAt: 500,
           amountSats: 1500,
           completed: false,
           updatedAt: 600,
         );
         expect(n.type, NotificationType.bondClaim);
-        expect(n.id, 'bond-claim-order-1-pending-600');
+        expect(n.id, 'bond-claim-order-1-node-a-500-pending-600');
         expect(n.orderId, 'order-1');
         expect(n.title, isEmpty);
         expect(n.detail?['bondAmountSats'], '1500');
@@ -33,6 +35,8 @@ void main() {
         // A re-prompt is a new record; the cadence retry is not.
         final again = NotificationModel.bondClaim(
           orderId: 'order-1',
+          nodePubkey: 'node-a',
+          slashedAt: 500,
           amountSats: 1500,
           completed: false,
           updatedAt: 900,
@@ -44,11 +48,32 @@ void main() {
     test('a payout received: one record per order', () {
       final n = NotificationModel.bondClaim(
         orderId: 'order-1',
+        nodePubkey: 'node-a',
+        slashedAt: 500,
         amountSats: 1500,
         completed: true,
         updatedAt: 999,
       );
-      expect(n.id, 'bond-claim-order-1-completed');
+      expect(n.id, 'bond-claim-order-1-node-a-500-completed');
+      // A later slash on the same order, or another node, is another claim:
+      // its payout is a notification of its own.
+      final later = NotificationModel.bondClaim(
+        orderId: 'order-1',
+        nodePubkey: 'node-a',
+        slashedAt: 9000,
+        amountSats: 1500,
+        completed: true,
+        updatedAt: 9999,
+      );
+      final other = NotificationModel.bondClaim(
+        orderId: 'order-1',
+        nodePubkey: 'node-b',
+        slashedAt: 500,
+        amountSats: 1500,
+        completed: true,
+        updatedAt: 999,
+      );
+      expect({n.id, later.id, other.id}, hasLength(3));
       expect(n.resolvedTitle(l10n), 'Bond payout received');
       expect(n.resolvedMessage(l10n), 'Bond payout of 1500 sats received.');
     });
@@ -56,6 +81,8 @@ void main() {
     test('survives the JSON round trip', () {
       final n = NotificationModel.bondClaim(
         orderId: 'order-1',
+        nodePubkey: 'node-a',
+        slashedAt: 500,
         amountSats: 1500,
         completed: false,
         updatedAt: 600,

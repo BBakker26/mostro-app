@@ -3793,6 +3793,8 @@
   "@tradesGroupClosed": {"description": "Group header of completed, cancelled and expired trades"},
   "tradesDirectionSell": "You sell",
   "@tradesDirectionSell": {"description": "First words of a trade card: the user sells bitcoin"},
+  "tradesDirectionBondClaim": "Bond claim",
+  "@tradesDirectionBondClaim": {"description": "My Trades row heading for a payout claim whose trade row is gone: the side of the trade is unknown, so no buy/sell direction is shown"},
   "tradesDirectionBuy": "You buy",
   "@tradesDirectionBuy": {"description": "First words of a trade card: the user buys bitcoin"},
   "tradesCounterpartyTo": "to {handle}",

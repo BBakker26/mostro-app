@@ -336,13 +336,20 @@ void _consumeBondClaims(
         continue;
       }
       try {
-        final claim = await bond_api.getBondClaim(orderId: update.orderId);
+        // The claim the update names, never another node's claim for the
+        // same order that happens to be open.
+        final claim = await bond_api.getBondClaimFrom(
+          nodePubkey: update.nodePubkey,
+          orderId: update.orderId,
+        );
         if (claim == null) continue;
         await container
             .read(notificationsProvider.notifier)
             .addIfNew(
               NotificationModel.bondClaim(
                 orderId: update.orderId,
+                nodePubkey: claim.nodePubkey,
+                slashedAt: platformInt64ToInt(claim.slashedAt),
                 amountSats: claim.amountSats.toInt(),
                 completed: update.phase == BondClaimPhase.completed,
                 updatedAt: platformInt64ToInt(claim.updatedAt),

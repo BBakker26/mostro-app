@@ -936,6 +936,7 @@
   "tradesGroupInProgress": "In corso",
   "tradesGroupClosed": "Chiuse",
   "tradesDirectionSell": "Vendi",
+  "tradesDirectionBondClaim": "Richiesta sul deposito",
   "tradesDirectionBuy": "Compri",
   "tradesCounterpartyTo": "a {handle}",
   "tradesCounterpartyFrom": "da {handle}",

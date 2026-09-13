@@ -193,18 +193,21 @@ class NotificationModel {
   }
 
   /// A payout claim to act on, or one that was paid. [id] is stable per
-  /// claim and phase, so the daemon's cadence retries never add a second
-  /// record; a re-prompt carries a fresh [updatedAt] and does.
+  /// claim — the issuing node and the slash anchor, not just the order: a
+  /// later slash, or another node, is another claim — and per phase, so the
+  /// daemon's cadence retries never add a second record; a re-prompt
+  /// carries a fresh [updatedAt] and does.
   factory NotificationModel.bondClaim({
     required String orderId,
+    required String nodePubkey,
+    required int slashedAt,
     required int amountSats,
     required bool completed,
     required int updatedAt,
   }) {
+    final claimId = 'bond-claim-$orderId-$nodePubkey-$slashedAt';
     return NotificationModel(
-      id: completed
-          ? 'bond-claim-$orderId-completed'
-          : 'bond-claim-$orderId-pending-$updatedAt',
+      id: completed ? '$claimId-completed' : '$claimId-pending-$updatedAt',
       type: NotificationType.bondClaim,
       title: '',
       message: '',

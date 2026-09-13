@@ -176,14 +176,24 @@ class _DirectionRow extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final handle = row.peerHandle;
     final started = DateTime.fromMillisecondsSinceEpoch(row.startedAt * 1000);
+    // A claim with no trade behind it does not know which side the user
+    // was on: it says what it is instead of guessing a direction.
+    final claimOnly = row.claimOnly;
     return Row(
       children: [
         Icon(
-          row.isSelling
+          claimOnly
+              ? Icons.savings_outlined
+              : row.isSelling
               ? Icons.arrow_upward_rounded
               : Icons.arrow_downward_rounded,
           size: 14,
-          color: row.isSelling ? pal.sellArrow : pal.buyArrow,
+          color:
+              claimOnly
+                  ? book.textTertiary
+                  : row.isSelling
+                  ? pal.sellArrow
+                  : pal.buyArrow,
         ),
         const SizedBox(width: 6),
         Expanded(
@@ -192,7 +202,9 @@ class _DirectionRow extends StatelessWidget {
               children: [
                 TextSpan(
                   text:
-                      row.isSelling
+                      claimOnly
+                          ? l10n.tradesDirectionBondClaim
+                          : row.isSelling
                           ? l10n.tradesDirectionSell
                           : l10n.tradesDirectionBuy,
                   style: TextStyle(

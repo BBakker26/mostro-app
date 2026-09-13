@@ -936,6 +936,7 @@
   "tradesGroupInProgress": "Laufend",
   "tradesGroupClosed": "Abgeschlossen",
   "tradesDirectionSell": "Du verkaufst",
+  "tradesDirectionBondClaim": "Einlage-Anspruch",
   "tradesDirectionBuy": "Du kaufst",
   "tradesCounterpartyTo": "an {handle}",
   "tradesCounterpartyFrom": "von {handle}",

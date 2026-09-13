@@ -50,9 +50,14 @@ Future<List<TradeRow>> _rows(ProviderContainer container) async {
   return container.read(tradeRowsProvider).value!;
 }
 
-BondClaim _claim(String orderId, BondClaimPhase phase) => BondClaim(
+BondClaim _claim(
+  String orderId,
+  BondClaimPhase phase, {
+  String node = 'node-a',
+  int updatedAt = 600,
+}) => BondClaim(
   orderId: orderId,
-  nodePubkey: 'node-a',
+  nodePubkey: node,
   amountSats: BigInt.from(1500),
   slashedAt: intToPlatformInt64(500),
   // Far in the future: the clock never expires it in a test.
@@ -62,7 +67,7 @@ BondClaim _claim(String orderId, BondClaimPhase phase) => BondClaim(
   fiatCode: 'VES',
   fiatAmount: 100,
   paymentMethod: 'PagoMovil',
-  updatedAt: intToPlatformInt64(600),
+  updatedAt: intToPlatformInt64(updatedAt),
 );
 
 void main() {
@@ -97,6 +102,21 @@ void main() {
       expect(claimRow.paymentMethod, 'PagoMovil');
       expect(claimRow.startedAt, 500);
       expect(claimRow.state.group, TradeGroup.closed);
+    });
+
+    test('an older expired claim never masks a newer open one', () async {
+      // Newest first, as the core lists them: node-b's claim changed last
+      // and is closed; node-a's older claim is still pending.
+      final c = _container(
+        [fakeTrade(id: 'a', status: OrderStatus.canceled)],
+        claims: [
+          _claim('order-a', BondClaimPhase.expired, node: 'node-b', updatedAt: 900),
+          _claim('order-a', BondClaimPhase.pending, updatedAt: 600),
+        ],
+      );
+      final row = (await _rows(c)).single;
+      expect(row.claimBadge, TradeClaimBadge.payoutPending);
+      expect(row.state.verb, TradeRowVerb.claimPayout);
     });
 
     test('an expired claim adds nothing', () async {

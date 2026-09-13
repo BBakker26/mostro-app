@@ -5,8 +5,10 @@ library;
 
 import 'package:intl/intl.dart';
 
+import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show
+        BondClaim,
         BondClaimPhase,
         BondInfo,
         BondRole,
@@ -151,3 +153,39 @@ BondClaimPhase bondClaimEffectivePhase({
     phase == BondClaimPhase.pending && now > deadlineAt
         ? BondClaimPhase.expired
         : phase;
+
+/// One claim per order out of [claims] (newest change first, as the core
+/// lists them): the newest, unless an older one — another node's — is still
+/// open while the newest is not. The same choice the core's
+/// `get_bond_claim` makes, so the list, the banner and the claim screen
+/// agree on which claim an order stands for.
+Map<String, BondClaim> selectClaimsByOrder(List<BondClaim> claims, int now) {
+  bool open(BondClaim c) => bondClaimIsOpen(
+    phase: c.phase,
+    deadlineAt: platformInt64ToInt(c.deadlineAt),
+    now: now,
+  );
+  final selected = <String, BondClaim>{};
+  for (final claim in claims) {
+    final kept = selected[claim.orderId];
+    if (kept == null || (!open(kept) && open(claim))) {
+      selected[claim.orderId] = claim;
+    }
+  }
+  return selected;
+}
+
+/// How long until the nearest pending claim in [claims] passes its window,
+/// or null when none is pending inside it. The claim providers re-read at
+/// that moment, so a badge, a verb or a banner never offers an expired claim.
+Duration? nextClaimDeadlineDelay(List<BondClaim> claims, int now) {
+  int? nearest;
+  for (final claim in claims) {
+    if (claim.phase != BondClaimPhase.pending) continue;
+    final deadline = platformInt64ToInt(claim.deadlineAt);
+    if (deadline < now) continue;
+    if (nearest == null || deadline < nearest) nearest = deadline;
+  }
+  // One second past the deadline: `bondClaimIsOpen` is inclusive of it.
+  return nearest == null ? null : Duration(seconds: nearest - now + 1);
+}

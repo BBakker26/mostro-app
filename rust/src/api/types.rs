@@ -811,6 +811,9 @@ pub fn bond_claim_key(node_pubkey: &str, order_id: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BondClaimUpdate {
     pub order_id: String,
+    /// The node that issued the claim: two nodes can hold a claim for the
+    /// same order, and a consumer must read the one that changed.
+    pub node_pubkey: String,
     pub phase: BondClaimPhase,
 }
 

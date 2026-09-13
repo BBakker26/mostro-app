@@ -3873,7 +3873,7 @@ async fn apply_payout_request(request: crate::mostro::bond_claims::PayoutRequest
         ),
     );
     if notice.is_some() || claim.phase == crate::api::types::BondClaimPhase::Expired {
-        crate::api::bond::emit_claim_update(&request.order_id, claim.phase);
+        crate::api::bond::emit_claim_update(&request.node_pubkey, &request.order_id, claim.phase);
     }
     let _ = ClaimNotice::New; // the kind of notice travels with the phase for now
 }
@@ -3923,7 +3923,7 @@ async fn advance_claim_phase(
             crate::api::logging::short_id(order_id)
         ),
     );
-    crate::api::bond::emit_claim_update(order_id, phase);
+    crate::api::bond::emit_claim_update(node_pubkey, order_id, phase);
 }
 
 // ── Anti-abuse bond (docs/ANTI_ABUSE_BOND.md, Phase 1) ─────────────────────

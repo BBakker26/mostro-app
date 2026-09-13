@@ -61,7 +61,8 @@ reconnect nudge (`connect()` spawns a task for every relay without one, and
 the wait is bounded to 5 s), the bulk kind-14 filter re-issued under its
 stable id (the relay replaces it in place; the replay is ordered by the
 per-order status cursors), the order-book loop, peer chats and dispute chats
-re-armed (each a no-op while its task is alive), and the outbox flushed.
+re-armed (each a no-op while its task is alive), the outbox flushed, and the
+push registrations reconciled (`docs/PUSH_NOTIFICATIONS.md` §7.1).
 Single-flight: calls that arrive while a pass runs wait for it and report
 its outcome with `coalesced = true`. Idempotent over a healthy core. Before
 the pool exists it reports `online = false` and does nothing.

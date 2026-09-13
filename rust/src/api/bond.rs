@@ -123,6 +123,7 @@ pub(crate) async fn persist_claim(claim: &BondClaim) -> Result<()> {
     let db = crate::db::app_db::db().ok_or_else(|| anyhow::anyhow!("StorageUnavailable"))?;
     db.save_bond_claim(claim).await?;
     refresh_claim_nodes().await;
+    crate::api::push::request_reconcile();
     Ok(())
 }
 

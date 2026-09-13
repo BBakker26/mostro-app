@@ -231,6 +231,9 @@ pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
         crate::api::bond::retain_previous_node(&previous).await;
     }
     crate::api::orders::refresh_subscriptions_for_active_node().await;
+    // Selecting a node is the user's "try again" for a push-server refusal
+    // of that node (docs/PUSH_NOTIFICATIONS.md §7.1).
+    crate::api::push::clear_node_refusal(&pubkey).await;
     Ok(())
 }
 

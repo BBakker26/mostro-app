@@ -973,6 +973,19 @@ pub(crate) async fn resubscribe_active_dispute_chats() {
     }
 }
 
+/// The orders whose dispute is still live (opened or in review): their trade
+/// keys stay registered for push whatever the trade row's status says
+/// (docs/PUSH_NOTIFICATIONS.md §7.1).
+pub(crate) async fn live_dispute_order_ids() -> std::collections::HashSet<String> {
+    dispute_store()
+        .all()
+        .await
+        .into_iter()
+        .filter(|d| d.status != DisputeStatus::Resolved)
+        .map(|d| d.trade_id)
+        .collect()
+}
+
 /// Handle an incoming `adminSettled` event (admin resolved in buyer's favour).
 pub async fn handle_admin_settled(trade_id: String) -> Result<()> {
     resolve_dispute(trade_id, DisputeResolution::FundsToBuyer).await

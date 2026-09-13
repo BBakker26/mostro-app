@@ -131,6 +131,59 @@ pub enum ConnectionState {
     Reconnecting,
 }
 
+/// The device token's platform, as the push server wants it
+/// (docs/PUSH_NOTIFICATIONS.md §3.1, §3.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PushPlatform {
+    Android,
+    Ios,
+    Web,
+}
+
+impl PushPlatform {
+    /// The wire value of `platform`.
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            PushPlatform::Android => "android",
+            PushPlatform::Ios => "ios",
+            PushPlatform::Web => "web",
+        }
+    }
+
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "android" => Some(PushPlatform::Android),
+            "ios" => Some(PushPlatform::Ios),
+            "web" => Some(PushPlatform::Web),
+            _ => None,
+        }
+    }
+}
+
+/// What the notification settings screen shows about push registration
+/// (docs/PUSH_NOTIFICATIONS.md §8.1, §9.1). Capability (can this platform
+/// push at all) and permission are Dart's to know; this is the token and
+/// what the server holds.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PushStatus {
+    /// The master toggle.
+    pub enabled: bool,
+    /// A device token is held (Dart handed one over).
+    pub has_token: bool,
+    /// Trade pubkeys the server currently holds a token for.
+    pub registered: u32,
+    /// Trade pubkeys that should be registered right now.
+    pub wanted: u32,
+    /// Unix seconds of the most recent accepted registration.
+    pub last_success_at: Option<i64>,
+    /// Stable marker of the last failure, never prose: `PushServerUnreachable`,
+    /// `PushRateLimited`, `PushNodeRefused`, `PushBadRequest`.
+    pub last_error: Option<String>,
+    /// Unix seconds until which the operator's `403` for the active node
+    /// keeps its keys unregistered; `None` when not refused.
+    pub node_refused_until: Option<i64>,
+}
+
 /// What one `resync` pass found and did (docs/PUSH_NOTIFICATIONS.md §10).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ResyncOutcome {

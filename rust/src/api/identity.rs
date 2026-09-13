@@ -325,6 +325,10 @@ pub async fn delete_identity() -> Result<()> {
     *guard = None;
     drop(guard);
 
+    // The push server must stop waking this device for keys the user no
+    // longer holds; the registrations name pubkeys only, so no key is needed.
+    crate::api::push::unregister_all().await;
+
     // Clear the persisted trade key counter and per-order key mappings: both
     // belong to the deleted identity's derivation tree, and a new mnemonic
     // must start counting from zero instead of inheriting them. (If this

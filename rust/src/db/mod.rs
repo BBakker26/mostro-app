@@ -41,9 +41,9 @@ pub mod settings_keys {
     /// Every trade pubkey registered with the push server, JSON map of
     /// pubkey (hex) → [`crate::mostro::push::PushRegistration`].
     pub const PUSH_REGISTRATIONS: &str = "push_registrations";
-    /// `push_node_refused:<node>` — unix seconds when the push server answered
-    /// `403` for a key issued by that node; cleared per §7.1.
-    pub const PUSH_NODE_REFUSED_PREFIX: &str = "push_node_refused:";
+    /// Nodes the push server operator refused, JSON map of node (hex) →
+    /// unix seconds of the `403`; each entry clears per §7.1.
+    pub const PUSH_NODE_REFUSALS: &str = "push_node_refusals";
 
     /// User-added Mostro nodes, JSON array of `crate::api::nodes::CustomNode`.
     /// The trusted registry is compiled in (`crate::config::TRUSTED_MOSTRO_NODES`);

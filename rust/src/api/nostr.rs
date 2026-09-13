@@ -461,6 +461,8 @@ async fn run_resync() -> ResyncOutcome {
             0
         }
     };
+    // What the push server holds may have aged out while suspended.
+    crate::api::push::reconcile_push().await;
     log::info!("[nostr] resync: done, online={online} flushed={flushed}");
     ResyncOutcome {
         online,

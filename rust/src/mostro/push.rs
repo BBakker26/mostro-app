@@ -15,7 +15,7 @@
 //! overwrite, and keeps a persisted record of what it registered so a
 //! restart, a token refresh or an opt-out act on the full set.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use sha2::{Digest, Sha256};
 
@@ -122,10 +122,16 @@ impl PushRegistration {
 /// What the push server should hold: pubkey (hex) → the node that issued it.
 pub type Wanted = HashMap<String, String>;
 
-/// The keys the push server should hold a token for right now
-/// (§7.1): the trade key of every trade row that is not hard-terminal, the
-/// key of every trade with a live dispute (whatever its status), and the key
-/// each open payout claim was addressed to. Never "every key ever derived".
+/// The keys the push server should hold a token for right now (§7.1): the
+/// trade key of every trade row that is not hard-terminal, and the key each
+/// open payout claim was addressed to. Never "every key ever derived".
+///
+/// A live dispute adds nothing: its row reads `Dispute`, which is not
+/// terminal, and an admin outcome ends the dispute along with the row. The
+/// in-memory dispute record is not consulted on purpose — one an admin
+/// outcome never marked resolved would otherwise keep a finished trade's key
+/// registered for good. What still arrives after the outcome is covered by
+/// the grace.
 ///
 /// `key_for(index)` derives the pubkey for a trade-key index; `None` when it
 /// cannot (the identity is not loaded) drops that key from the set rather
@@ -135,7 +141,6 @@ pub type Wanted = HashMap<String, String>;
 pub fn wanted_pubkeys(
     trades: &[TradeInfo],
     claims: &[BondClaim],
-    disputed_order_ids: &HashSet<String>,
     active_node: &str,
     key_for: impl Fn(u32) -> Option<String>,
 ) -> Wanted {
@@ -143,9 +148,7 @@ pub fn wanted_pubkeys(
     let mut key_of_order: HashMap<&str, u32> = HashMap::new();
     for trade in trades {
         key_of_order.insert(trade.order.id.as_str(), trade.trade_key_index);
-        let live =
-            !is_hard_terminal(&trade.order.status) || disputed_order_ids.contains(&trade.order.id);
-        if !live {
+        if is_hard_terminal(&trade.order.status) {
             continue;
         }
         let Some(pubkey) = key_for(trade.trade_key_index) else {
@@ -422,7 +425,7 @@ mod tests {
             trade("o4", 4, OrderStatus::Canceled, NODE_A),
             trade("o5", 5, OrderStatus::SettledHoldInvoice, NODE_A),
         ];
-        let wanted = wanted_pubkeys(&trades, &[], &HashSet::new(), NODE_B, key);
+        let wanted = wanted_pubkeys(&trades, &[], NODE_B, key);
         let mut keys: Vec<_> = wanted.keys().cloned().collect();
         keys.sort();
         assert_eq!(
@@ -437,11 +440,21 @@ mod tests {
     }
 
     #[test]
-    fn a_live_dispute_keeps_an_admin_terminal_row_wanted() {
-        let trades = vec![trade("o1", 1, OrderStatus::SettledByAdmin, NODE_A)];
-        let disputed = HashSet::from(["o1".to_string()]);
-        assert!(wanted_pubkeys(&trades, &[], &HashSet::new(), NODE_B, key).is_empty());
-        assert!(wanted_pubkeys(&trades, &[], &disputed, NODE_B, key).contains_key(&key(1).unwrap()));
+    fn an_admin_outcome_ends_the_dispute_and_the_key_with_it() {
+        // The row is what says whether the trade is over; a dispute record
+        // that was never marked resolved must not keep the key registered.
+        let trades = vec![
+            trade("o1", 1, OrderStatus::Dispute, NODE_A),
+            trade("o2", 2, OrderStatus::SettledByAdmin, NODE_A),
+            trade("o3", 3, OrderStatus::CanceledByAdmin, NODE_A),
+        ];
+        let wanted = wanted_pubkeys(&trades, &[], NODE_B, key);
+        assert!(
+            wanted.contains_key(&key(1).unwrap()),
+            "a live dispute row is live"
+        );
+        assert!(!wanted.contains_key(&key(2).unwrap()));
+        assert!(!wanted.contains_key(&key(3).unwrap()));
     }
 
     #[test]
@@ -451,7 +464,7 @@ mod tests {
             claim("o2", Some(8), BondClaimPhase::Completed, NODE_B),
             claim("o3", Some(9), BondClaimPhase::Expired, NODE_B),
         ];
-        let wanted = wanted_pubkeys(&[], &claims, &HashSet::new(), NODE_A, key);
+        let wanted = wanted_pubkeys(&[], &claims, NODE_A, key);
         assert_eq!(wanted.len(), 1);
         assert_eq!(wanted[&key(7).unwrap()], NODE_B);
     }
@@ -460,10 +473,10 @@ mod tests {
     fn an_old_claim_without_an_index_falls_back_to_the_orders_key() {
         let trades = vec![trade("o1", 3, OrderStatus::Success, NODE_A)];
         let claims = vec![claim("o1", None, BondClaimPhase::Acknowledged, NODE_A)];
-        let wanted = wanted_pubkeys(&trades, &claims, &HashSet::new(), NODE_A, key);
+        let wanted = wanted_pubkeys(&trades, &claims, NODE_A, key);
         assert!(wanted.contains_key(&key(3).unwrap()));
         let orphan = vec![claim("o9", None, BondClaimPhase::Pending, NODE_A)];
-        assert!(wanted_pubkeys(&[], &orphan, &HashSet::new(), NODE_A, key).is_empty());
+        assert!(wanted_pubkeys(&[], &orphan, NODE_A, key).is_empty());
     }
 
     #[test]
@@ -472,8 +485,8 @@ mod tests {
             trade("o1", 1, OrderStatus::Active, NODE_A),
             trade("o2", 2, OrderStatus::WaitingMakerBond, ""),
         ];
-        let before = wanted_pubkeys(&trades, &[], &HashSet::new(), NODE_A, key);
-        let after = wanted_pubkeys(&trades, &[], &HashSet::new(), NODE_B, key);
+        let before = wanted_pubkeys(&trades, &[], NODE_A, key);
+        let after = wanted_pubkeys(&trades, &[], NODE_B, key);
         assert_eq!(before[&key(1).unwrap()], NODE_A);
         assert_eq!(
             after[&key(1).unwrap()],
@@ -491,15 +504,13 @@ mod tests {
     #[test]
     fn a_key_that_cannot_be_derived_is_dropped_not_registered_blank() {
         let trades = vec![trade("o1", 1, OrderStatus::Active, NODE_A)];
-        assert!(wanted_pubkeys(&trades, &[], &HashSet::new(), NODE_A, |_| None).is_empty());
+        assert!(wanted_pubkeys(&trades, &[], NODE_A, |_| None).is_empty());
     }
 
     #[test]
     fn pubkeys_and_nodes_are_lowercased() {
         let trades = vec![trade("o1", 1, OrderStatus::Active, "AA")];
-        let wanted = wanted_pubkeys(&trades, &[], &HashSet::new(), NODE_A, |_| {
-            Some("ABCD".into())
-        });
+        let wanted = wanted_pubkeys(&trades, &[], NODE_A, |_| Some("ABCD".into()));
         assert_eq!(wanted.get("abcd").map(String::as_str), Some("aa"));
     }
 

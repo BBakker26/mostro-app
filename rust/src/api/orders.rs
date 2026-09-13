@@ -755,7 +755,10 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
         fiat_code: params.fiat_code,
         payment_method: params.payment_method,
         premium: params.premium,
-        creator_pubkey: String::new(),
+        // The issuing node, as on a book order (the 38383 author): the DM
+        // filter and the push registration read it back after a node
+        // switch (docs/PUSH_NOTIFICATIONS.md §7.1).
+        creator_pubkey: active_mostro_pubkey(),
         created_at: now,
         // The test environment may ask the daemon for a short expiry; the
         // daemon's own default is an hour, shown here as the day-long
@@ -4034,7 +4037,8 @@ fn restored_bond_row(
         fiat_code: String::new(),
         payment_method: String::new(),
         premium: 0.0,
-        creator_pubkey: String::new(),
+        // The node the restore answered from: the issuing node of the row.
+        creator_pubkey: active_mostro_pubkey(),
         created_at: now,
         expires_at: None,
         is_mine: maker,
@@ -5178,7 +5182,9 @@ async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeIn
             ),
         );
     }
-    db.save_trade(trade).await
+    let saved = db.save_trade(trade).await;
+    crate::api::push::request_reconcile();
+    saved
 }
 
 /// Writes `status` / `hold_invoice` / `amount_sats` to the trade row only when
@@ -5888,6 +5894,9 @@ pub async fn subscribe_orders() {
     // timeout that fired while the app was closed). Idempotent across
     // re-subscribes — at most one sweep loop per process.
     spawn_stale_sweep();
+    // The pool is up and the DM filter seeded: what the push server holds
+    // can be brought in step, now and on a timer (docs/PUSH_NOTIFICATIONS.md).
+    crate::api::push::start_push_timer();
 }
 
 // ── Stale-state sweep ─────────────────────────────────────────────────────────
@@ -6500,6 +6509,17 @@ async fn replace_global_dm_filter(
     for hex in crate::mostro::bond_claims::claim_node_pubkeys() {
         if let Ok(pk) = nostr_sdk::prelude::PublicKey::from_hex(&hex) {
             if pk != mostro_pubkey {
+                authors.push(pk);
+            }
+        }
+    }
+    // And the issuing node of every trade row that can still receive daemon
+    // messages: a trade taken on node A must stay audible after a switch to
+    // B, or a push for it wakes an app that drops A's events
+    // (docs/PUSH_NOTIFICATIONS.md §7.1).
+    for hex in crate::api::push::issuing_nodes_of_live_trades().await {
+        if let Ok(pk) = nostr_sdk::prelude::PublicKey::from_hex(&hex) {
+            if !authors.contains(&pk) {
                 authors.push(pk);
             }
         }
@@ -7182,6 +7202,9 @@ pub(crate) fn emit_trade_update_with(
         status,
         reason,
     });
+    // Every status a trade can take changes what the push server should
+    // hold for its key (a wipe, a terminal outcome, a new bond window).
+    crate::api::push::request_reconcile();
 }
 
 /// Stream of trade lifecycle changes pushed by the daemon-message ingest.
@@ -7734,6 +7757,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             // (docs/ANTI_ABUSE_BOND.md §6.5): the pay-bond screen then
             // offers the same-take re-request (taker) or Abandon (maker).
             persist_restored_bond_rows(&info).await;
+            crate::api::push::request_reconcile();
             Ok(info)
         }
         Ok(Ok(Wake {

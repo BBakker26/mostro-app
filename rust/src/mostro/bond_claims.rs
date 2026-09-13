@@ -6,7 +6,7 @@
 //! Protocol state, not bridge surface (#120): `api/bond.rs` owns the calls
 //! Dart makes and the persistence; everything here is pure or in-memory.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{OnceLock, RwLock};
 
 use crate::api::types::{BondClaim, BondClaimPhase};
@@ -25,6 +25,8 @@ pub fn claim_deadline(slashed_at: i64, window_days: Option<u32>) -> i64 {
 pub struct PayoutRequest {
     pub order_id: String,
     pub node_pubkey: String,
+    /// The trade key index the request arrived on.
+    pub trade_index: Option<u32>,
     pub amount_sats: u64,
     pub slashed_at: i64,
     pub fiat_code: String,
@@ -65,6 +67,7 @@ pub fn upsert_claim(
         BondClaim {
             order_id: request.order_id.clone(),
             node_pubkey: request.node_pubkey.clone(),
+            trade_index: request.trade_index,
             amount_sats: request.amount_sats,
             slashed_at: request.slashed_at,
             deadline_at,
@@ -98,6 +101,7 @@ pub fn upsert_claim(
             let mut claim = stored.clone();
             claim.phase = BondClaimPhase::Pending;
             claim.submitted_invoice = None;
+            claim.trade_index = claim.trade_index.or(request.trade_index);
             claim.updated_at = now;
             (Some(claim), Some(ClaimNotice::Reprompt))
         }
@@ -143,18 +147,88 @@ pub fn set_claim_nodes<I: IntoIterator<Item = String>>(nodes: I) {
 /// the active one: their retries and acknowledgements keep arriving after
 /// a node switch (§6.4).
 pub fn claim_node_pubkeys() -> Vec<String> {
-    claim_nodes()
+    let mut nodes: HashSet<String> = claim_nodes()
         .read()
         .map(|set| set.iter().cloned().collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let now = crate::rt::unix_now();
+    if let Ok(map) = retained().read() {
+        nodes.extend(map.iter().filter(|(_, until)| **until >= now).map(|(n, _)| n.clone()));
+    }
+    nodes.into_iter().collect()
 }
 
-/// Whether `pubkey_hex` is a node with an open claim.
+// ── Nodes the user left ─────────────────────────────────────────────────────
+
+/// Days a node the user switched away from stays on the filter beyond its
+/// claim window. The window starts at the slash, and a slash only lands when
+/// a dispute resolves, which can be days after the switch: without the
+/// margin the node's first `add-bond-invoice` would be filtered out before
+/// any claim exists to keep it listened to.
+pub const RETAIN_MARGIN_DAYS: u32 = 15;
+
+fn retained() -> &'static RwLock<HashMap<String, i64>> {
+    static NODES: OnceLock<RwLock<HashMap<String, i64>>> = OnceLock::new();
+    NODES.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Until when a node left at `now` stays heard: its claim window (the
+/// node's, or the default) plus [`RETAIN_MARGIN_DAYS`].
+pub fn retain_until(now: i64, window_days: Option<u32>) -> i64 {
+    let days = i64::from(window_days.unwrap_or(DEFAULT_CLAIM_WINDOW_DAYS))
+        + i64::from(RETAIN_MARGIN_DAYS);
+    now.saturating_add(days.saturating_mul(86_400))
+}
+
+/// Keep `node` heard until `until`, never shortening an existing entry.
+pub fn retain_node(node: &str, until: i64) {
+    if let Ok(mut map) = retained().write() {
+        let entry = map.entry(node.to_lowercase()).or_insert(until);
+        if *entry < until {
+            *entry = until;
+        }
+    }
+}
+
+/// Drop the entries past their date; returns whether anything was dropped.
+pub fn prune_retained(now: i64) -> bool {
+    retained()
+        .write()
+        .map(|mut map| {
+            let before = map.len();
+            map.retain(|_, until| *until >= now);
+            map.len() != before
+        })
+        .unwrap_or(false)
+}
+
+/// The retained nodes and their dates, for persistence.
+pub fn retained_nodes_snapshot() -> HashMap<String, i64> {
+    retained().read().map(|map| map.clone()).unwrap_or_default()
+}
+
+fn is_retained(pubkey_hex: &str, now: i64) -> bool {
+    retained()
+        .read()
+        .map(|map| map.get(pubkey_hex).is_some_and(|until| *until >= now))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+pub(crate) fn forget_retained(node: &str) {
+    if let Ok(mut map) = retained().write() {
+        map.remove(node);
+    }
+}
+
+/// Whether `pubkey_hex` is a node with an open claim, or one the user left
+/// recently enough that its first request may still come.
 pub fn is_claim_node(pubkey_hex: &str) -> bool {
-    claim_nodes()
+    let open = claim_nodes()
         .read()
         .map(|set| set.contains(pubkey_hex))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    open || is_retained(pubkey_hex, crate::rt::unix_now())
 }
 
 /// The set as derived from the store: every node with a claim that is not
@@ -175,6 +249,7 @@ mod tests {
         PayoutRequest {
             order_id: "order-1".into(),
             node_pubkey: "node-a".into(),
+            trade_index: Some(7),
             amount_sats: 1_500,
             slashed_at,
             fiat_code: "VES".into(),
@@ -187,6 +262,7 @@ mod tests {
         BondClaim {
             order_id: "order-1".into(),
             node_pubkey: "node-a".into(),
+            trade_index: Some(7),
             amount_sats: 1_500,
             slashed_at: 1_000,
             deadline_at: 1_000 + 15 * 86_400,
@@ -308,7 +384,40 @@ mod tests {
         set_claim_nodes(nodes);
         assert!(is_claim_node("node-a"));
         assert!(!is_claim_node("node-done"));
-        assert_eq!(claim_node_pubkeys(), vec!["node-a".to_string()]);
+        let listed = claim_node_pubkeys();
+        assert!(listed.contains(&"node-a".to_string()));
+        assert!(!listed.contains(&"node-done".to_string()));
         set_claim_nodes(Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_left_node_is_heard_for_its_window_plus_the_margin() {
+        assert_eq!(retain_until(1_000, Some(3)), 1_000 + 18 * 86_400);
+        assert_eq!(retain_until(1_000, None), 1_000 + 30 * 86_400);
+
+        let now = crate::rt::unix_now();
+        retain_node("node-left", now + 1_000);
+        assert!(is_claim_node("node-left"));
+        assert!(claim_node_pubkeys().contains(&"node-left".to_string()));
+        // Never shortened by a later, shorter retention.
+        retain_node("node-left", now + 10);
+        assert_eq!(retained_nodes_snapshot().get("node-left"), Some(&(now + 1_000)));
+
+        retain_node("node-stale", now - 1);
+        assert!(!is_claim_node("node-stale"));
+        assert!(prune_retained(now));
+        assert!(!retained_nodes_snapshot().contains_key("node-stale"));
+        forget_retained("node-left");
+        assert!(!is_claim_node("node-left"));
+    }
+
+    #[test]
+    fn a_re_prompt_keeps_the_key_the_claim_was_first_asked_on() {
+        let mut stored = stored(BondClaimPhase::Acknowledged);
+        stored.trade_index = None;
+        let (claim, _) = upsert_claim(Some(&stored), &request(1_000), None, 3_000);
+        assert_eq!(claim.unwrap().trade_index, Some(7));
+        let (fresh, _) = upsert_claim(None, &request(1_000), None, 2_000);
+        assert_eq!(fresh.unwrap().trade_index, Some(7));
     }
 }

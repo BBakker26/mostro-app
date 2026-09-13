@@ -2634,7 +2634,16 @@ async fn dispatch_mostro_message(
     // gates below own correlation. BondSlashed is exempt: it never writes
     // order state, and a trailing slash notice addressed to the slashed
     // (superseded) generation is by-design delivery (#197).
-    if kind.action != Action::BondSlashed {
+    // Payout claim traffic is exempt for the same reason (§6.4): a claim
+    // belongs to the slashed attempt, not to the order's current generation,
+    // and is answered on the key it was asked on.
+    if !matches!(
+        kind.action,
+        Action::BondSlashed
+            | Action::AddBondInvoice
+            | Action::BondInvoiceAccepted
+            | Action::BondPayoutCompleted
+    ) {
         if let Some(order_id) = &kind.id {
             let oid = order_id.to_string();
             if let Some(bound) = lookup_trade_key_index(&oid).await {
@@ -2787,11 +2796,20 @@ async fn dispatch_mostro_message(
         // A payout claim's acknowledgement (`bond-invoice-accepted`)
         // unblocks the waiting submission and falls through to its arm,
         // which records the phase (docs/ANTI_ABUSE_BOND.md §6.4).
-        if let Some(pending) =
-            crate::mostro::pending::take_matching_claim_submit(trade_pubkey_hex, kind.request_id)
-        {
-            if let Some(tx) = pending.tx {
-                let _ = tx.send(Wake::from(DaemonReply::Acknowledged));
+        // Only an acknowledgement (or the payout itself) answers it: the
+        // daemon also echoes our own `add-bond-invoice` reply on the same
+        // nonce, and that echo accepts nothing.
+        if matches!(
+            kind.action,
+            Action::BondInvoiceAccepted | Action::BondPayoutCompleted
+        ) {
+            if let Some(pending) = crate::mostro::pending::take_matching_claim_submit(
+                trade_pubkey_hex,
+                kind.request_id,
+            ) {
+                if let Some(tx) = pending.tx {
+                    let _ = tx.send(Wake::from(DaemonReply::Acknowledged));
+                }
             }
         }
 
@@ -3627,6 +3645,7 @@ async fn dispatch_mostro_message(
             let request = crate::mostro::bond_claims::PayoutRequest {
                 order_id: order_id.clone(),
                 node_pubkey: sender_hex.clone(),
+                trade_index: Some(trade_index),
                 amount_sats,
                 slashed_at: req.slashed_at,
                 fiat_code: req.order.fiat_code.clone(),
@@ -13556,6 +13575,7 @@ mod tests {
         let seeded = crate::mostro::bond_claims::PayoutRequest {
             order_id: order_id.clone(),
             node_pubkey: other.clone(),
+            trade_index: None,
             amount_sats: 900,
             slashed_at,
             fiat_code: "VES".into(),
@@ -13597,6 +13617,108 @@ mod tests {
         crate::api::bond::refresh_claim_nodes().await;
     }
 
+    /// Our own `add-bond-invoice` reply echoed back on the submission's
+    /// nonce accepts nothing: only `bond-invoice-accepted` resolves the wait.
+    #[tokio::test]
+    async fn an_echoed_claim_reply_does_not_resolve_the_submission() {
+        let _db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let key = "ff00ff81";
+        let (tx, mut rx) = tokio::sync::oneshot::channel::<Wake>();
+        pending_requests().lock().unwrap().insert(
+            key.to_string(),
+            PendingRequest {
+                request_id: 811,
+                trade_index: 41,
+                kind: PendingRequestKind::BondClaimSubmit,
+                tx: Some(tx),
+            },
+        );
+
+        dispatch_mostro_message(
+            correlated_message(
+                order_uuid,
+                811,
+                Action::AddBondInvoice,
+                Some(Payload::PaymentRequest(None, BOND_BOLT11.to_string(), None)),
+                5_000,
+            ),
+            "test-claim-echo-waiter",
+            key,
+            41,
+        )
+        .await;
+        assert!(rx.try_recv().is_err(), "the echo must not resolve the waiter");
+
+        dispatch_mostro_message(
+            correlated_message(order_uuid, 811, Action::BondInvoiceAccepted, None, 5_001),
+            "test-claim-ack-waiter",
+            key,
+            41,
+        )
+        .await;
+        match rx.try_recv() {
+            Ok(Wake { reply: DaemonReply::Acknowledged, .. }) => {}
+            _ => panic!("the acknowledgement resolves the waiter"),
+        }
+    }
+
+    /// A payout request addressed to a superseded trade key — the order was
+    /// retaken on a newer key after the slashed attempt — still creates the
+    /// claim, on the key it was asked on.
+    #[tokio::test]
+    async fn a_payout_request_on_a_superseded_key_still_creates_the_claim() {
+        let db = bond_test_db().await;
+        let node = active_mostro_pubkey();
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        store_trade_key_index(&order_id, 60).await;
+
+        dispatch_mostro_message(
+            payout_request_message(order_uuid, &node, 1_500, crate::rt::unix_now() - 60),
+            "test-claim-superseded-key",
+            "ff00ff82",
+            45,
+        )
+        .await;
+        let claim = db.get_bond_claim(&node, &order_id).await.unwrap().expect("claim persisted");
+        assert_eq!(claim.trade_index, Some(45));
+        db.delete_bond_claim(&node, &order_id).await.unwrap();
+        crate::api::bond::refresh_claim_nodes().await;
+    }
+
+    /// A node the user switched away from before its first request arrived
+    /// is still heard for claims (and only for claims).
+    #[tokio::test]
+    async fn a_node_the_user_left_is_still_heard_for_its_first_claim() {
+        let db = bond_test_db().await;
+        let left = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        // Unknown policy: retained, persisted.
+        crate::api::bond::retain_previous_node(&left).await;
+        assert!(crate::mostro::bond_claims::is_claim_node(&left));
+        let stored = db
+            .get_setting(crate::db::settings_keys::BOND_CLAIM_RETAINED_NODES)
+            .await
+            .unwrap()
+            .expect("persisted");
+        assert!(stored.contains(&left));
+
+        dispatch_mostro_message(
+            payout_request_message(order_uuid, &left, 700, crate::rt::unix_now() - 60),
+            "test-claim-left-node",
+            "ff00ff83",
+            46,
+        )
+        .await;
+        let claim = db.get_bond_claim(&left, &order_id).await.unwrap().expect("claim created");
+        assert_eq!(claim.amount_sats, 700);
+
+        db.delete_bond_claim(&left, &order_id).await.unwrap();
+        crate::mostro::bond_claims::forget_retained(&left);
+    }
+
     /// The submission's markers, without a relay: an empty or wrong-amount
     /// invoice never leaves the device, and a claim past its window expires.
     #[tokio::test]
@@ -13616,6 +13738,7 @@ mod tests {
         let request = crate::mostro::bond_claims::PayoutRequest {
             order_id: order_id.clone(),
             node_pubkey: node.clone(),
+            trade_index: None,
             amount_sats: 1_500,
             slashed_at: 1_000,
             fiat_code: "VES".into(),

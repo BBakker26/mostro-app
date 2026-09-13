@@ -777,6 +777,12 @@ pub struct BondClaim {
     pub order_id: String,
     /// The daemon that issued the claim; the submission target.
     pub node_pubkey: String,
+    /// The trade key index the daemon addressed the request to: the slashed
+    /// attempt's key, which the reply must come from even when the order was
+    /// retaken on a newer key since. `None` only for a claim stored before it
+    /// was recorded; the order's current key is used then.
+    #[serde(default)]
+    pub trade_index: Option<u32>,
     /// The share on offer, in satoshis; the invoice must be for exactly this.
     pub amount_sats: u64,
     /// Unix seconds when the daemon slashed the bond, from the request.

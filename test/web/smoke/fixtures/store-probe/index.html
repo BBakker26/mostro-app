@@ -10,6 +10,9 @@
   so the probe the check reads comes from the seeded rows. This is what makes
   a failure of store-probe-empty mean "the comparison caught it" rather than
   "seeding never worked".
+
+  Like the app, it publishes only when window.mostroStoreProbeRequested is
+  set, so a pass also proves smoke.mjs asks for the probe on every load.
 -->
 <html lang="en">
   <head>
@@ -38,6 +41,10 @@
         };
         const db = await request(open);
         window.mostroBridgeReady = true;
+        if (window.mostroStoreProbeRequested !== true) {
+          db.close();
+          return;
+        }
 
         const readAll = (store) =>
           request(db.transaction(store).objectStore(store).getAll());

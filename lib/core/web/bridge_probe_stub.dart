@@ -8,9 +8,3 @@ void markBridgeReady() {}
 
 /// No-op off web.
 void markBridgeFailed(Object error) {}
-
-/// No-op off web.
-void markStoreProbe(String json) {}
-
-/// No-op off web.
-void markStoreProbeFailed(Object error) {}

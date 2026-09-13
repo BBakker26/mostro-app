@@ -252,7 +252,7 @@ void main() {
       // turns it into a timeout that reads as a broken bundle, or into a
       // check that never runs.
       final dart =
-          File('lib/core/web/bridge_probe_web.dart').readAsStringSync();
+          File('lib/core/web/store_probe_signal_web.dart').readAsStringSync();
       final location =
           File('lib/core/storage/db_location.dart').readAsStringSync();
       final js = smoke.readAsStringSync();
@@ -262,6 +262,10 @@ void main() {
       // Act / Assert
       expect(dart, contains(storeProbeFlag));
       expect(js, contains(storeProbeFlag));
+      // Production publishes nothing unless the page asks, so the request
+      // flag must match too, or the check times out on a healthy bundle.
+      expect(dart, contains(storeProbeRequestFlag));
+      expect(js, contains(storeProbeRequestFlag));
       expect(js, contains('SMOKE_BOND_STORE'));
       expect(yaml, contains('SMOKE_BOND_STORE: "1"'));
       expect(seed.existsSync(), isTrue);
@@ -292,3 +296,7 @@ const bridgeReadyFlag = 'mostroBridgeReady';
 /// The `window` property the web build sets to what it read back from the
 /// persistent store, and that the smoke test compares with its seed.
 const storeProbeFlag = 'mostroStoreProbe';
+
+/// The `window` property the smoke test sets before the page loads to ask the
+/// web build for the store read-back.
+const storeProbeRequestFlag = 'mostroStoreProbeRequested';

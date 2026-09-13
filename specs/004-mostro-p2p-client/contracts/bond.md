@@ -65,10 +65,10 @@ Every claim, most recently changed first. **Errors**: `StorageUnavailable`.
 
 ### get_bond_claim(order_id: String) → BondClaim?
 The claim for one order: the open one when several nodes issued one, otherwise
-the most recently changed.
+the most recently changed. **Errors**: `StorageUnavailable`.
 
 ### get_bond_claim_from(node_pubkey: String, order_id: String) → BondClaim?
-The exact claim a `BondClaimUpdate` names.
+The exact claim a `BondClaimUpdate` names. **Errors**: `StorageUnavailable`.
 
 ### submit_bond_payout_invoice(order_id: String, invoice: String) → ()
 Publish the `add-bond-invoice` reply to the issuing node, from the trade key

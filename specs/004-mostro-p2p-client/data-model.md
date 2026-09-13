@@ -251,7 +251,10 @@ Stored in `bond_claims` (SQLite table, IndexedDB store), keyed
 **Validation rules**:
 - A cadence retry of `add-bond-invoice` never re-arms a `Submitted` claim; a
   re-prompt after `Acknowledged` does.
-- `Completed` and `Expired` are terminal.
+- `Completed` is terminal. `Expired` is terminal once `deadline_at` has
+  passed; a re-prompt inside the frozen deadline reopens it as `Pending`.
+- A request with a different `slashed_at` for the same (node, order) replaces
+  the claim, with a deadline computed afresh.
 
 ---
 

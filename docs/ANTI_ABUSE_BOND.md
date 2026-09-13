@@ -1084,30 +1084,31 @@ trades, the pre-take/pre-create estimate, and web parity of the claim store.
 
 ## 13. Open questions and assumptions to verify
 
-1. **Restart coverage of wiped trade keys** (§9, T4.2) — assumed to need work; verify
-   before PR-4b.
+1. **Restart coverage of wiped trade keys** (§9, T4.2). *Resolved in Phase 4:*
+   verified with a restart test; the result is recorded in §9.
 2. **Does `RestoreData` include `waiting-taker-bond` / `waiting-maker-bond` orders?**
-   Assumed yes (they are open orders on the daemon side). If the daemon filters them,
-   the local rows are the only record and the "request again" path is the recovery.
-3. **bolt11 decoder crate.** `lightning-invoice` (rust-lightning) is the candidate:
-   pure Rust, `no_std`-capable, builds for `wasm32-unknown-unknown`. Confirm it does
-   not drag a conflicting `secp256k1` / `bitcoin` version into the tree next to
-   `bip32` / `k256` before PR-1a; if it does, a minimal bech32 + tagged-field reader
-   for the `x` (expiry) and `c`/timestamp fields is acceptable (no signature check is
-   needed — the daemon is the trusted source of the invoice).
+   *Resolved in PR-4b:* the restore builds a bond-window row for every restored order
+   parked on a bond (`persist_restored_bond_rows`). If a daemon filters them out, no row
+   is created, and the local rows from before the restore stay the only record, with
+   "request again" as the recovery.
+3. **bolt11 decoder crate.** *Resolved in Phase 1:* `lightning-invoice` 0.34 is in the
+   tree (`rust/Cargo.toml`, `api/invoice.rs::decode_bolt11`) and builds for
+   `wasm32-unknown-unknown` in CI. No signature check is made; the daemon is the
+   trusted source of the invoice.
 7. **Upstream follow-ups to propose** (not blockers): ship `claim_window_days` or
    `deadline_at` inside `BondPayoutRequest` so the deadline is immutable end to end;
    an idempotent re-request for a maker bond bolt11 (or the bolt11 in `RestoreData`)
    so a fresh-device restore does not strand a `WaitingMakerBond` order; a cause field
    on `bond-slashed`.
-4. **Amount seeding for a seller-as-taker.** The existing `PayInvoice` arm seeds
-   `order.amount_sats` from the payload; confirm the `PayBondInvoice` payload's
-   `amount` (the bond) is never used for that seeding (T1.1 test).
+4. **Amount seeding for a seller-as-taker.** *Resolved in Phase 1:* the
+   `PayBondInvoice` payload's `amount` is the bond and never seeds
+   `order.amount_sats`; `classify_take_reply` and the dispatch tests assert it.
 5. **Push pipeline capability** for data-only bond events (T5.2). *Resolved in PR-5:*
    the pipeline is content-free by design, so it cannot carry them; see §8.5.
-6. **Concurrent-bond visibility**: after a lost race the local book must show the order
-   as available again only if the wire still says `pending`; the existing
-   `settle_after_lost_take` path is expected to cover this — confirm in T1.2 tests.
+6. **Concurrent-bond visibility.** *Resolved in Phase 1:* a `canceled` during the bond
+   window while the order is still public wipes the row, reports `BondLostRace`, and
+   leaves the order in the book
+   (`a_canceled_during_the_bond_window_reads_as_a_lost_race`).
 
 ---
 

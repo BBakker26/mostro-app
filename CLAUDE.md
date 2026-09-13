@@ -193,7 +193,7 @@ bridged by flutter_rust_bridge.
   `bond_claims` store keyed `node:order`. It outlives the trade row (completed, canceled or
   wiped) and is always submitted to the node that issued it, even after a node switch: the
   kind-14 filter keeps that node as an author while a claim is open, and for its claim window
-  after the user switches away. Don't look a claim up through a trade, and don't delete one
+  plus a 15-day margin after the user switches away. Don't look a claim up through a trade, and don't delete one
   with it (§6.4).
 - **Push cannot carry bond events.** The push server only sees kind 14 p-tagged to a trade
   pubkey and sends a content-free wake-up, so no payload can name `add-bond-invoice` or

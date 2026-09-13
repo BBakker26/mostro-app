@@ -134,10 +134,10 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
       debugPrint('[main] Mortsom build: orders expire after ${orderExpiry}s');
     }
     markBridgeReady();
-    // Web only, and not awaited: startup does not wait on it. With
-    // SMOKE_BOND_STORE=1 the smoke test seeds bond rows and checks they come
-    // back through the bridge — see lib/core/web/store_probe.dart.
-    if (kIsWeb) unawaited(publishStoreProbe());
+    // Only when the smoke test asks (SMOKE_BOND_STORE=1), and not awaited:
+    // it seeds bond rows and checks they come back through the bridge — see
+    // lib/core/web/store_probe.dart. A normal launch skips it entirely.
+    if (kIsWeb && storeProbeRequested()) unawaited(publishStoreProbe());
   } catch (e) {
     debugPrint('[main] rehydrate active Mostro node failed: $e');
     markBridgeFailed(e);

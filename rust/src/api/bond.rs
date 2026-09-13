@@ -473,6 +473,8 @@ mod tests {
     /// renamed field fails `cargo test` instead of a CI browser run.
     #[test]
     fn web_smoke_seed_rows_decode_as_stored() {
+        // Outside the crate on purpose: this is the file the smoke test
+        // seeds, and a crate-local copy would drift from it unnoticed.
         let seed: serde_json::Value =
             serde_json::from_str(include_str!("../../../test/web/smoke/seed/bond_store.json"))
                 .expect("seed is JSON");

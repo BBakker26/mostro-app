@@ -8,13 +8,21 @@
 /// Trades and nothing else. So with `SMOKE_BOND_STORE=1` the smoke test seeds
 /// those rows, reloads, and compares them with what this publishes
 /// (docs/ANTI_ABUSE_BOND.md T5.1).
+///
+/// Only on request: the smoke test sets `mostroStoreProbeRequested` before the
+/// page loads. The shipped bundle stays the one under test, but a production
+/// launch neither decodes every row for nothing nor leaves the user's bond
+/// rows on `window`.
 library;
 
 import 'dart:convert';
 
-import 'package:mostro/core/web/bridge_probe.dart';
+import 'package:mostro/core/web/store_probe_signal.dart';
 import 'package:mostro/src/rust/api/bond.dart' as bond_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
+
+export 'package:mostro/core/web/store_probe_signal.dart'
+    show storeProbeRequested;
 
 /// Reads every claim and every trade that carries a bond, and publishes a
 /// summary of them to the page. A no-op off web, where the publish is a stub;

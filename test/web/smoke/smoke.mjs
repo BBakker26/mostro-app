@@ -213,6 +213,15 @@ async function main() {
     // the one case the knob exists for, passing green without testing it.
     const page = await browser.newPage({ locale: process.env.SMOKE_LOCALE ?? 'en-US' });
 
+    // The app reads its bond rows back only when asked (step 3b). An init
+    // script, so the request is in place before the app starts, on the first
+    // load and again on the reload.
+    if (process.env.SMOKE_BOND_STORE === '1') {
+      await page.addInitScript(() => {
+        globalThis.mostroStoreProbeRequested = true;
+      });
+    }
+
     // SMOKE_LOCALE goes through Playwright, which normalizes the tag before the
     // page sees it: 'en_US' arrives as 'en-US' and '' falls back to the system
     // locale, so only 'C' survives the trip. That is a limit of that option,
@@ -387,13 +396,21 @@ async function main() {
       await page.reload({ waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
       await page
         .waitForFunction(
+          // The bridge error too: the reloaded page publishes no probe when
+          // its bridge call fails, and that should fail now, with its reason,
+          // rather than as a probe timeout after the whole budget.
           () =>
             typeof globalThis.mostroStoreProbe === 'string' ||
-            typeof globalThis.mostroStoreProbeError === 'string',
+            typeof globalThis.mostroStoreProbeError === 'string' ||
+            typeof globalThis.mostroBridgeError === 'string',
           undefined,
           { timeout: TIMEOUT_MS },
         )
         .catch(() => fail('the app never published what it read from the store (mostroStoreProbe)'));
+      const reloadBridgeError = await page.evaluate(() => globalThis.mostroBridgeError);
+      if (reloadBridgeError) {
+        await fail(`Rust bridge call failed after the reload: ${reloadBridgeError}`);
+      }
       const probeError = await page.evaluate(() => globalThis.mostroStoreProbeError);
       if (probeError) await fail(`reading the bond rows back failed: ${probeError}`);
 

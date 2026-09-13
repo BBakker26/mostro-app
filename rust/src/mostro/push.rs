@@ -210,7 +210,9 @@ pub fn refusal_active(refused_at: i64, now: i64) -> bool {
 /// Every rule of §7.1, in one place:
 ///
 /// - a wanted key is registered when the server never accepted it, when it
-///   was accepted with another token, when its registration is older than
+///   was accepted with another token or filed under another node (a legacy
+///   maker row resolves to the active node, which a switch changes), when
+///   its registration is older than
 ///   [`REFRESH_SECS`], or when the clock reads earlier than its
 ///   `registered_at` (a rollback); a failed attempt is retried only once its
 ///   backoff has passed; a key issued by a node under an active refusal is
@@ -251,6 +253,7 @@ pub fn plan(
             Some(r) => {
                 !r.is_registered()
                     || r.token_hash != token_hash
+                    || r.mostro_pubkey != *node
                     || now < r.registered_at
                     || now - r.registered_at >= REFRESH_SECS
                     || r.attempts > 0
@@ -551,6 +554,24 @@ mod tests {
         let actions = plan(&wanted, &regs, "new-token", &Refusals::new(), NOW);
         assert!(register_for(&actions, &k1).is_some());
         assert!(register_for(&actions, &k2).is_some());
+    }
+
+    #[test]
+    fn a_key_wanted_under_another_node_is_re_registered_at_once() {
+        // A legacy maker row reads as the active node; after a switch the key
+        // is the same but its node is not, and the server must hold it under
+        // the node that now owns it rather than until the next refresh.
+        let k = key(1).unwrap();
+        let wanted = Wanted::from([(k.clone(), NODE_B.to_string())]);
+        let regs = regs(vec![registered(&k, 10)]);
+        let actions = plan(&wanted, &regs, "tok", &Refusals::new(), NOW);
+        assert_eq!(
+            register_for(&actions, &k),
+            Some(&Action::Register {
+                trade_pubkey: k.clone(),
+                mostro_pubkey: NODE_B.to_string()
+            })
+        );
     }
 
     #[test]

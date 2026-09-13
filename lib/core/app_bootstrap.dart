@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/core/test_environment.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
+import 'package:mostro/core/web/store_probe.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/walkthrough/providers/first_run_provider.dart';
@@ -132,6 +134,10 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
       debugPrint('[main] Mortsom build: orders expire after ${orderExpiry}s');
     }
     markBridgeReady();
+    // Only when the smoke test asks (SMOKE_BOND_STORE=1), and not awaited:
+    // it seeds bond rows and checks they come back through the bridge — see
+    // lib/core/web/store_probe.dart. A normal launch skips it entirely.
+    if (kIsWeb && storeProbeRequested()) unawaited(publishStoreProbe());
   } catch (e) {
     debugPrint('[main] rehydrate active Mostro node failed: $e');
     markBridgeFailed(e);

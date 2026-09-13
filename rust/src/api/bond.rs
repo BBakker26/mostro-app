@@ -467,6 +467,82 @@ pub fn on_bond_slashed() -> BondSlashedStream {
 mod tests {
     use super::*;
 
+    /// The web smoke test seeds these rows into IndexedDB and expects the
+    /// release build to read them back (docs/ANTI_ABUSE_BOND.md T5.1).
+    /// Decoding the file here keeps it in step with the stored types: a
+    /// renamed field fails `cargo test` instead of a CI browser run.
+    #[test]
+    fn web_smoke_seed_rows_decode_as_stored() {
+        // Outside the crate on purpose: this is the file the smoke test
+        // seeds, and a crate-local copy would drift from it unnoticed.
+        let seed: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test/web/smoke/seed/bond_store.json"))
+                .expect("seed is JSON");
+        let stores = &seed["stores"];
+        // The probe publishes Dart enum names: the variant, first letter lower.
+        let dart_name = |variant: String| {
+            let mut chars = variant.chars();
+            chars
+                .next()
+                .map(|first| first.to_lowercase().collect::<String>() + chars.as_str())
+                .unwrap_or_default()
+        };
+
+        let claims: Vec<BondClaim> = stores["bond_claims"]
+            .as_object()
+            .expect("bond_claims store")
+            .iter()
+            .map(|(key, doc)| {
+                let claim: BondClaim = serde_json::from_value(doc.clone()).expect("a BondClaim");
+                assert_eq!(key, &claim.storage_id(), "stored under its storage key");
+                claim
+            })
+            .collect();
+        let trades: Vec<crate::api::types::TradeInfo> = stores["trades"]
+            .as_object()
+            .expect("trades store")
+            .iter()
+            .map(|(key, doc)| {
+                let trade: crate::api::types::TradeInfo =
+                    serde_json::from_value(doc.clone()).expect("a TradeInfo");
+                assert_eq!(key, &trade.id, "stored under its id");
+                trade
+            })
+            .collect();
+        for (order_id, index) in stores["trade_keys"].as_object().expect("trade_keys store") {
+            index.as_str().expect("stored as a string").parse::<u32>().expect("a u32 index");
+            assert!(trades.iter().any(|t| &t.id == order_id), "key for a seeded trade");
+        }
+
+        let expect = &seed["expect"];
+        for want in expect["claims"].as_array().expect("expected claims") {
+            assert!(
+                claims.iter().any(|c| {
+                    want["orderId"] == c.order_id.as_str()
+                        && want["phase"] == dart_name(format!("{:?}", c.phase)).as_str()
+                }),
+                "no seeded claim matches {want}"
+            );
+        }
+        let expected_trades = expect["trades"].as_array().expect("expected trades");
+        for want in expected_trades {
+            assert!(
+                trades.iter().any(|t| {
+                    want["id"] == t.id.as_str()
+                        && want["status"] == dart_name(format!("{:?}", t.order.status)).as_str()
+                        && t.bond.as_ref().is_some_and(|b| {
+                            want["bondState"] == dart_name(format!("{:?}", b.state)).as_str()
+                        })
+                }),
+                "no seeded trade matches {want}"
+            );
+        }
+        // Both bond statuses, or the check covers only half of what it claims.
+        for status in ["waitingTakerBond", "waitingMakerBond"] {
+            assert!(expected_trades.iter().any(|t| t["status"] == status), "{status} seeded");
+        }
+    }
+
     #[test]
     fn dispute_and_admin_states_infer_dispute() {
         for status in [

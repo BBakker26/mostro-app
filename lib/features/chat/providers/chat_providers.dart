@@ -132,6 +132,21 @@ class ChatRoomsNotifier extends StateNotifier<List<ChatRoomState>> {
     }
   }
 
+  /// Upsert a room read from storage without rolling back a live one.
+  ///
+  /// A snapshot is built room by room, and a message folded into a room after
+  /// its own history was read but before the whole list is ready is newer
+  /// than what the snapshot holds for it. Such a room keeps its live preview,
+  /// time and unread count; a snapshot at or past the live room's time, and a
+  /// room the list does not have yet, are taken as read.
+  void upsertIfNewer(ChatRoomState room) {
+    final existing = state.indexWhere((r) => r.orderId == room.orderId);
+    if (existing >= 0 && state[existing].lastMessageAt > room.lastMessageAt) {
+      return;
+    }
+    upsertRoom(room);
+  }
+
   /// Folds a message that arrived for [orderId] into its room's preview,
   /// time and unread count, so the list stays live without a reload.
   ///
@@ -312,14 +327,14 @@ final messageHistoryProvider = FutureProvider.autoDispose
 // ── Hydration (resume) ────────────────────────────────────────────────────────
 
 /// Rebuild the chat rooms from the trade list and the persisted messages —
-/// the same path `ChatRoomsScreen` runs on init — and upsert them, so a room
-/// added live while the fetch ran survives. Assumes the trade list was
+/// the same path `ChatRoomsScreen` runs on init — and merge them in, so a room
+/// added or updated live while the fetch ran survives. Assumes the trade list was
 /// hydrated first (`defaultHydrators` orders it so).
 Future<void> hydrateChatRooms(ProviderContainer container) async {
   container.invalidate(chatRoomsFromTradesProvider);
   final rooms = await container.read(chatRoomsFromTradesProvider.future);
   final notifier = container.read(chatRoomsNotifierProvider.notifier);
   for (final room in rooms) {
-    notifier.upsertRoom(room);
+    notifier.upsertIfNewer(room);
   }
 }

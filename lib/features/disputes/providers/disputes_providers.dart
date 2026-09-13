@@ -237,15 +237,19 @@ DisputeItem disputeItemFromRust(rust_types.Dispute dispute) => DisputeItem(
   isRead: dispute.isRead,
 );
 
-/// Trade statuses that can carry a dispute record on the bridge.
-const _disputedStatuses = {
-  rust_types.OrderStatus.dispute,
-  rust_types.OrderStatus.settledByAdmin,
-  rust_types.OrderStatus.canceledByAdmin,
-  rust_types.OrderStatus.completedByAdmin,
+/// Trade statuses under which the bridge cannot hold a dispute: the trade
+/// ended without one. Everything else is queried, because a dispute's record
+/// and the row's status are written by different arms — `admin-took-dispute`
+/// creates an `InReview` dispute without touching the status, so the row can
+/// still read `active`, `fiatSent` or `inProgress` while a dispute exists.
+const _undisputableStatuses = {
+  rust_types.OrderStatus.success,
+  rust_types.OrderStatus.canceled,
+  rust_types.OrderStatus.expired,
+  rust_types.OrderStatus.cooperativelyCanceled,
 };
 
-/// Re-read every dispute the bridge knows for the trades that can have one
+/// Re-read every dispute the bridge knows for the trades that can own one
 /// and upsert it: the read flag the UI manages survives (`upsert` keeps it),
 /// and a dispute opened by the peer while the process was suspended appears
 /// without a restart — the shape of the v1 bug this exists to prevent
@@ -258,7 +262,7 @@ Future<void> hydrateDisputes(
   final trades = await container.read(rawTradesProvider.future);
   final notifier = container.read(disputeNotifierProvider.notifier);
   for (final trade in trades) {
-    if (!_disputedStatuses.contains(trade.order.status)) continue;
+    if (_undisputableStatuses.contains(trade.order.status)) continue;
     final rust_types.Dispute? dispute;
     try {
       dispute = await lookup(tradeId: trade.order.id);

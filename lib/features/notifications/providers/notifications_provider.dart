@@ -214,18 +214,37 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
 
   final SembastNotificationsStore? store;
 
+  /// Ids deleted while a load was reading the store. The snapshot the load
+  /// returns still holds them, so the merge must not bring them back.
+  final Set<String> _deletedDuringLoad = {};
+
+  /// Loads in flight; deletions are only tracked while this is non-zero.
+  int _loadsInFlight = 0;
+
+  /// Set by [deleteAll] while a load is in flight: the whole snapshot that
+  /// load returns predates the wipe and is discarded.
+  bool _wipedDuringLoad = false;
+
   /// Load persisted notifications into state. Called once on construction
-  /// when a [store] is provided.
+  /// when a [store] is provided, and again on every resume (the resync
+  /// hydration, lib/core/lifecycle/resume_resync.dart).
   ///
   /// Merges the persisted snapshot with whatever is already in state, keyed by
   /// id, so a delayed load never drops (or overwrites with a stale copy) a
   /// notification added live while the load was in flight. Records added this
-  /// session win on conflict.
+  /// session win on conflict. A record the user deleted while the load was
+  /// reading is not resurrected: [delete] and [deleteAll] note the removal,
+  /// and the merge skips it.
   Future<void> loadInitialData() async {
     if (store == null) return;
+    _loadsInFlight++;
     try {
       final loaded = await store!.loadAll();
-      final byId = {for (final n in loaded) n.id: n};
+      if (_wipedDuringLoad) return;
+      final byId = {
+        for (final n in loaded)
+          if (!_deletedDuringLoad.contains(n.id)) n.id: n,
+      };
       for (final n in state) {
         byId[n.id] = n;
       }
@@ -234,6 +253,12 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
             ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     } catch (e) {
       debugPrint('NotificationsNotifier: failed to load from Sembast: $e');
+    } finally {
+      _loadsInFlight--;
+      if (_loadsInFlight == 0) {
+        _deletedDuringLoad.clear();
+        _wipedDuringLoad = false;
+      }
     }
   }
 
@@ -302,6 +327,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
   }
 
   Future<void> delete(String id) async {
+    if (_loadsInFlight > 0) _deletedDuringLoad.add(id);
     state = state.where((n) => n.id != id).toList();
     try {
       await store?.deleteRecord(id);
@@ -311,6 +337,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
   }
 
   Future<void> deleteAll() async {
+    if (_loadsInFlight > 0) _wipedDuringLoad = true;
     state = [];
     try {
       await store?.deleteAll();

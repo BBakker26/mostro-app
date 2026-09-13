@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/lifecycle/resume_resync.dart';
@@ -45,8 +47,11 @@ void main() {
   Future<rust_types.Dispute?> lookup({required String tradeId}) async =>
       bridgeDisputes[tradeId];
 
-  ResumeResync routine() => ResumeResync(
+  ResumeResync routine({Stream<Object?> Function()? updates}) => ResumeResync(
     container: container,
+    updates: updates ?? () => const Stream.empty(),
+    settleQuiet: const Duration(milliseconds: 30),
+    settleMax: const Duration(milliseconds: 200),
     resync:
         () async => const rust_types.ResyncOutcome(
           online: true,
@@ -115,6 +120,98 @@ void main() {
       expect(listed.status, DisputeStatus.inReview);
       expect(listed.adminPubkey, 'solver');
       expect(listed.initiatedByMe, isFalse);
+    },
+  );
+
+  test(
+    'a dispute the solver took while the row still reads fiat-sent is listed',
+    () async {
+      // `admin-took-dispute` creates the InReview record without touching the
+      // trade status: the row may still read active, fiat-sent or in-progress.
+      bridgeTrades = [
+        fakeTrade(id: 't1', status: rust_types.OrderStatus.fiatSent),
+      ];
+      bridgeDisputes['order-t1'] = const rust_types.Dispute(
+        id: 'd1',
+        tradeId: 'order-t1',
+        status: rust_types.DisputeStatus.inReview,
+        initiatedByMe: false,
+        adminPubkey: 'solver',
+        openedAt: 1234,
+        isRead: false,
+      );
+
+      await routine().run();
+
+      expect(container.read(disputeNotifierProvider).single.id, 'd1');
+    },
+  );
+
+  test('a trade that finished without a dispute is not queried', () async {
+    var lookups = 0;
+    bridgeTrades = [
+      fakeTrade(id: 't1', status: rust_types.OrderStatus.success),
+      fakeTrade(id: 't2', status: rust_types.OrderStatus.canceled),
+    ];
+    final counting = ResumeResync(
+      container: container,
+      resync:
+          () async => const rust_types.ResyncOutcome(
+            online: true,
+            flushed: 0,
+            coalesced: false,
+          ),
+      hydrators: [
+        hydrateTrades,
+        (c) => hydrateDisputes(
+          c,
+          getDispute: ({required tradeId}) async {
+            lookups++;
+            return null;
+          },
+        ),
+      ],
+      updates: () => const Stream.empty(),
+      settleMax: const Duration(milliseconds: 50),
+    );
+
+    await counting.run();
+
+    expect(lookups, 0);
+  });
+
+  test(
+    'events that land during the replay, after resync returned, are picked up',
+    () async {
+      // resync() returns once the subscriptions are re-issued; the events
+      // arrive over the next seconds. The first pass sees the old row; the
+      // replay writes the new one and emits a trade update; the second pass
+      // sees it.
+      final updates = StreamController<Object?>();
+      addTearDown(updates.close);
+      final run = routine(updates: () => updates.stream).run();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(
+        (await container.read(rawTradesProvider.future)).single.order.status,
+        rust_types.OrderStatus.active,
+        reason: 'the first pass ran against the pre-replay row',
+      );
+
+      bridgeTrades = [
+        fakeTrade(id: 't1', status: rust_types.OrderStatus.dispute),
+      ];
+      bridgeDisputes['order-t1'] = const rust_types.Dispute(
+        id: 'd1',
+        tradeId: 'order-t1',
+        status: rust_types.DisputeStatus.open,
+        initiatedByMe: false,
+        openedAt: 1234,
+        isRead: false,
+      );
+      updates.add(null);
+      await run;
+
+      expect(container.read(disputeNotifierProvider).single.id, 'd1');
     },
   );
 

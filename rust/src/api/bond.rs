@@ -430,6 +430,12 @@ pub(crate) fn emit_bond_slashed(event: BondSlashedEvent) {
     let _ = bond_store().event_tx.send(event);
 }
 
+/// The raw slash channel, for tests that drain it without awaiting.
+#[cfg(test)]
+pub(crate) fn subscribe_slashed() -> broadcast::Receiver<BondSlashedEvent> {
+    bond_store().event_tx.subscribe()
+}
+
 /// A stream that emits incoming [`BondSlashedEvent`]s for the Dart layer.
 pub struct BondSlashedStream {
     rx: broadcast::Receiver<BondSlashedEvent>,

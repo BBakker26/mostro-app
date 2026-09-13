@@ -2949,7 +2949,14 @@ async fn dispatch_mostro_message(
                         // persisted with the bond reply moves on. Never a
                         // fresh row from this payload — that would drop the
                         // bond.
-                        if !confirm_maker_bond(&daemon_id, &row_state, trade_index).await {
+                        if !confirm_maker_bond(
+                            &daemon_id,
+                            &row_state,
+                            trade_index,
+                            Some((kind, trade_pubkey_hex)),
+                        )
+                        .await
+                        {
                             crate::api::logging::blog_info("daemon-msg", format!(
                                 "NewOrder: bond confirmation for order={daemon_id} \
                                  found no WaitingMakerBond row — ignored"
@@ -2986,7 +2993,14 @@ async fn dispatch_mostro_message(
                         )
                         .await;
                     }
-                } else if confirm_maker_bond(&daemon_id, &row_state, trade_index).await {
+                } else if confirm_maker_bond(
+                    &daemon_id,
+                    &row_state,
+                    trade_index,
+                    Some((kind, trade_pubkey_hex)),
+                )
+                .await
+                {
                     // No record (the app restarted while the maker's bond
                     // was outstanding), but the persisted WaitingMakerBond
                     // row of this very trade key says what this is
@@ -3982,6 +3996,194 @@ fn bond_deadline(trade: &crate::api::types::TradeInfo) -> Option<i64> {
     }
 }
 
+/// The row a fresh-device restore rebuilds for an order the daemon reports
+/// parked on a bond (§6.5): no bolt11 — the daemon's `RestoreData` carries
+/// none — so `bond.invoice` is `None` and `expires_at` unknown.
+///
+/// A taker's row is built from the daemon's public order (`book`, required):
+/// the taker takes the other side, and a guessed side would send the wrong
+/// retake. A maker's order is unpublished, so its row is a **placeholder**
+/// — no fiat, kind and role provisional — that
+/// [`fill_restored_maker_row`] completes from the daemon's `new-order` when
+/// the bond locks. Nothing is written over a row that already exists.
+fn restored_bond_row(
+    order_id: &str,
+    trade_index: u32,
+    status: crate::api::types::OrderStatus,
+    book: Option<&OrderInfo>,
+    now: i64,
+) -> crate::api::types::TradeInfo {
+    use crate::api::types::*;
+    let maker = status == OrderStatus::WaitingMakerBond;
+    let role = match (maker, book.map(|o| o.kind.clone())) {
+        (true, _) => TradeRole::Seller,
+        (false, Some(OrderKind::Sell)) => TradeRole::Buyer,
+        (false, Some(OrderKind::Buy)) => TradeRole::Seller,
+        // Callers never build a taker row without the order (see
+        // `persist_restored_bond_rows`); kept total for the type.
+        (false, None) => TradeRole::Buyer,
+    };
+    let mut order = book.cloned().unwrap_or(OrderInfo {
+        id: order_id.to_string(),
+        kind: OrderKind::Sell,
+        status: status.clone(),
+        amount_sats: None,
+        fiat_amount: None,
+        fiat_amount_min: None,
+        fiat_amount_max: None,
+        fiat_code: String::new(),
+        payment_method: String::new(),
+        premium: 0.0,
+        creator_pubkey: String::new(),
+        created_at: now,
+        expires_at: None,
+        is_mine: maker,
+        rating: 0.0,
+        total_reviews: 0,
+        days_active: 0,
+    });
+    order.status = status;
+    order.is_mine = maker;
+    let step = match role {
+        TradeRole::Buyer => TradeStep::Buyer(BuyerStep::OrderTaken),
+        TradeRole::Seller => TradeStep::Seller(SellerStep::TakerFound),
+    };
+    TradeInfo {
+        id: order_id.to_string(),
+        order,
+        role,
+        counterparty_pubkey: String::new(),
+        current_step: step,
+        hold_invoice: None,
+        buyer_invoice: None,
+        trade_key_index: trade_index,
+        cooperative_cancel_state: None,
+        timeout_at: None,
+        started_at: now,
+        completed_at: None,
+        outcome: None,
+        peer_rating: None,
+        peer_reviews: None,
+        peer_days: None,
+        rated_at: None,
+        bond: Some(BondInfo {
+            role: if maker { BondRole::Maker } else { BondRole::Taker },
+            amount_sats: 0,
+            invoice: None,
+            state: BondState::Requested,
+            requested_at: now,
+            expires_at: None,
+            locked_at: None,
+        }),
+    }
+}
+
+/// Whether a maker row is the restore placeholder [`restored_bond_row`]
+/// leaves — its side and fiat still to come from the daemon.
+fn is_restored_maker_placeholder(trade: &crate::api::types::TradeInfo) -> bool {
+    trade.order.status == crate::api::types::OrderStatus::WaitingMakerBond
+        && trade.order.is_mine
+        && trade.order.fiat_code.is_empty()
+        && trade.bond.as_ref().is_some_and(|b| b.invoice.is_none())
+}
+
+/// Complete a restored maker placeholder from the order the daemon
+/// published (`new-order`'s payload): kind, side, fiat, amounts and method.
+/// The bond, the key index and the start time are the row's own.
+fn fill_restored_maker_row(
+    trade: &crate::api::types::TradeInfo,
+    published: &mostro_core::order::SmallOrder,
+    creator_pubkey: &str,
+) -> Option<crate::api::types::TradeInfo> {
+    let role = match published.kind {
+        Some(mostro_core::order::Kind::Sell) => TradeRole::Seller,
+        Some(mostro_core::order::Kind::Buy) => TradeRole::Buyer,
+        None => return None,
+    };
+    let mut filled = trade_row_from_small_order(
+        &trade.order.id,
+        published,
+        role,
+        true,
+        trade.trade_key_index,
+        String::new(),
+        creator_pubkey,
+        trade.order.status.clone(),
+    )?;
+    filled.id = trade.id.clone();
+    filled.bond = trade.bond.clone();
+    filled.started_at = trade.started_at;
+    Some(filled)
+}
+
+/// Persist a row for every restored order parked on a bond that has none
+/// yet (§6.5), binding the daemon's trade index to the order so the
+/// re-request and the abandon can find their key. Under the order's guard:
+/// a daemon message rebuilding or advancing the order meanwhile must not be
+/// written over.
+async fn persist_restored_bond_rows(info: &mostro_core::message::RestoreSessionInfo) {
+    use crate::api::types::OrderStatus;
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let now = crate::rt::unix_now();
+    for restored in &info.restore_orders {
+        let status = match restored.status.as_str() {
+            "waiting-taker-bond" => OrderStatus::WaitingTakerBond,
+            "waiting-maker-bond" => OrderStatus::WaitingMakerBond,
+            _ => continue,
+        };
+        let Some(trade_index) = sanitize_trade_index(restored.trade_index) else {
+            continue;
+        };
+        let order_id = restored.order_id.to_string();
+        // A taker's side comes from the daemon's public order — the book,
+        // or the relays — never a guess: the wrong side sends the wrong
+        // retake. Resolved before the guard: a relay round trip must not
+        // hold the order's dispatch.
+        let book = if status == OrderStatus::WaitingTakerBond {
+            match order_book().get_order(&order_id).await {
+                Some(order) => Some(order),
+                None => fetch_public_order(&order_id).await,
+            }
+        } else {
+            None
+        };
+        if status == OrderStatus::WaitingTakerBond && book.is_none() {
+            crate::api::logging::blog_warn(
+                "restore",
+                format!(
+                    "restored order={} is waiting on a taker bond but the daemon's \
+                     public order is not available: no row rebuilt",
+                    crate::api::logging::short_id(&order_id),
+                ),
+            );
+            continue;
+        }
+        let _guard = lock_order(&order_id).await;
+        if matches!(db.get_trade_by_order_id(&order_id).await, Ok(Some(_))) {
+            continue;
+        }
+        let row = restored_bond_row(&order_id, trade_index, status.clone(), book.as_ref(), now);
+        store_trade_key_index(&order_id, trade_index).await;
+        if let Err(e) = persist_trade_row(db, &row).await {
+            crate::api::logging::blog_warn(
+                "restore",
+                format!("restored bond row not persisted for order={order_id}: {e}"),
+            );
+            continue;
+        }
+        crate::api::logging::blog_info(
+            "restore",
+            format!(
+                "restored {status:?} row for order={} trade_index={trade_index} (no bolt11)",
+                crate::api::logging::short_id(&order_id),
+            ),
+        );
+        emit_trade_update(&order_id, status);
+    }
+}
+
 /// Whether an unpaid bond's window has lapsed (see [`bond_deadline`]).
 fn bond_expired(trade: &crate::api::types::TradeInfo, now: i64) -> bool {
     bond_deadline(trade).is_some_and(|at| now > at)
@@ -4058,11 +4260,35 @@ async fn maker_order_is_published(order_id: &str) -> bool {
 /// key's own `WaitingMakerBond` row — the trade index is the
 /// `(trade pubkey, order id)` match the restart fallback relies on — and
 /// moves it to `Pending` with the bond `Locked`. Returns whether it acted.
-async fn confirm_maker_bond(order_id: &str, row_state: &RowState, trade_index: u32) -> bool {
-    match row_state.trade() {
-        Some(trade) => lock_maker_bond(order_id, trade, trade_index).await,
-        None => false,
+async fn confirm_maker_bond(
+    order_id: &str,
+    row_state: &RowState,
+    trade_index: u32,
+    published: Option<(&mostro_core::message::MessageKind, &str)>,
+) -> bool {
+    let Some(trade) = row_state.trade() else {
+        return false;
+    };
+    // A restored placeholder learns its side, fiat and amounts from the
+    // order the daemon just published (§6.5); the lock below then moves it.
+    if is_restored_maker_placeholder(trade) {
+        if let Some((kind, creator)) = published {
+            if let Some(mostro_core::message::Payload::Order(so)) = &kind.payload {
+                if let (Some(filled), Some(db)) =
+                    (fill_restored_maker_row(trade, so, creator), crate::db::app_db::db())
+                {
+                    if let Err(e) = persist_trade_row(db, &filled).await {
+                        crate::api::logging::blog_warn(
+                            "orders",
+                            format!("restored maker row not completed for order={order_id}: {e}"),
+                        );
+                    }
+                    return lock_maker_bond(order_id, &filled, trade_index).await;
+                }
+            }
+        }
     }
+    lock_maker_bond(order_id, trade, trade_index).await
 }
 
 /// [`confirm_maker_bond`] on a row already in hand.
@@ -5831,25 +6057,56 @@ async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::
     newest_book_status(events, &mostro_pubkey, order_id)
 }
 
-/// The newest status among `events` that the daemon published for exactly
+/// The daemon's newest public event for `order_id`, as an order — what the
+/// restore needs to know which side a taker took (§6.5). `None` without a
+/// pool, on a relay failure, or when the daemon never published the order.
+async fn fetch_public_order(order_id: &str) -> Option<OrderInfo> {
+    let pool = crate::api::nostr::get_pool().ok()?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).ok()?;
+    let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, order_id);
+    let events = match pool
+        .client()
+        .fetch_events(filter)
+        .timeout(std::time::Duration::from_secs(10))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            log::warn!("[orders] restore: d-tag fetch for {order_id} failed: {e}");
+            return None;
+        }
+    };
+    newest_book_order(events, &mostro_pubkey, order_id)
+}
+
+/// The newest order among `events` that the daemon published for exactly
 /// `order_id`. The relay was asked for that author and that order; a relay
 /// is not trusted to have honoured either, so both are checked again here:
 /// a genuine daemon event for another order must not move this trade.
-fn newest_book_status(
+fn newest_book_order(
     events: impl IntoIterator<Item = nostr_sdk::prelude::Event>,
     mostro_pubkey: &nostr_sdk::prelude::PublicKey,
     order_id: &str,
-) -> Option<crate::api::types::OrderStatus> {
+) -> Option<OrderInfo> {
     events
         .into_iter()
         .filter(|e| e.pubkey == *mostro_pubkey)
         .filter_map(|e| {
             crate::nostr::order_events::parse_order_event(&e, None)
                 .filter(|order| order.id == order_id)
-                .map(|order| (e.created_at, order.status))
+                .map(|order| (e.created_at, order))
         })
         .max_by_key(|(created_at, _)| *created_at)
-        .map(|(_, status)| status)
+        .map(|(_, order)| order)
+}
+
+/// [`newest_book_order`]'s status alone.
+fn newest_book_status(
+    events: impl IntoIterator<Item = nostr_sdk::prelude::Event>,
+    mostro_pubkey: &nostr_sdk::prelude::PublicKey,
+    order_id: &str,
+) -> Option<crate::api::types::OrderStatus> {
+    newest_book_order(events, mostro_pubkey, order_id).map(|order| order.status)
 }
 
 /// Reconcile trades stuck in waiting states with the daemon's public book.
@@ -7466,7 +7723,17 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             };
             if let Some(floor) = resync_floor(daemon_counter, &info) {
                 crate::api::identity::ensure_trade_key_index_at_least(floor).await?;
+                // The raised counter owns keys the coverage was seeded
+                // without: derive them now and re-issue the kind-14
+                // filter, or every message addressed to a restored trade's
+                // key is dropped until the next restart.
+                seed_global_dm_coverage().await;
+                resubscribe_global_dm_filter().await;
             }
+            // Orders parked on a bond come back as rows without a bolt11
+            // (docs/ANTI_ABUSE_BOND.md §6.5): the pay-bond screen then
+            // offers the same-take re-request (taker) or Abandon (maker).
+            persist_restored_bond_rows(&info).await;
             Ok(info)
         }
         Ok(Ok(Wake {
@@ -13536,11 +13803,14 @@ mod tests {
                 crate::api::types::BondClaimPhase::Completed,
             ]
         );
-        // A paid claim keeps its node off the filter.
-        assert!(!crate::mostro::bond_claims::is_claim_node(&node) || {
-            // unless another test's open claim on the same node is live
-            db.list_bond_claims().await.unwrap().iter().any(|c| c.node_pubkey == node && !c.phase.is_terminal())
-        });
+        // A paid claim keeps its node off the filter. Judged on this claim
+        // alone: the process-wide node set unions every test's open claims
+        // and the retained nodes, so reading it here races other tests.
+        let paid = db.get_bond_claim(&node, &order_id).await.unwrap().unwrap();
+        assert!(
+            !crate::mostro::bond_claims::claim_nodes_of(std::slice::from_ref(&paid))
+                .contains(&node)
+        );
     }
 
     /// Our own reply (`PaymentRequest` shape) echoed back is not a request.
@@ -13781,6 +14051,198 @@ mod tests {
         assert_eq!(err.to_string(), "InvoiceAmountMismatch");
         _db.delete_bond_claim(&node, &order_id).await.unwrap();
         crate::api::bond::refresh_claim_nodes().await;
+    }
+
+    /// docs/ANTI_ABUSE_BOND.md §9 (T4.2): a trailing `bond-slashed` for a
+    /// trade this client wiped is still delivered — the arm is exempt from
+    /// the row gates.
+    #[tokio::test]
+    async fn a_slash_for_a_wiped_trade_is_still_delivered() {
+        use mostro_core::message::{Action, Payload};
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut row = bonded_taker_row(&order_id, BOND_BOLT11, None);
+        row.trade_key_index = 71;
+        row.bond.as_mut().unwrap().state = crate::api::types::BondState::Locked;
+        db.save_trade(&row).await.unwrap();
+        wipe_never_active_trade(&order_id, true, 5_000, 71).await.unwrap();
+        assert!(db.get_trade_by_order_id(&order_id).await.unwrap().is_none());
+
+        let mut rx = crate::api::bond::subscribe_slashed();
+        let so = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            None,
+            1_000,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "Bank".to_string(),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        dispatch_mostro_message(
+            daemon_message(order_uuid, Action::BondSlashed, Some(Payload::Order(so)), 6_000),
+            "test-slash-after-wipe",
+            "ff00ff91",
+            71,
+        )
+        .await;
+        let event = rx.try_recv().expect("the slash notice reaches the notification layer");
+        assert_eq!(event.order_id, order_id);
+        assert_eq!(event.amount_sats, 1_000);
+    }
+
+    /// docs/ANTI_ABUSE_BOND.md §9 (T4.2): after a restart the decryption
+    /// coverage is rebuilt from the identity's counter alone, so a wiped
+    /// trade's key — which no row references any more — is back on the
+    /// filter. Modelled by clearing the map (process loss) and re-seeding
+    /// against a loaded identity; ignored by default because the identity
+    /// is a process-global singleton other tests load and delete.
+    #[tokio::test]
+    #[ignore = "claims the process-global identity — run with --ignored"]
+    async fn a_reseed_after_a_restart_covers_a_wiped_trades_key() {
+        let _db = bond_test_db().await;
+        let words = crate::crypto::keys::generate_mnemonic().unwrap();
+        crate::api::identity::load_identity_from_mnemonic(words, 75, false, None)
+            .await
+            .expect("identity loaded with the counter past the wiped trade's index");
+        let wiped_key = crate::api::identity::get_active_trade_keys(71)
+            .await
+            .expect("the wiped trade's key derives from the counter");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut row = bonded_taker_row(&order_id, BOND_BOLT11, None);
+        row.trade_key_index = 71;
+        _db.save_trade(&row).await.unwrap();
+        wipe_never_active_trade(&order_id, true, 5_000, 71).await.unwrap();
+
+        // Process loss: nothing survives in the coverage map.
+        global_dm_keys().write().await.clear();
+        let pubkeys = seed_global_dm_coverage().await;
+
+        assert!(
+            pubkeys.contains(&wiped_key.public_key()),
+            "the wiped trade's key must be derived back onto the filter"
+        );
+        assert!(global_dm_keys().read().await.contains_key(&wiped_key.public_key().to_hex()));
+    }
+
+    /// docs/ANTI_ABUSE_BOND.md §6.5 (T4.3): a restore lists an order parked
+    /// on a bond with no bolt11. The row is rebuilt without one — a taker's
+    /// side from the public book, a maker's as the user's own — and an
+    /// existing row is left alone.
+    #[tokio::test]
+    async fn a_restore_rebuilds_bond_rows_without_a_bolt11() {
+        use crate::api::types::*;
+        let db = bond_test_db().await;
+        let taker_uuid = uuid::Uuid::new_v4();
+        let maker_uuid = uuid::Uuid::new_v4();
+        let kept_uuid = uuid::Uuid::new_v4();
+        let taker_id = taker_uuid.to_string();
+        // The taker's order is a sell in the public book: the taker buys.
+        let mut book = seam_trade_row(&taker_id, OrderStatus::Pending).order;
+        book.kind = OrderKind::Sell;
+        book.is_mine = false;
+        order_book().upsert_order(book).await;
+        // A row that already exists must not be overwritten.
+        let kept = bonded_taker_row(&kept_uuid.to_string(), "lnbc1kept", None);
+        db.save_trade(&kept).await.unwrap();
+
+        let restored = |id: uuid::Uuid, index: i64, status: &str| {
+            mostro_core::message::RestoredOrdersInfo {
+                order_id: id,
+                trade_index: index,
+                status: status.to_string(),
+            }
+        };
+        persist_restored_bond_rows(&mostro_core::message::RestoreSessionInfo {
+            restore_orders: vec![
+                restored(taker_uuid, 81, "waiting-taker-bond"),
+                restored(maker_uuid, 82, "waiting-maker-bond"),
+                restored(kept_uuid, 83, "waiting-taker-bond"),
+                restored(uuid::Uuid::new_v4(), 84, "active"),
+            ],
+            restore_disputes: vec![],
+        })
+        .await;
+
+        let taker = db.get_trade_by_order_id(&taker_id).await.unwrap().expect("taker row");
+        assert_eq!(taker.order.status, OrderStatus::WaitingTakerBond);
+        assert_eq!(taker.role, TradeRole::Buyer);
+        assert!(!taker.order.is_mine);
+        assert_eq!(taker.trade_key_index, 81);
+        let bond = taker.bond.expect("bond without a bolt11");
+        assert_eq!(bond.role, BondRole::Taker);
+        assert_eq!(bond.invoice, None);
+        assert_eq!(bond.state, BondState::Requested);
+        assert_eq!(get_trade_key_index(&taker_id).await, Some(81));
+
+        let maker = db
+            .get_trade_by_order_id(&maker_uuid.to_string())
+            .await
+            .unwrap()
+            .expect("maker row");
+        assert_eq!(maker.order.status, OrderStatus::WaitingMakerBond);
+        assert!(maker.order.is_mine);
+        assert_eq!(maker.bond.map(|b| b.role), Some(BondRole::Maker));
+
+        let untouched = db.get_trade_by_order_id(&kept_uuid.to_string()).await.unwrap().unwrap();
+        assert_eq!(untouched.bond.unwrap().invoice.as_deref(), Some("lnbc1kept"));
+
+        // A taker whose public order is nowhere to be found (no book entry,
+        // no pool to ask): no row is guessed.
+        let unknown = uuid::Uuid::new_v4();
+        persist_restored_bond_rows(&mostro_core::message::RestoreSessionInfo {
+            restore_orders: vec![restored(unknown, 85, "waiting-taker-bond")],
+            restore_disputes: vec![],
+        })
+        .await;
+        assert!(db.get_trade_by_order_id(&unknown.to_string()).await.unwrap().is_none());
+    }
+
+    /// The restored maker placeholder has no side of its own: the daemon's
+    /// `new-order` on the bond lock fills kind, role, fiat and amounts, and
+    /// the row moves to Pending with the bond Locked.
+    #[tokio::test]
+    async fn a_restored_maker_placeholder_takes_its_side_from_the_confirmation() {
+        use crate::api::types::*;
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let placeholder =
+            restored_bond_row(&order_id, 86, OrderStatus::WaitingMakerBond, None, 1_000);
+        assert!(is_restored_maker_placeholder(&placeholder));
+        db.save_trade(&placeholder).await.unwrap();
+
+        // The maker created a BUY order: the placeholder's provisional sell
+        // side is wrong until the daemon says so.
+        let mut so = pending_small_order(order_uuid);
+        so.kind = Some(mostro_core::order::Kind::Buy);
+        so.fiat_amount = 250;
+        dispatch_mostro_message(
+            correlated_message(order_uuid, 903, Action::NewOrder, Some(Payload::Order(so)), 2_000),
+            "test-restored-maker-filled",
+            "ff00ff92",
+            86,
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().expect("row kept");
+        assert_eq!(row.order.status, OrderStatus::Pending);
+        assert_eq!(row.order.kind, OrderKind::Buy);
+        assert_eq!(row.role, TradeRole::Buyer);
+        assert_eq!(row.order.fiat_code, "VES");
+        assert_eq!(row.order.fiat_amount, Some(250.0));
+        assert!(row.order.is_mine);
+        assert_eq!(row.trade_key_index, 86);
+        assert!(!is_restored_maker_placeholder(&row));
+        assert_eq!(row.bond.map(|b| b.state), Some(BondState::Locked));
     }
 
     /// #394 step 2: a payload naming two strangers proves no role for the

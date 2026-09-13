@@ -332,7 +332,7 @@ Consequences the client must design around:
 ### 3.5 Server changes web needs
 
 Both are small, and both are prerequisites this client cannot work around. Proposed
-upstream as one issue (§14 item 7):
+upstream as [mostro-push-server#44](https://github.com/MostroP2P/mostro-push-server/issues/44):
 
 1. **Accept `platform: "web"`** in `/api/register` (`Platform` enum, the
    `android`/`ios` validation in `routes.rs`, the `/api/status` counts). The FCM v1
@@ -1082,8 +1082,9 @@ matrix.
    the `mostro-mobile` Firebase project — an operator task outside this repo. Phase 4
    ships the client side either way and states iOS as pending if the key is missing.
 7. **Web on the server.** Two changes (§3.5): accept `platform: "web"`, and CORS for
-   the app's origin. Propose them upstream as one issue before PR-4c; do not work
-   around either (a proxy would put a third party between the browser and the
+   the app's origin. Proposed upstream as
+   [mostro-push-server#44](https://github.com/MostroP2P/mostro-push-server/issues/44);
+   PR-4c's capability flag flips when it ships. Do not work around either (a proxy would put a third party between the browser and the
    token). Verify against the real bundle, not in isolation: the worker's
    `importScripts` from `gstatic.com` under the isolated page, its coexistence with
    `coi-serviceworker` (scopes, `clients.claim()`), and registration under the

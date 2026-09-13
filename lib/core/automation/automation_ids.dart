@@ -43,6 +43,9 @@ class AutomationIds {
   static const String keysGenerateConfirm = 'keys.generate.confirm';
   static const String keysGenerateCancel = 'keys.generate.cancel';
   static const String keysImport = 'keys.import';
+  /// Readout: the identity's full public key, for a driver to prove the
+  /// identity it onboarded is the one the app still holds.
+  static const String keysPublicKey = 'keys.public_key';
   static const String keysSeedReveal = 'keys.seed.reveal';
   // There is deliberately no identifier for the mnemonic itself. A stable
   // readout would put the seed phrase in the accessibility tree, where any

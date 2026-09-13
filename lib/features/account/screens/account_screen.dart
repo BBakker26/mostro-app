@@ -19,6 +19,7 @@ import 'package:mostro/features/account/widgets/backup_widgets.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/session_provider.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
+import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 
 /// Account — Route `/key_management` (`design_handoff_cuenta_respaldo`,
@@ -41,11 +42,31 @@ class AccountScreen extends ConsumerStatefulWidget {
 }
 
 class _AccountScreenState extends ConsumerState<AccountScreen> {
+  /// The identity's public key, read out for automation only: the design
+  /// shows no key card, but the contract keeps `keys.public_key`.
+  String? _publicKey;
+
   /// The revealed mnemonic; null while masked.
   List<String>? _words;
   bool _loadingWords = false;
   bool _copied = false;
   Timer? _copiedTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPublicKey());
+  }
+
+  Future<void> _loadPublicKey() async {
+    try {
+      final info = await identity_api.getIdentity();
+      if (!mounted) return;
+      setState(() => _publicKey = info?.publicKey);
+    } catch (e) {
+      debugPrint('[account] public key unavailable: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -130,6 +151,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         child: BackupFillViewport(
           gap: 11,
           blocks: [
+            // One pixel, not zero: a zero-size box has no semantics node,
+            // and the readout lives in the accessibility tree only.
+            const SizedBox(width: 1, height: 1).withAutomationId(
+              AutomationIds.keysPublicKey,
+              label: _publicKey ?? '',
+            ),
             if (backedUp)
               _SecretWordsCard(
                 words: _words,

@@ -59,9 +59,9 @@ class _PaymentMethodPickerScreenState
     final fiatCode = ref.read(selectedFiatCodeProvider);
     final catalogue = ref.read(paymentMethodsForCurrencyProvider(fiatCode));
     final match = catalogue.cast<String?>().firstWhere(
-          (m) => m!.toLowerCase() == sanitized.toLowerCase(),
-          orElse: () => null,
-        );
+      (m) => m!.toLowerCase() == sanitized.toLowerCase(),
+      orElse: () => null,
+    );
     if (match != null) {
       if (!ref.read(selectedPaymentMethodsProvider).contains(match)) {
         _toggle(match);
@@ -102,7 +102,7 @@ class _PaymentMethodPickerScreenState
           icon: Icon(Icons.arrow_back, size: 22, color: palette.textBody),
           tooltip: MaterialLocalizations.of(context).backButtonTooltip,
           onPressed: () => Navigator.of(context).maybePop(),
-        ),
+        ).withAutomationId(AutomationIds.appBarBack),
         titleSpacing: 0,
         title: Text(
           l10n.paymentMethodsLabel,
@@ -133,7 +133,11 @@ class _PaymentMethodPickerScreenState
                 ),
                 hintText: l10n.paymentMethodSearchHint,
                 hintStyle: TextStyle(fontSize: 14, color: palette.textFaint),
-                prefixIcon: Icon(Icons.search, size: 18, color: palette.sortLabel),
+                prefixIcon: Icon(
+                  Icons.search,
+                  size: 18,
+                  color: palette.sortLabel,
+                ),
               ),
               onChanged: (v) => setState(() => _query = v),
             ).withAutomationId(AutomationIds.orderCreatePaymentMethodSearch),
@@ -180,31 +184,32 @@ class _PaymentMethodPickerScreenState
               const SizedBox(width: 12),
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: FilledButton(
-                  onPressed: canAddCustom ? _addCustom : null,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: palette.lime,
-                    foregroundColor: palette.onLime,
-                    disabledBackgroundColor: create.ctaDisabledBg,
-                    disabledForegroundColor: create.ctaDisabledInk,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
+                child:
+                    FilledButton(
+                      onPressed: canAddCustom ? _addCustom : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: palette.lime,
+                        foregroundColor: palette.onLime,
+                        disabledBackgroundColor: create.ctaDisabledBg,
+                        disabledForegroundColor: create.ctaDisabledInk,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        minimumSize: Size.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        textStyle: const TextStyle(
+                          fontFamily: AppFonts.ui,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      child: Text(l10n.paymentMethodAdd),
+                    ).withAutomationId(
+                      AutomationIds.orderCreatePaymentMethodCustomAdd,
                     ),
-                    minimumSize: Size.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    textStyle: const TextStyle(
-                      fontFamily: AppFonts.ui,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  child: Text(l10n.paymentMethodAdd),
-                ).withAutomationId(
-                  AutomationIds.orderCreatePaymentMethodCustomAdd,
-                ),
               ),
             ],
           ),

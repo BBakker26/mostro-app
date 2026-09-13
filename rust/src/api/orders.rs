@@ -687,7 +687,30 @@ pub async fn get_orders(filters: Option<OrderFilters>) -> Result<Vec<OrderInfo>>
 
 /// Public API: get a single order by ID.
 pub async fn get_order(order_id: String) -> Result<Option<OrderInfo>> {
-    Ok(order_book().get_order(&order_id).await)
+    let Some(order) = order_book().get_order(&order_id).await else {
+        return Ok(None);
+    };
+    let local = waiting_bond_status(&order_id).await;
+    Ok(Some(with_bond_window(order, local)))
+}
+
+/// The book's view of an order of ours, corrected for the bond window: the
+/// daemon publishes a take parked on the taker's bond as `pending` on
+/// purpose (docs/ANTI_ABUSE_BOND.md §2.7), so the public bucket must not
+/// hide the private `waiting-taker-bond` the trade row holds, or the
+/// trade screen — which polls this view first — reads a take as an open
+/// order. Only a `pending` bucket is corrected: every other public
+/// status is applied to the row by the sync paths themselves.
+fn with_bond_window(
+    mut order: OrderInfo,
+    local: Option<crate::api::types::OrderStatus>,
+) -> OrderInfo {
+    if order.status == crate::api::types::OrderStatus::Pending {
+        if let Some(local) = local {
+            order.status = local;
+        }
+    }
+    order
 }
 
 /// Create a new order on the Mostro network.
@@ -4831,6 +4854,9 @@ async fn status_sync_blocked_by_terminal(
     let Some(local) = current_local_status(order_id).await else {
         return false;
     };
+    if crate::mostro::status::admin_verdict_refines(&local, action) {
+        return false;
+    }
     if is_hard_terminal(&local) {
         crate::api::logging::blog_debug(
             "orders",
@@ -9515,6 +9541,9 @@ mod tests {
         canceled.status = crate::api::types::OrderStatus::Canceled;
         order_book().upsert_order(canceled).await;
         assert!(status_sync_blocked_by_terminal(&canceled_id, &Action::WaitingSellerToPay).await);
+        // The book's plain `canceled` lands before the admin's message; the
+        // verdict still refines it (a slashed bond reads its cause from it).
+        assert!(!status_sync_blocked_by_terminal(&canceled_id, &Action::AdminCanceled).await);
 
         let active_id = uuid::Uuid::new_v4().to_string();
         let mut active = dummy_order_info(&active_id);
@@ -15607,5 +15636,56 @@ mod restore_e2e_tests {
             "the order must be pending again for the next run"
         );
         println!("[test] ✓ retake round-trip OK");
+    }
+}
+
+#[cfg(test)]
+mod bond_window_tests {
+    use super::*;
+    use crate::api::types::OrderStatus;
+
+    fn book_order(status: OrderStatus) -> OrderInfo {
+        OrderInfo {
+            id: "order".to_string(),
+            kind: crate::api::types::OrderKind::Sell,
+            status,
+            fiat_code: "ARS".to_string(),
+            fiat_amount: Some(1000.0),
+            fiat_amount_min: None,
+            fiat_amount_max: None,
+            payment_method: "cash".to_string(),
+            premium: 0.0,
+            is_mine: true,
+            created_at: 0,
+            expires_at: None,
+            amount_sats: Some(1000),
+            creator_pubkey: String::new(),
+            rating: 0.0,
+            total_reviews: 0,
+            days_active: 0,
+        }
+    }
+
+    /// The public `pending` of a take parked on the taker's bond yields to
+    /// the row's bond window; any other public status stands.
+    #[test]
+    fn a_pending_book_view_yields_to_the_rows_bond_window() {
+        let corrected = with_bond_window(
+            book_order(OrderStatus::Pending),
+            Some(OrderStatus::WaitingTakerBond),
+        );
+        assert_eq!(corrected.status, OrderStatus::WaitingTakerBond);
+        let maker = with_bond_window(
+            book_order(OrderStatus::Pending),
+            Some(OrderStatus::WaitingMakerBond),
+        );
+        assert_eq!(maker.status, OrderStatus::WaitingMakerBond);
+        let untouched = with_bond_window(book_order(OrderStatus::Pending), None);
+        assert_eq!(untouched.status, OrderStatus::Pending);
+        let locked = with_bond_window(
+            book_order(OrderStatus::InProgress),
+            Some(OrderStatus::WaitingTakerBond),
+        );
+        assert_eq!(locked.status, OrderStatus::InProgress);
     }
 }

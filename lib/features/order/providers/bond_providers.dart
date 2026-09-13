@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:clock/clock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -112,16 +115,32 @@ final bondClaimProvider = FutureProvider.autoDispose.family<BondClaim?, String>(
     ref.listen(bondClaimUpdatesProvider, (_, next) {
       if (next.valueOrNull?.orderId == orderId) ref.invalidateSelf();
     });
-    return bond_api.getBondClaim(orderId: orderId);
+    final claim = await bond_api.getBondClaim(orderId: orderId);
+    _reReadAtNextDeadline(ref, [if (claim != null) claim]);
+    return claim;
   },
 );
+
+/// Re-run the provider when the nearest pending claim passes its window:
+/// nothing else rebuilds a settled trade screen or list at that moment.
+void _reReadAtNextDeadline(Ref ref, List<BondClaim> claims) {
+  final delay = nextClaimDeadlineDelay(
+    claims,
+    clock.now().millisecondsSinceEpoch ~/ 1000,
+  );
+  if (delay == null) return;
+  final timer = Timer(delay, ref.invalidateSelf);
+  ref.onDispose(timer.cancel);
+}
 
 /// Every claim, most recently changed first.
 final bondClaimsProvider = FutureProvider.autoDispose<List<BondClaim>>((
   ref,
 ) async {
   ref.listen(bondClaimUpdatesProvider, (_, _) => ref.invalidateSelf());
-  return bond_api.listBondClaims();
+  final claims = await bond_api.listBondClaims();
+  _reReadAtNextDeadline(ref, claims);
+  return claims;
 });
 
 /// The submission behind a seam: publish the bolt11 for a claim's share to

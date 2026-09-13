@@ -76,9 +76,10 @@ fn claim_tx() -> &'static broadcast::Sender<BondClaimUpdate> {
 }
 
 /// Broadcast a claim's phase change to any [`BondClaimStream`].
-pub(crate) fn emit_claim_update(order_id: &str, phase: BondClaimPhase) {
+pub(crate) fn emit_claim_update(node_pubkey: &str, order_id: &str, phase: BondClaimPhase) {
     let _ = claim_tx().send(BondClaimUpdate {
         order_id: order_id.to_string(),
+        node_pubkey: node_pubkey.to_string(),
         phase,
     });
 }
@@ -226,6 +227,13 @@ pub async fn get_bond_claim(order_id: String) -> Result<Option<BondClaim>> {
     claim_for_order(&order_id).await
 }
 
+/// The claim one node issued for one order — the exact claim a
+/// [`BondClaimUpdate`] names, whatever other node holds one for the order.
+pub async fn get_bond_claim_from(node_pubkey: String, order_id: String) -> Result<Option<BondClaim>> {
+    let db = crate::db::app_db::db().ok_or_else(|| anyhow::anyhow!("StorageUnavailable"))?;
+    db.get_bond_claim(&node_pubkey, &order_id).await
+}
+
 /// Send the daemon the bolt11 for a claim's share (§6.4): publish the
 /// `add-bond-invoice` reply **to the node that issued the claim**, mark the
 /// claim `Submitted` so the next cadence retry does not re-arm the form,
@@ -269,7 +277,7 @@ pub async fn submit_bond_payout_invoice(order_id: String, invoice: String) -> Re
         expired.phase = BondClaimPhase::Expired;
         expired.updated_at = now;
         persist_claim(&expired).await?;
-        emit_claim_update(&order_id, BondClaimPhase::Expired);
+        emit_claim_update(&claim.node_pubkey, &order_id, BondClaimPhase::Expired);
         bail!("BondClaimExpired");
     }
     // The key the daemon asked on — the slashed attempt's, even when the
@@ -322,7 +330,7 @@ pub async fn submit_bond_payout_invoice(order_id: String, invoice: String) -> Re
     submitted.submitted_invoice = Some(bolt11.clone());
     submitted.updated_at = now;
     persist_claim(&submitted).await?;
-    emit_claim_update(&order_id, BondClaimPhase::Submitted);
+    emit_claim_update(&claim.node_pubkey, &order_id, BondClaimPhase::Submitted);
     crate::api::logging::blog_info(
         "bond",
         format!(
@@ -358,7 +366,7 @@ pub async fn submit_bond_payout_invoice(order_id: String, invoice: String) -> Re
                     next.phase = phase;
                     next.updated_at = now;
                     persist_claim(&next).await?;
-                    emit_claim_update(&order_id, phase);
+                    emit_claim_update(&current.node_pubkey, &order_id, phase);
                     bail!("BondClaimExpired")
                 }
                 Err(marker) => {
@@ -368,7 +376,7 @@ pub async fn submit_bond_payout_invoice(order_id: String, invoice: String) -> Re
                     pending.submitted_invoice = None;
                     pending.updated_at = now;
                     persist_claim(&pending).await?;
-                    emit_claim_update(&order_id, BondClaimPhase::Pending);
+                    emit_claim_update(&current.node_pubkey, &order_id, BondClaimPhase::Pending);
                     bail!("{marker}")
                 }
             }

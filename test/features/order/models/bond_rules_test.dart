@@ -3,6 +3,7 @@ import 'package:mostro/features/order/models/bond_rules.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show
+        BondClaim,
         BondClaimPhase,
         BondInfo,
         BondRole,
@@ -12,6 +13,65 @@ import 'package:mostro/src/rust/api/types.dart'
         TradeUpdateReason;
 
 void main() {
+  group('claims per order and their next deadline', () {
+    BondClaim claim(
+      String order,
+      BondClaimPhase phase, {
+      String node = 'node-a',
+      int deadlineAt = 1000,
+    }) => BondClaim(
+      orderId: order,
+      nodePubkey: node,
+      tradeIndex: 1,
+      amountSats: BigInt.from(1500),
+      slashedAt: intToPlatformInt64(1),
+      deadlineAt: intToPlatformInt64(deadlineAt),
+      phase: phase,
+      submittedInvoice: null,
+      fiatCode: 'VES',
+      fiatAmount: null,
+      paymentMethod: 'PagoMovil',
+      updatedAt: intToPlatformInt64(1),
+    );
+
+    test('keeps the newest claim unless an older one is still open', () {
+      final newestClosed = claim('o', BondClaimPhase.expired, node: 'b');
+      final olderOpen = claim('o', BondClaimPhase.pending);
+      expect(
+        selectClaimsByOrder([newestClosed, olderOpen], 500)['o'],
+        olderOpen,
+      );
+      final newestOpen = claim('o', BondClaimPhase.acknowledged, node: 'b');
+      expect(
+        selectClaimsByOrder([newestOpen, olderOpen], 500)['o'],
+        newestOpen,
+      );
+      final bothClosed = claim('o', BondClaimPhase.completed);
+      expect(
+        selectClaimsByOrder([newestClosed, bothClosed], 500)['o'],
+        newestClosed,
+      );
+    });
+
+    test('the next re-read is just past the nearest pending deadline', () {
+      expect(
+        nextClaimDeadlineDelay([
+          claim('a', BondClaimPhase.pending, deadlineAt: 900),
+          claim('b', BondClaimPhase.pending, deadlineAt: 700),
+          claim('c', BondClaimPhase.submitted, deadlineAt: 600),
+        ], 500),
+        const Duration(seconds: 201),
+      );
+      expect(
+        nextClaimDeadlineDelay([
+          claim('a', BondClaimPhase.pending, deadlineAt: 400),
+        ], 500),
+        isNull,
+      );
+      expect(nextClaimDeadlineDelay(const [], 500), isNull);
+    });
+  });
+
   group('payout claim rules (docs/ANTI_ABUSE_BOND.md §6.4)', () {
     test('only a pending claim inside its window accepts an invoice', () {
       expect(

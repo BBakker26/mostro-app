@@ -125,8 +125,10 @@ paid the daemon publishes the order and `/my_order` reads `pending`.
 
 **A slashed bond is explained on tap.** Tapping a bond-slashed notification opens a
 dialog with the cause, the amount and the order; `bond.slashed.viewPolicy` (`View policy`)
-leads to the About screen, `bond.slashed.close` dismisses it. The trade keeps
-`trade.bondSlashed` afterwards.
+leads to the About screen, `bond.slashed.viewTrade` (`View trade`) opens the trade
+detail and is present only while the trade row still exists (a timeout slash wipes
+it), `bond.slashed.close` dismisses it. The trade keeps `trade.bondSlashed`
+afterwards.
 
 **A claimable share reaches the user from three places.** The trade detail
 carries `trade.bondClaim` (labelled with the claim's phase) with

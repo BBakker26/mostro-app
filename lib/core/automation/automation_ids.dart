@@ -191,6 +191,10 @@ class AutomationIds {
   /// slashed.
   static const String tradeBondSlashed = 'trade.bondSlashed';
   static const String bondSlashedViewPolicy = 'bond.slashed.viewPolicy';
+
+  /// Present only while the slashed trade's row still exists (a timeout
+  /// slash wipes it): opens the trade detail.
+  static const String bondSlashedViewTrade = 'bond.slashed.viewTrade';
   static const String bondSlashedClose = 'bond.slashed.close';
   static const String tradeBondClaimOpen = 'trade.bondClaim.open';
   static const String tradeAddInvoice = 'trade.addInvoice';

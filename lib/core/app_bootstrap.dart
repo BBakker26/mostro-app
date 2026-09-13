@@ -32,6 +32,8 @@ import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show BondClaimPhase, BondClaimUpdate, BondSlashedEvent, SlashCause;
 import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/trades/providers/trades_providers.dart'
+    show rawTradesProvider;
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 
 /// Starts the application.
@@ -294,6 +296,11 @@ void _consumeBondSlashed(
         break;
       }
       try {
+        // The core wrote `bond.state = Slashed` on the row; the cached
+        // trades still carry the provisional `Released` from the
+        // resolution that preceded the notice. Re-read so the durable
+        // notice on the trade detail appears now, not on the next refresh.
+        container.invalidate(rawTradesProvider);
         // Only stable data is stored; the copy is localized at render time.
         await container
             .read(notificationsProvider.notifier)

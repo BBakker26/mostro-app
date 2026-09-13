@@ -811,13 +811,14 @@ deletion, `#197`) **does not port**:
   `rust/src/api/orders.rs:5276`) for the life of the process, independently of the
   trade row. A trailing `bond-slashed` after a `canceled` wipe is still received and
   decrypted; the `BondSlashed` arm is already exempt from the row gates.
-- What must be **verified and tested** (task T4.2): after a **restart**, keys of wiped
-  trades are re-added to the global filter (the `trade_keys` table keeps
-  `(order_id, key_index)` and the wipe records `wiped_index`). If they are not, a
-  `bond-slashed` or `add-bond-invoice` arriving during the restart gap is lost until the
-  daemon's next retry (claims) or forever (slash notice). The fix, if needed, is to seed
-  the global filter from `trade_keys` at startup, bounded to keys used in the last
-  `bond_payout_claim_window_days` + margin.
+- **Verified (T4.2, PR-4a):** after a restart the coverage is seeded by deriving every
+  key up to the identity's `trade_key_index` (`build_trade_key_map`), independently of
+  the trade rows and of the `trade_keys` table, so a wiped trade's key is back on the
+  filter as soon as the pool starts; a `bond-slashed` for it is delivered and reaches
+  the notification layer (`a_slash_for_a_wiped_trade_is_still_delivered_after_a_reseed`).
+  No `trade_keys`-based seeding is needed. The one gap left is the restart window itself
+  (the process is down): a slash notice sent then is on the relays and comes in with the
+  global feed's history replay; a claim request comes in with the daemon's next retry.
 - **Claims survive everything** because they live in their own store and the daemon
   re-sends the request on a cadence until the deadline.
 - **Restore session** rebuilds bond statuses (§6.5). The pending-request registry is

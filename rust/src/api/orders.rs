@@ -3982,6 +3982,125 @@ fn bond_deadline(trade: &crate::api::types::TradeInfo) -> Option<i64> {
     }
 }
 
+/// The row a fresh-device restore rebuilds for an order the daemon reports
+/// parked on a bond (§6.5): no bolt11 — the daemon's `RestoreData` carries
+/// none — so `bond.invoice` is `None` and `expires_at` unknown. A taker's
+/// order is still in the public book, which names its kind (the taker takes
+/// the other side); a maker's is unpublished, so the row only knows it is
+/// the user's own. Nothing is written over a row that already exists.
+fn restored_bond_row(
+    order_id: &str,
+    trade_index: u32,
+    status: crate::api::types::OrderStatus,
+    book: Option<&OrderInfo>,
+    now: i64,
+) -> crate::api::types::TradeInfo {
+    use crate::api::types::*;
+    let maker = status == OrderStatus::WaitingMakerBond;
+    let role = match (maker, book.map(|o| o.kind.clone())) {
+        (true, _) => TradeRole::Seller,
+        (false, Some(OrderKind::Sell)) => TradeRole::Buyer,
+        (false, Some(OrderKind::Buy)) => TradeRole::Seller,
+        (false, None) => TradeRole::Buyer,
+    };
+    let mut order = book.cloned().unwrap_or(OrderInfo {
+        id: order_id.to_string(),
+        kind: OrderKind::Sell,
+        status: status.clone(),
+        amount_sats: None,
+        fiat_amount: None,
+        fiat_amount_min: None,
+        fiat_amount_max: None,
+        fiat_code: String::new(),
+        payment_method: String::new(),
+        premium: 0.0,
+        creator_pubkey: String::new(),
+        created_at: now,
+        expires_at: None,
+        is_mine: maker,
+        rating: 0.0,
+        total_reviews: 0,
+        days_active: 0,
+    });
+    order.status = status;
+    order.is_mine = maker;
+    let step = match role {
+        TradeRole::Buyer => TradeStep::Buyer(BuyerStep::OrderTaken),
+        TradeRole::Seller => TradeStep::Seller(SellerStep::TakerFound),
+    };
+    TradeInfo {
+        id: order_id.to_string(),
+        order,
+        role,
+        counterparty_pubkey: String::new(),
+        current_step: step,
+        hold_invoice: None,
+        buyer_invoice: None,
+        trade_key_index: trade_index,
+        cooperative_cancel_state: None,
+        timeout_at: None,
+        started_at: now,
+        completed_at: None,
+        outcome: None,
+        peer_rating: None,
+        peer_reviews: None,
+        peer_days: None,
+        rated_at: None,
+        bond: Some(BondInfo {
+            role: if maker { BondRole::Maker } else { BondRole::Taker },
+            amount_sats: 0,
+            invoice: None,
+            state: BondState::Requested,
+            requested_at: now,
+            expires_at: None,
+            locked_at: None,
+        }),
+    }
+}
+
+/// Persist a row for every restored order parked on a bond that has none
+/// yet (§6.5), binding the daemon's trade index to the order so the
+/// re-request and the abandon can find their key.
+async fn persist_restored_bond_rows(info: &mostro_core::message::RestoreSessionInfo) {
+    use crate::api::types::OrderStatus;
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let now = crate::rt::unix_now();
+    for restored in &info.restore_orders {
+        let status = match restored.status.as_str() {
+            "waiting-taker-bond" => OrderStatus::WaitingTakerBond,
+            "waiting-maker-bond" => OrderStatus::WaitingMakerBond,
+            _ => continue,
+        };
+        let Some(trade_index) = sanitize_trade_index(restored.trade_index) else {
+            continue;
+        };
+        let order_id = restored.order_id.to_string();
+        if matches!(db.get_trade_by_order_id(&order_id).await, Ok(Some(_))) {
+            continue;
+        }
+        let book = order_book().get_order(&order_id).await;
+        let row = restored_bond_row(&order_id, trade_index, status.clone(), book.as_ref(), now);
+        store_trade_key_index(&order_id, trade_index).await;
+        if let Err(e) = persist_trade_row(db, &row).await {
+            crate::api::logging::blog_warn(
+                "restore",
+                format!("restored bond row not persisted for order={order_id}: {e}"),
+            );
+            continue;
+        }
+        crate::api::logging::blog_info(
+            "restore",
+            format!(
+                "restored {status:?} row for order={} trade_index={trade_index} (no bolt11)",
+                crate::api::logging::short_id(&order_id),
+            ),
+        );
+        emit_trade_update(&order_id, status);
+    }
+}
+
 /// Whether an unpaid bond's window has lapsed (see [`bond_deadline`]).
 fn bond_expired(trade: &crate::api::types::TradeInfo, now: i64) -> bool {
     bond_deadline(trade).is_some_and(|at| now > at)
@@ -7467,6 +7586,10 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             if let Some(floor) = resync_floor(daemon_counter, &info) {
                 crate::api::identity::ensure_trade_key_index_at_least(floor).await?;
             }
+            // Orders parked on a bond come back as rows without a bolt11
+            // (docs/ANTI_ABUSE_BOND.md §6.5): the pay-bond screen then
+            // offers the same-take re-request (taker) or Abandon (maker).
+            persist_restored_bond_rows(&info).await;
             Ok(info)
         }
         Ok(Ok(Wake {
@@ -13781,6 +13904,126 @@ mod tests {
         assert_eq!(err.to_string(), "InvoiceAmountMismatch");
         _db.delete_bond_claim(&node, &order_id).await.unwrap();
         crate::api::bond::refresh_claim_nodes().await;
+    }
+
+    /// docs/ANTI_ABUSE_BOND.md §9 (T4.2): a trailing `bond-slashed` for a
+    /// trade this client wiped is still delivered — the arm is exempt from
+    /// the row gates — and the wiped trade's key stays in the decryption
+    /// coverage across a re-seed, which is what a restart does.
+    #[tokio::test]
+    async fn a_slash_for_a_wiped_trade_is_still_delivered_after_a_reseed() {
+        use mostro_core::message::{Action, Payload};
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let session = nostr_sdk::prelude::Keys::generate();
+        let key_hex = session.public_key().to_hex();
+        ensure_global_dm_coverage(&session, 71).await;
+
+        let mut row = bonded_taker_row(&order_id, BOND_BOLT11, None);
+        row.trade_key_index = 71;
+        row.bond.as_mut().unwrap().state = crate::api::types::BondState::Locked;
+        db.save_trade(&row).await.unwrap();
+        wipe_never_active_trade(&order_id, true, 5_000, 71).await.unwrap();
+        assert!(db.get_trade_by_order_id(&order_id).await.unwrap().is_none());
+
+        // "Restart": the coverage is re-seeded from scratch and must keep it.
+        let pubkeys = seed_global_dm_coverage().await;
+        assert!(pubkeys.contains(&session.public_key()), "wiped trade's key left the filter");
+        assert!(global_dm_keys().read().await.contains_key(&key_hex));
+
+        let mut rx = crate::api::bond::subscribe_slashed();
+        let so = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            None,
+            1_000,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "Bank".to_string(),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        dispatch_mostro_message(
+            daemon_message(order_uuid, Action::BondSlashed, Some(Payload::Order(so)), 6_000),
+            "test-slash-after-wipe",
+            &key_hex,
+            71,
+        )
+        .await;
+        let event = rx.try_recv().expect("the slash notice reaches the notification layer");
+        assert_eq!(event.order_id, order_id);
+        assert_eq!(event.amount_sats, 1_000);
+        global_dm_keys().write().await.remove(&key_hex);
+    }
+
+    /// docs/ANTI_ABUSE_BOND.md §6.5 (T4.3): a restore lists an order parked
+    /// on a bond with no bolt11. The row is rebuilt without one — a taker's
+    /// side from the public book, a maker's as the user's own — and an
+    /// existing row is left alone.
+    #[tokio::test]
+    async fn a_restore_rebuilds_bond_rows_without_a_bolt11() {
+        use crate::api::types::*;
+        let db = bond_test_db().await;
+        let taker_uuid = uuid::Uuid::new_v4();
+        let maker_uuid = uuid::Uuid::new_v4();
+        let kept_uuid = uuid::Uuid::new_v4();
+        let taker_id = taker_uuid.to_string();
+        // The taker's order is a sell in the public book: the taker buys.
+        let mut book = seam_trade_row(&taker_id, OrderStatus::Pending).order;
+        book.kind = OrderKind::Sell;
+        book.is_mine = false;
+        order_book().upsert_order(book).await;
+        // A row that already exists must not be overwritten.
+        let kept = bonded_taker_row(&kept_uuid.to_string(), "lnbc1kept", None);
+        db.save_trade(&kept).await.unwrap();
+
+        let restored = |id: uuid::Uuid, index: i64, status: &str| {
+            mostro_core::message::RestoredOrdersInfo {
+                order_id: id,
+                trade_index: index,
+                status: status.to_string(),
+            }
+        };
+        persist_restored_bond_rows(&mostro_core::message::RestoreSessionInfo {
+            restore_orders: vec![
+                restored(taker_uuid, 81, "waiting-taker-bond"),
+                restored(maker_uuid, 82, "waiting-maker-bond"),
+                restored(kept_uuid, 83, "waiting-taker-bond"),
+                restored(uuid::Uuid::new_v4(), 84, "active"),
+            ],
+            restore_disputes: vec![],
+        })
+        .await;
+
+        let taker = db.get_trade_by_order_id(&taker_id).await.unwrap().expect("taker row");
+        assert_eq!(taker.order.status, OrderStatus::WaitingTakerBond);
+        assert_eq!(taker.role, TradeRole::Buyer);
+        assert!(!taker.order.is_mine);
+        assert_eq!(taker.trade_key_index, 81);
+        let bond = taker.bond.expect("bond without a bolt11");
+        assert_eq!(bond.role, BondRole::Taker);
+        assert_eq!(bond.invoice, None);
+        assert_eq!(bond.state, BondState::Requested);
+        assert_eq!(get_trade_key_index(&taker_id).await, Some(81));
+
+        let maker = db
+            .get_trade_by_order_id(&maker_uuid.to_string())
+            .await
+            .unwrap()
+            .expect("maker row");
+        assert_eq!(maker.order.status, OrderStatus::WaitingMakerBond);
+        assert!(maker.order.is_mine);
+        assert_eq!(maker.bond.map(|b| b.role), Some(BondRole::Maker));
+
+        let untouched = db.get_trade_by_order_id(&kept_uuid.to_string()).await.unwrap().unwrap();
+        assert_eq!(untouched.bond.unwrap().invoice.as_deref(), Some("lnbc1kept"));
     }
 
     /// #394 step 2: a payload naming two strangers proves no role for the

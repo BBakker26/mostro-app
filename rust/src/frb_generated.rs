@@ -6535,6 +6535,7 @@ impl SseDecode for crate::api::types::BondClaim {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_orderId = <String>::sse_decode(deserializer);
         let mut var_nodePubkey = <String>::sse_decode(deserializer);
+        let mut var_tradeIndex = <Option<u32>>::sse_decode(deserializer);
         let mut var_amountSats = <u64>::sse_decode(deserializer);
         let mut var_slashedAt = <i64>::sse_decode(deserializer);
         let mut var_deadlineAt = <i64>::sse_decode(deserializer);
@@ -6547,6 +6548,7 @@ impl SseDecode for crate::api::types::BondClaim {
         return crate::api::types::BondClaim {
             order_id: var_orderId,
             node_pubkey: var_nodePubkey,
+            trade_index: var_tradeIndex,
             amount_sats: var_amountSats,
             slashed_at: var_slashedAt,
             deadline_at: var_deadlineAt,
@@ -9029,6 +9031,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::BondClaim {
         [
             self.order_id.into_into_dart().into_dart(),
             self.node_pubkey.into_into_dart().into_dart(),
+            self.trade_index.into_into_dart().into_dart(),
             self.amount_sats.into_into_dart().into_dart(),
             self.slashed_at.into_into_dart().into_dart(),
             self.deadline_at.into_into_dart().into_dart(),
@@ -10811,6 +10814,7 @@ impl SseEncode for crate::api::types::BondClaim {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.order_id, serializer);
         <String>::sse_encode(self.node_pubkey, serializer);
+        <Option<u32>>::sse_encode(self.trade_index, serializer);
         <u64>::sse_encode(self.amount_sats, serializer);
         <i64>::sse_encode(self.slashed_at, serializer);
         <i64>::sse_encode(self.deadline_at, serializer);

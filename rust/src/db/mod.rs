@@ -24,6 +24,11 @@ pub mod settings_keys {
     /// [`super::Storage::save_active_mostro_pubkey`] accessor.
     pub const ACTIVE_MOSTRO_PUBKEY: &str = "active_mostro_pubkey";
 
+    /// Nodes the user switched away from that may still send a payout claim,
+    /// JSON map of pubkey (hex) → unix seconds until which they stay on the
+    /// kind-14 filter (docs/ANTI_ABUSE_BOND.md §6.4).
+    pub const BOND_CLAIM_RETAINED_NODES: &str = "bond_claim_retained_nodes";
+
     /// User-added Mostro nodes, JSON array of `crate::api::nodes::CustomNode`.
     /// The trusted registry is compiled in (`crate::config::TRUSTED_MOSTRO_NODES`);
     /// only user additions are persisted.

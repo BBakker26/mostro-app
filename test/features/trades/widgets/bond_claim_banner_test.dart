@@ -17,6 +17,7 @@ BondClaim _claim(BondClaimPhase phase, {int deadlineAt = _now + 86400}) =>
     BondClaim(
       orderId: 'order-1',
       nodePubkey: 'node-a',
+      tradeIndex: 1,
       amountSats: BigInt.from(1500),
       slashedAt: intToPlatformInt64(_now - 3600),
       deadlineAt: intToPlatformInt64(deadlineAt),

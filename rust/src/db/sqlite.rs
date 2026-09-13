@@ -811,6 +811,7 @@ mod tests {
         crate::api::types::BondClaim {
             order_id: order.to_string(),
             node_pubkey: node.to_string(),
+            trade_index: Some(3),
             amount_sats: 1_500,
             slashed_at: 1_000,
             deadline_at: 1_000 + 15 * 86_400,

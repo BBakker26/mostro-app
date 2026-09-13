@@ -58,6 +58,7 @@ BondClaim _claim(
 }) => BondClaim(
   orderId: orderId,
   nodePubkey: node,
+  tradeIndex: 1,
   amountSats: BigInt.from(1500),
   slashedAt: intToPlatformInt64(500),
   // Far in the future: the clock never expires it in a test.

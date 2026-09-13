@@ -213,6 +213,7 @@ pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
     let pubkey = pubkey.to_lowercase();
     nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
         .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
+    let previous = crate::config::active_mostro_pubkey();
 
     {
         // Same lock as the node registry: without it, a concurrent
@@ -222,7 +223,12 @@ pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
         if let Some(db) = crate::db::app_db::db() {
             db.save_active_mostro_pubkey(&pubkey).await?;
         }
-        crate::config::set_active_mostro_pubkey(Some(pubkey));
+        crate::config::set_active_mostro_pubkey(Some(pubkey.clone()));
+    }
+    // Before the refresh drops the previous node's cached policy: a node the
+    // user traded on may still owe them a payout claim (§6.4).
+    if !previous.eq_ignore_ascii_case(&pubkey) {
+        crate::api::bond::retain_previous_node(&previous).await;
     }
     crate::api::orders::refresh_subscriptions_for_active_node().await;
     Ok(())

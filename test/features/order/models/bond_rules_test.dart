@@ -22,6 +22,7 @@ void main() {
     }) => BondClaim(
       orderId: order,
       nodePubkey: node,
+      tradeIndex: 1,
       amountSats: BigInt.from(1500),
       slashedAt: intToPlatformInt64(1),
       deadlineAt: intToPlatformInt64(deadlineAt),

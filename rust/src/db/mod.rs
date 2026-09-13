@@ -29,6 +29,22 @@ pub mod settings_keys {
     /// kind-14 filter (docs/ANTI_ABUSE_BOND.md §6.4).
     pub const BOND_CLAIM_RETAINED_NODES: &str = "bond_claim_retained_nodes";
 
+    // ── Push notifications (docs/PUSH_NOTIFICATIONS.md §7.1, §8.1) ──────────
+
+    /// The master toggle, `"true"` / `"false"`; absent reads as enabled.
+    pub const PUSH_ENABLED: &str = "push_enabled";
+    /// The device token Dart last handed over, so a restart can unregister
+    /// before the device hands one over again.
+    pub const PUSH_TOKEN: &str = "push_token";
+    /// The platform of [`PUSH_TOKEN`]: `android`, `ios` or `web`.
+    pub const PUSH_PLATFORM: &str = "push_platform";
+    /// Every trade pubkey registered with the push server, JSON map of
+    /// pubkey (hex) → [`crate::mostro::push::PushRegistration`].
+    pub const PUSH_REGISTRATIONS: &str = "push_registrations";
+    /// `push_node_refused:<node>` — unix seconds when the push server answered
+    /// `403` for a key issued by that node; cleared per §7.1.
+    pub const PUSH_NODE_REFUSED_PREFIX: &str = "push_node_refused:";
+
     /// User-added Mostro nodes, JSON array of `crate::api::nodes::CustomNode`.
     /// The trusted registry is compiled in (`crate::config::TRUSTED_MOSTRO_NODES`);
     /// only user additions are persisted.

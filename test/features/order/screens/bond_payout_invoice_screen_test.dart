@@ -9,6 +9,7 @@ import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/screens/bond_payout_invoice_screen.dart';
+import 'package:mostro/features/order/widgets/invoice_widgets.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
@@ -93,10 +94,17 @@ void main() {
       expect(find.textContaining('forfeited in your favour'), findsOneWidget);
       expect(_byId(AutomationIds.bondClaimText), findsOneWidget);
       // Nothing typed: nothing to send.
-      final button = tester.widget<AutomationId>(
-        _byId(AutomationIds.bondClaimSubmit),
+      final button = tester.widget<InvoicePrimaryButton>(
+        find.descendant(
+          of: _byId(AutomationIds.bondClaimSubmit),
+          matching: find.byType(InvoicePrimaryButton),
+        ),
       );
-      expect(button, isNotNull);
+      expect(button.onPressed, isNull);
+      // The status readout does not hide the controls from accessibility.
+      final handle = tester.ensureSemantics();
+      expect(find.bySemanticsLabel('Send invoice'), findsOneWidget);
+      handle.dispose();
     });
   });
 
@@ -210,6 +218,55 @@ void main() {
       expect(_label(tester, AutomationIds.bondClaimStatus), 'expired');
       expect(find.byType(TextField), findsNothing);
     });
+  });
+
+  testWidgets('a refused wallet invoice switches to manual entry', (
+    tester,
+  ) async {
+    final generated = <int>[];
+    await withClock(clockAt, () async {
+      await _pump(
+        tester,
+        claim: _claim(),
+        walletConnected: true,
+        submit: (_, _) async => throw Exception('BondClaimRejected'),
+        generateInvoice: (sats) async {
+          generated.add(sats);
+          return 'lnbc15u1wallet';
+        },
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pump();
+      expect(generated, [1500]);
+      // Manual form with the reason, and no second wallet invoice.
+      expect(find.byType(NwcInvoiceWidget), findsNothing);
+      expect(_byId(AutomationIds.bondClaimText), findsOneWidget);
+      expect(
+        find.text('The node did not accept the invoice. Try another one.'),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 1));
+      expect(generated, [1500]);
+    });
+  });
+
+  testWidgets('the form turns expired when the deadline passes on screen', (
+    tester,
+  ) async {
+    var nowSecs = _now;
+    await withClock(
+      Clock(
+        () => DateTime.fromMillisecondsSinceEpoch(nowSecs * 1000, isUtc: true),
+      ),
+      () async {
+        await _pump(tester, claim: _claim(deadlineAt: _now + 1));
+        expect(_byId(AutomationIds.bondClaimText), findsOneWidget);
+        nowSecs = _now + 5;
+        await tester.pump(const Duration(seconds: 2));
+        expect(find.text('The claim window ended'), findsOneWidget);
+        expect(_byId(AutomationIds.bondClaimText), findsNothing);
+      },
+    );
   });
 
   testWidgets('no claim for the order says so', (tester) async {

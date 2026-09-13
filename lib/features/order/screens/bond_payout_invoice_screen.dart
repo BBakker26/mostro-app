@@ -54,16 +54,26 @@ class _BondPayoutInvoiceScreenState
   final _focus = FocusNode();
   bool _submitting = false;
   bool _manualMode = false;
+
+  /// Rebuilds the screen just past a pending claim's deadline, so the form
+  /// turns into the expired state even when nothing else rebuilds it.
+  Timer? _deadlineTimer;
+  int? _deadlineArmedFor;
   String? _lastError;
 
   @override
   void dispose() {
+    _deadlineTimer?.cancel();
     _controller.dispose();
     _focus.dispose();
     super.dispose();
   }
 
-  Future<void> _submit(String invoice) async {
+  /// Send [invoice]. [fromWallet] marks one the NWC widget generated: when
+  /// the node refuses it the screen switches to manual entry, or returning
+  /// to `pending` would recreate the widget and generate and submit another
+  /// invoice on its own.
+  Future<void> _submit(String invoice, {bool fromWallet = false}) async {
     if (_submitting) return;
     final l10n = AppLocalizations.of(context);
     setState(() {
@@ -79,6 +89,7 @@ class _BondPayoutInvoiceScreenState
       ).showSnackBar(SnackBar(content: Text(l10n.bondClaimSent)));
     } catch (e) {
       if (!mounted) return;
+      if (fromWallet) _manualMode = true;
       ref.invalidate(bondClaimProvider(widget.orderId));
       setState(() {
         _lastError = localizedDaemonError(
@@ -174,6 +185,7 @@ class _BondPayoutInvoiceScreenState
       deadlineAt: deadlineAt,
       now: now,
     );
+    _armDeadline(claim.phase, deadlineAt, now);
     final body = switch (phase) {
       BondClaimPhase.pending => _pending(l10n, claim, deadlineAt),
       BondClaimPhase.submitted => _state(
@@ -214,11 +226,31 @@ class _BondPayoutInvoiceScreenState
       backgroundColor: book.bg,
       resizeToAvoidBottomInset: true,
       appBar: appBar,
-      body: body.withAutomationId(
-        AutomationIds.bondClaimStatus,
-        label: phase.name,
+      // The phase readout sits beside the body, never around it: a merging
+      // automation id would hide every control below from accessibility.
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox.shrink().withAutomationId(
+            AutomationIds.bondClaimStatus,
+            label: phase.name,
+          ),
+          Expanded(child: body),
+        ],
       ),
     );
+  }
+
+  /// Arm one rebuild just past a pending claim's deadline (once per
+  /// deadline); `bondClaimIsOpen` is inclusive of the deadline itself.
+  void _armDeadline(BondClaimPhase phase, int deadlineAt, int now) {
+    if (phase != BondClaimPhase.pending || deadlineAt < now) return;
+    if (_deadlineArmedFor == deadlineAt) return;
+    _deadlineArmedFor = deadlineAt;
+    _deadlineTimer?.cancel();
+    _deadlineTimer = Timer(Duration(seconds: deadlineAt - now + 1), () {
+      if (mounted) setState(() {});
+    });
   }
 
   String _date(int unixSecs) {
@@ -287,7 +319,8 @@ class _BondPayoutInvoiceScreenState
               child: NwcInvoiceWidget(
                 amountSats: sats,
                 generateInvoice: widget.generateInvoice,
-                onInvoiceConfirmed: _submit,
+                onInvoiceConfirmed:
+                    (invoice) => _submit(invoice, fromWallet: true),
                 onFallbackToManual: () => setState(() => _manualMode = true),
               ),
             ),

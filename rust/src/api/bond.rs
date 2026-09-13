@@ -132,14 +132,71 @@ pub(crate) async fn refresh_claim_nodes() {
     let Some(db) = crate::db::app_db::db() else {
         return;
     };
+    let before: std::collections::HashSet<String> =
+        bond_claims::claim_node_pubkeys().into_iter().collect();
     let claims = db.list_bond_claims().await.unwrap_or_default();
-    let before = bond_claims::claim_node_pubkeys().len();
-    let nodes = bond_claims::claim_nodes_of(&claims);
-    let changed = nodes.len() != before || nodes.iter().any(|n| !bond_claims::is_claim_node(n));
-    bond_claims::set_claim_nodes(nodes);
-    if changed {
+    bond_claims::set_claim_nodes(bond_claims::claim_nodes_of(&claims));
+    // The nodes the user left, as persisted: merged in, then pruned.
+    let stored: std::collections::HashMap<String, i64> = db
+        .get_setting(crate::db::settings_keys::BOND_CLAIM_RETAINED_NODES)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    let stored_len = stored.len();
+    for (node, until) in stored {
+        bond_claims::retain_node(&node, until);
+    }
+    if bond_claims::prune_retained(crate::rt::unix_now())
+        || bond_claims::retained_nodes_snapshot().len() != stored_len
+    {
+        persist_retained_nodes().await;
+    }
+    let after: std::collections::HashSet<String> =
+        bond_claims::claim_node_pubkeys().into_iter().collect();
+    if before != after {
         crate::api::orders::resubscribe_global_dm_filter().await;
     }
+}
+
+async fn persist_retained_nodes() {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    match serde_json::to_string(&bond_claims::retained_nodes_snapshot()) {
+        Ok(json) => {
+            if let Err(e) = db
+                .set_setting(crate::db::settings_keys::BOND_CLAIM_RETAINED_NODES, &json)
+                .await
+            {
+                log::warn!("[bond] retained claim nodes not persisted: {e}");
+            }
+        }
+        Err(e) => log::warn!("[bond] retained claim nodes not serialised: {e}"),
+    }
+}
+
+/// Keep `previous` — the node the user is switching away from — on the
+/// claim filter for its claim window plus a margin (§6.4). A counterparty's
+/// bond slashed after the switch (a dispute still open, say) is otherwise
+/// asked for on a node the filter no longer hears, and the claim is never
+/// created. Call before the switch clears the node's cached policy: a node
+/// known not to run bonds cannot issue a claim and is not retained.
+pub(crate) async fn retain_previous_node(previous: &str) {
+    let policy = crate::mostro::bond_policy::get_for(previous);
+    if policy
+        .as_ref()
+        .is_some_and(|p| p.policy != crate::api::types::BondPolicy::Enabled)
+    {
+        return;
+    }
+    let now = crate::rt::unix_now();
+    let until = bond_claims::retain_until(now, policy.and_then(|p| p.payout_claim_window_days));
+    bond_claims::retain_node(previous, until);
+    bond_claims::prune_retained(now);
+    persist_retained_nodes().await;
+    crate::api::orders::resubscribe_global_dm_filter().await;
 }
 
 /// The claim for `order_id` the user can still act on — or, failing that,
@@ -215,9 +272,15 @@ pub async fn submit_bond_payout_invoice(order_id: String, invoice: String) -> Re
         emit_claim_update(&order_id, BondClaimPhase::Expired);
         bail!("BondClaimExpired");
     }
-    let trade_index = crate::api::orders::trade_key_index_of(&order_id)
-        .await
-        .ok_or_else(|| anyhow::anyhow!("TradeKeyMissing"))?;
+    // The key the daemon asked on — the slashed attempt's, even when the
+    // order was retaken on a newer key since — or, for a claim stored
+    // before that was recorded, the order's current one.
+    let trade_index = match claim.trade_index {
+        Some(index) => index,
+        None => crate::api::orders::trade_key_index_of(&order_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("TradeKeyMissing"))?,
+    };
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
     let identity_keys = crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
     let node_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&claim.node_pubkey)?;

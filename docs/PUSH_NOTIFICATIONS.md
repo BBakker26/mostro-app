@@ -98,11 +98,24 @@ The client does not decide:
 | Relays | what they already see: kind 14 ciphertext and its `p` tag | — |
 
 The server's own invariants (its `docs/architecture.md`): the relay filter never pins
-`authors`; `/api/notify` answers `202` whether or not the pubkey is registered; no
+`authors`; `/api/notify` answers `202` whether the pubkey is registered or not; no
 authentication, sender field or idempotency key is accepted on `/api/notify`; per-IP
 and per-pubkey rate-limit responses are byte-identical; pubkeys are logged only as a
 salted hash. A client must not undermine these — in particular it must **never send an
 `Authorization`, `X-Request-Id` or sender field**.
+
+**Registration takeover is an accepted limitation, not an oversight.** Because
+`/api/register` and `/api/unregister` take nothing but a `trade_pubkey` — and trade
+pubkeys are public, every kind-14 `p` tag on the relays names one — anyone can
+overwrite a mapping with their own token or delete it. The consequence is bounded: the
+attacker receives content-free pushes ("you have an update on your trade") for a key
+they already knew was trading, and the victim stops being woken until their next
+refresh re-installs the mapping (12 h while the app runs, the OS job of T1.5
+otherwise). No message, order or identity leaks, and trading itself is unaffected: the
+push is a doorbell, the relays are the delivery. The upstream fix is an ownership
+proof on both endpoints (a signature by the trade key over a server nonce); it is
+recorded as an ask in §14. Until it lands, this document and the Settings privacy
+footnote say what a push is and is not, and never promise delivery.
 
 ### 2.2 The server, end to end
 
@@ -469,7 +482,10 @@ than the grace is unregistered and forgotten. Restart-safe, because the registra
 map is persisted. A key that turned terminal before this feature existed has no
 timestamp and gets the full grace from the first reconcile that sees it.
 
-**State.** Per pubkey, persisted: `registered_at` (server time of the last `200`),
+**State.** Per pubkey, persisted: `registered_at` (the **client's** clock when the
+`200` arrived — the response carries no server time, and the same clock is `now` in
+every rule below; a clock that reads earlier than `registered_at` is a rollback, and
+the key is due for refresh at once rather than "in 12 h from a future date"),
 `token_hash` (which token it was registered with), `mostro_pubkey` (the issuing node
 it was filed under), `unwanted_since` (when it first dropped out of the wanted set,
 `None` while wanted), `attempts` and `next_attempt_at` for backoff. Settings key `push_registrations` (one JSON map), plus `push_token` /
@@ -491,8 +507,13 @@ again) and `push_enabled`.
    whitelist, it does not route — but a registration filed under the wrong node is
    refused, or accepted, under the wrong policy, and a refusal must be recorded
    against the node that earned it. Backoff on failure: 1 min → 5 → 30 → 2 h, capped;
-   `429` honours `Retry-After`; `403` marks **that node** refused and stops
-   registering its keys until the node's policy is re-read (§9).
+   `429` honours `Retry-After`; `403` marks **that node** refused
+   (`push_node_refused:<node>` = now) and reconcile skips its keys. The refusal
+   **clears** on the first of: 24 h since it was recorded (the next reconcile retries
+   once, and a repeated `403` re-arms it for another 24 h), the user turning the
+   master toggle on, or the user selecting that node as the active one — the two
+   explicit "try again" gestures. A refusal survives a restart until one of those;
+   nothing else reads or writes the key, so there is no implicit clear.
 
 **The issuing node is on the row.** A taken order's row already carries the node in
 `order.creator_pubkey` (the 38383 author, #334). A maker's row does **not** today:
@@ -574,7 +595,10 @@ user's own evidence sends do not need a wake (the solver is not a push client).
   sees no token and keeps nothing registered. When the user grants it in system
   settings, the existing `retryInitialize()` path produces a token and reconcile runs.
 - **Unsupported platform** (desktop, web): `set_push_token` is never called; the
-  settings screen shows the unsupported state instead of the toggle.
+  settings screen shows the unsupported state instead of the toggle. Capability is a
+  **Dart fact** (the platform), read from `PushNotificationService.isSupported`
+  (made public), never inferred from "no token": a denied permission also yields no
+  token and must show the denied banner, not unsupported copy.
 
 ### 7.5 Flow 5 — Token refresh
 
@@ -614,18 +638,23 @@ pub enum PushPlatform { Android, Ios }
 /// What Settings shows (docs/PUSH_NOTIFICATIONS.md §9).
 pub struct PushStatus {
     pub enabled: bool,
-    pub supported: bool,          // a token was ever handed over on this platform
+    pub has_token: bool,          // a device token is held (Dart handed one over)
     pub registered: u32,          // pubkeys currently registered
     pub wanted: u32,
     pub last_success_at: Option<i64>,
     pub last_error: Option<String>,   // stable marker, never prose
-    pub node_refused: bool,       // a 403 from the operator for the active node
+    pub node_refused_until: Option<i64>, // a 403 for the active node, and when it clears
 }
 ```
 
+Three states, three sources, never conflated: **capability** (can this platform
+push at all) is Dart's `PushNotificationService.isSupported`; **permission** is the
+existing `notificationPermissionDeniedProvider`; **token** is `PushStatus.has_token`.
+Settings picks its branch in that order (§9.1).
+
 Settings keys (`db/mod.rs::settings_keys`): `push_enabled` (`"true"`/`"false"`,
 default true), `push_token`, `push_platform`, `push_registrations` (JSON map keyed by
-pubkey), `push_node_refused:<node>` (unix seconds of the 403).
+pubkey), `push_node_refused:<node>` (unix seconds of the 403; cleared per §7.1).
 
 Pure functions in `mostro/push.rs`, unit-tested without I/O: `wanted_pubkeys(trades,
 claims, disputes, now)`, `plan(wanted, registrations, token_hash, now) → Vec<Action>`
@@ -683,8 +712,11 @@ first row and the contract is rewritten (T1.4).
   `PushServerUnreachable` (*"Push server unreachable — retrying"*), `PushNodeRefused`
   (*"This Mostro node is not accepted by the push server"*), `PushRateLimited`.
 - The **denied banner** (exists) is unchanged.
-- **Unsupported platform** (desktop/web): the master row is replaced by an info row
-  *"Push notifications are not available on this platform"*; the event rows stay.
+- **Unsupported platform** (desktop/web, from `isSupported`, checked first): the
+  master row is replaced by an info row *"Push notifications are not available on
+  this platform"*; the event rows stay. Checked before permission and before the
+  token, so a denied permission on a phone keeps its banner and a phone that has
+  not handed a token over yet shows the toggle, not unsupported copy.
 - The **privacy footnote** (exists) is kept and extended with the one true sentence
   about transport: *"A push travels through Google's servers and says only that there
   is something to see."* No sentence about token encryption.
@@ -864,12 +896,17 @@ PR adds the tests for its own tasks; coverage target 80 % on new code.
 
 **Rust unit:**
 
-- `wanted_pubkeys`: non-terminal rows in, hard-terminal rows out after the grace and in
-  during it; claim `trade_index` in while the claim is open; node switch changes
-  nothing; `None` trade index on an old claim falls back to the order's key.
-- `plan`: never registered → register; older than 12 h → register; token hash differs
-  → register; not wanted and grace over → unregister then forget; backoff sequence;
-  `403` marks the node refused and suppresses registration for it; `429` uses
+- `wanted_pubkeys`: the base set only — non-terminal rows in, hard-terminal rows
+  out; claim `trade_index` in while the claim is open; node switch changes nothing;
+  `None` trade index on an old claim falls back to the order's key. It has no
+  registration state, so no grace assertion lives here.
+- `plan`: never registered → register; older than 12 h → register; `registered_at`
+  in the future (clock rollback) → register now; token hash differs → register; not
+  wanted → `unwanted_since` set, kept while inside the grace, unregister then forget
+  once past it, timestamp cleared when the key returns to `wanted`; a legacy
+  registration with no `unwanted_since` gets the full grace; backoff sequence; `403`
+  refuses that node's keys, the refusal clears after 24 h, on `set_push_enabled(true)`
+  and on selecting the node, and a repeated `403` re-arms it; `429` uses
   `Retry-After`.
 - `reconcile_push` with a fake `PushServer`: single-flight under concurrent triggers;
   disabled → unregisters everything; server error → no state change beyond backoff;
@@ -965,6 +1002,10 @@ matrix.
     stock builds but restrictive OEMs may stretch it; iOS grants `BGAppRefreshTask`
     on its own judgement of usage. Measure the real cadence on both during T1.5 and
     record it here; the Settings copy must promise no more than what was measured.
+12. **Ownership proof on registration.** `/api/register` and `/api/unregister` accept
+    any caller who knows a public trade pubkey (§2.1). Propose upstream a signature by
+    the trade key over a server-issued nonce on both endpoints; until then the
+    12 h refresh and the T1.5 job are the mitigation, and the limitation is stated.
 
 ---
 

@@ -430,7 +430,6 @@ fn note_failure(
 async fn current_wanted(db: &impl Storage) -> Wanted {
     let trades = db.list_trades().await.unwrap_or_default();
     let claims = db.list_bond_claims().await.unwrap_or_default();
-    let disputed = crate::api::disputes::live_dispute_order_ids().await;
     let indexes: HashSet<u32> = trades
         .iter()
         .map(|t| t.trade_key_index)
@@ -445,7 +444,6 @@ async fn current_wanted(db: &impl Storage) -> Wanted {
     rules::wanted_pubkeys(
         &trades,
         &claims,
-        &disputed,
         &crate::config::active_mostro_pubkey(),
         |index| keys.get(&index).cloned(),
     )
@@ -653,13 +651,32 @@ pub async fn get_push_status() -> Result<PushStatus> {
 }
 
 /// Selecting a node is the user's "try again" for that node's refusal.
+///
+/// Under the reconcile lock, and touching the refusals only: a reconcile in
+/// flight owns the registration map, and a stale copy written over its
+/// result would drop a registration the server just accepted.
 pub(crate) async fn clear_node_refusal(node: &str) {
     let Some(db) = crate::db::app_db::db() else {
         return;
     };
-    let mut state = load_state(db).await;
-    if state.refusals.remove(&node.to_lowercase()).is_some() {
-        save_registrations(db, &state).await;
+    {
+        let _guard = RECONCILE_LOCK.lock().await;
+        let mut refusals: Refusals = db
+            .get_setting(settings_keys::PUSH_NODE_REFUSALS)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        if refusals.remove(&node.to_lowercase()).is_some() {
+            let json = serde_json::to_string(&refusals).unwrap_or_default();
+            if let Err(e) = db
+                .set_setting(settings_keys::PUSH_NODE_REFUSALS, &json)
+                .await
+            {
+                log::warn!("[push] refusal not cleared: {e}");
+            }
+        }
     }
     request_reconcile();
 }

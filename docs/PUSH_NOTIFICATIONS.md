@@ -495,10 +495,12 @@ against an imagined typed payload and must be retired, not built on.
    review rule and a test enforce it.
 3. **Register what the DM filter covers, no more — and make the filter cover what is
    registered.** The set of registered pubkeys is derived from the same facts the
-   kind-14 filter is built from: the trade keys of non-terminal trade rows, the
-   `trade_index` of non-terminal payout claims, and the keys of trades with a live
-   dispute. A key drops off when its row turns hard-terminal (plus a grace period,
-   §7.1). Never "all keys `1..=trade_key_index`": the server keeps one token per
+   kind-14 filter is built from: the trade keys of non-terminal trade rows and the
+   `trade_index` of non-terminal payout claims. A live dispute adds nothing: its row
+   reads `Dispute`, which is not terminal, and an admin outcome ends both; the
+   in-memory dispute record is not consulted, since one never marked resolved would
+   keep a finished trade's key registered for good. A key drops off when its row turns
+   hard-terminal (plus a grace period, §7.1). Never "all keys `1..=trade_key_index`": the server keeps one token per
    pubkey and every registration costs a request. The converse holds too: a wake for a
    key whose daemon the filter no longer listens to is a wake the app cannot act on,
    so the filter's `authors` must include the **issuing node of every registered

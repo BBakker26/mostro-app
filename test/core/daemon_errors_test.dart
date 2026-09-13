@@ -29,6 +29,14 @@ void main() {
       localizedDaemonError(l10n, 'ClaimNotClaimable', fallback: 'x'),
       l10n.bondClaimErrorNotClaimable,
     );
+    expect(
+      localizedDaemonError(l10n, 'ClaimNotFound', fallback: 'x'),
+      l10n.bondClaimErrorNotClaimable,
+    );
+    expect(
+      localizedDaemonError(l10n, 'TradeKeyMissing', fallback: 'x'),
+      l10n.bondClaimErrorNoKey,
+    );
   });
 
   test('maps the maker bond cancel marker', () {

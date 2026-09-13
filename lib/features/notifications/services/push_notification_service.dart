@@ -2,6 +2,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mostro/features/notifications/services/token_handoff.dart';
 import 'package:mostro/src/rust/api/push.dart' as push_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -39,6 +40,13 @@ class PushNotificationService {
 
   /// Kept from the first [initialize] so [retryInitialize] can pass it on.
   ProviderContainer? _container;
+
+  /// The bridge hand-over, with its retry while storage is not ready.
+  final TokenHandoff _handoff = TokenHandoff(
+    setToken:
+        (token, platform) =>
+            push_api.setPushToken(token: token, platform: platform),
+  );
 
   /// Whether this platform can receive a push at all: a capability, decided
   /// here and read by Settings as its first branch (§9.1). Not "a token was
@@ -84,12 +92,13 @@ class PushNotificationService {
     // 2. Register the display-only background handler.
     FirebaseMessaging.onBackgroundMessage(_backgroundMessageHandler);
 
-    // 3. Hand the token to Rust — now, and on every refresh. Rust decides
-    //    what to register it for.
-    await _handOverToken();
+    // 3. Hand the token to Rust — on every refresh, and now. The refresh
+    //    listener is attached first: a rotation that lands while the first
+    //    hand-over is in flight must not be missed.
     _fcm.onTokenRefresh.listen((token) {
       _handOver(token);
     });
+    await _handOverToken();
 
     // 4. Foreground messages carry nothing to act on (§2.3): the foreground
     //    subscription already delivers the event and the in-app card.
@@ -120,20 +129,18 @@ class PushNotificationService {
   Future<void> _handOver(String token) async {
     final platform = platformFor(kIsWeb, defaultTargetPlatform);
     if (platform == null) return;
-    try {
-      await push_api.setPushToken(token: token, platform: platform);
-    } catch (e) {
-      // Rust reports storage problems; the token is retried on the next
-      // refresh or launch, and trading does not depend on it.
-      debugPrint('[push] token not handed to Rust: $e');
-    }
+    await _handoff.offer(token, platform);
   }
 
   /// Runs [initialize] again after the user granted a permission they had
   /// denied: the first run stopped before acquiring a token or attaching
-  /// listeners. A no-op once a run has got past the permission step.
+  /// listeners. Once a run has got past the permission step, only a token
+  /// Rust could not take yet is worth retrying.
   Future<void> retryInitialize() async {
-    if (_initStarted) return;
+    if (_initStarted) {
+      await _handoff.retryPending();
+      return;
+    }
     await initialize(container: _container);
   }
 

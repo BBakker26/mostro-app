@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Locale;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -82,13 +83,18 @@ void main() {
     });
 
     test(
-      'falls back to English for a language the app does not ship',
-      () async {
-        SharedPreferences.setMockInitialValues({kLanguagePrefKey: 'pt'});
+      'an unset or unshipped language follows the device, like Settings',
+      () {
+        const device = [Locale('pt', 'BR'), Locale('fr')];
 
-        await handleBackgroundWake({'type': kChatWakeType}, show: record);
-
-        expect(shown.single.$2, 'You have a new message');
+        expect(chatWakeLanguage(null, deviceLocales: device), 'fr');
+        expect(chatWakeLanguage('pt', deviceLocales: device), 'fr');
+        expect(chatWakeLanguage('de-AT', deviceLocales: device), 'de');
+        expect(
+          chatWakeLanguage(null, deviceLocales: const [Locale('pt')]),
+          'en',
+          reason: 'English when the device offers nothing the app ships',
+        );
       },
     );
 

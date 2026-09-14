@@ -21,7 +21,9 @@ final FlutterLocalNotificationsPlugin _plugin =
 const kChatWakeNotificationId = 38400;
 const _kChatWakeTag = 'mostro-chat';
 
-Future<void> _initialize() => _plugin.initialize(
+/// [onTap] runs when the user taps a notice this plugin rendered while the
+/// app is alive; the background isolate passes none.
+Future<void> _initialize({VoidCallback? onTap}) => _plugin.initialize(
   const InitializationSettings(
     android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     // Permission is asked by the push service, not here.
@@ -31,6 +33,7 @@ Future<void> _initialize() => _plugin.initialize(
       requestSoundPermission: false,
     ),
   ),
+  onDidReceiveNotificationResponse: onTap == null ? null : (_) => onTap(),
 );
 
 /// Show the content-free "new message" notice (docs/PUSH_NOTIFICATIONS.md
@@ -60,10 +63,16 @@ Future<void> showChatWakeNotification(String title, String body) async {
 /// Create the channel with the importance the app wants, once per launch.
 /// Idempotent on the platform side; failures are logged, since a missing
 /// channel degrades the notification's importance but never its delivery.
-Future<void> ensurePushNotificationChannel() async {
+///
+/// The channel does not need the plugin initialised, so it is created first
+/// and on its own: a failed `initialize` (an icon the plugin rejects, say)
+/// must not leave the server's push on a default-importance channel.
+///
+/// [onTap] routes a tap on the chat-wake notice: FCM's open callbacks never
+/// see a notification the app rendered itself.
+Future<void> ensurePushNotificationChannel({VoidCallback? onTap}) async {
   if (kIsWeb) return;
   try {
-    await _initialize();
     await _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -77,5 +86,23 @@ Future<void> ensurePushNotificationChannel() async {
         );
   } catch (e) {
     debugPrint('[push] notification channel not created: $e');
+  }
+  try {
+    await _initialize(onTap: onTap);
+  } catch (e) {
+    debugPrint('[push] local notifications not initialised: $e');
+  }
+}
+
+/// Whether a tap on the chat-wake notice launched this process — the cold
+/// counterpart of [ensurePushNotificationChannel]'s `onTap`.
+Future<bool> launchedFromLocalNotification() async {
+  if (kIsWeb) return false;
+  try {
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    return details?.didNotificationLaunchApp ?? false;
+  } catch (e) {
+    debugPrint('[push] notification launch details unavailable: $e');
+    return false;
   }
 }

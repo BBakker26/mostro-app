@@ -13,7 +13,7 @@
 /// off (§7.2, T3.2).
 library;
 
-import 'dart:ui' show Locale;
+import 'dart:ui' show Locale, PlatformDispatcher;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -59,32 +59,42 @@ Future<void> handleBackgroundWake(
   SharedPreferences? prefs;
   try {
     prefs = await SharedPreferences.getInstance();
+    // The background isolate can outlive a delivery, and the instance caches
+    // what it read then: a toggle or language changed in the app since would
+    // otherwise go unseen.
+    await prefs.reload();
     await prefs.setBool(kPushWakePendingKey, true);
   } catch (e) {
     // Diagnostic only: the resume resyncs whether or not the flag is set.
     debugPrint('[push] wake flag not recorded: $e');
+    prefs = null;
   }
 
   if (type != kChatWakeType) return;
-  if (prefs?.getBool(kNewMessagesPrefKey) == false) return;
+  // Unreadable preferences cannot say the user allows it: stay silent.
+  if (prefs == null || prefs.getBool(kNewMessagesPrefKey) == false) return;
   final l10n = lookupAppLocalizations(
-    Locale(chatWakeLanguage(prefs?.getString(kLanguagePrefKey))),
+    Locale(chatWakeLanguage(prefs.getString(kLanguagePrefKey))),
   );
   try {
-    await show('Mostro', l10n.pushNewMessageBody);
+    await show(l10n.appName, l10n.pushNewMessageBody);
   } catch (e) {
     debugPrint('[push] new-message notice not shown: $e');
   }
 }
 
-/// The stored language as a supported code: the region stripped, English
-/// when empty or unsupported — the same rule the settings provider applies.
-String chatWakeLanguage(String? stored) {
+/// The stored language as a supported code: the region stripped, and when
+/// empty or unsupported the first supported device locale, then English —
+/// the same rule the settings provider applies.
+String chatWakeLanguage(String? stored, {Iterable<Locale>? deviceLocales}) {
+  final supported =
+      AppLocalizations.supportedLocales.map((l) => l.languageCode).toSet();
   final code = (stored ?? '').split(RegExp(r'[-_]')).first.toLowerCase();
-  final supported = AppLocalizations.supportedLocales.map(
-    (l) => l.languageCode,
-  );
-  return supported.contains(code) ? code : 'en';
+  if (supported.contains(code)) return code;
+  for (final locale in deviceLocales ?? PlatformDispatcher.instance.locales) {
+    if (supported.contains(locale.languageCode)) return locale.languageCode;
+  }
+  return 'en';
 }
 
 /// Whether a wake arrived since the last resume, clearing the flag.

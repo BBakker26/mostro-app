@@ -20,6 +20,7 @@ import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_input_field.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
+import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
 import 'package:mostro/l10n/app_localizations.dart';
@@ -130,6 +131,17 @@ class _AddLightningInvoiceScreenState
       (_, next) => trackInvoiceDeadline(next.valueOrNull),
       fireImmediately: true,
     );
+    _prefillDefaultLightningAddress();
+  }
+
+  /// Starts the field with the Lightning address saved in Settings. Only a
+  /// suggestion: the buyer still presses send to agree to be paid there.
+  void _prefillDefaultLightningAddress() {
+    final address = normalizeInvoiceInput(
+      ref.read(settingsProvider).defaultLightningAddress ?? '',
+    );
+    if (address.isEmpty) return;
+    _setInput(address);
   }
 
   @override

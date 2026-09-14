@@ -328,6 +328,11 @@ Emits whenever the order list changes (new orders, status updates,
 expirations). Used to keep the UI order list in sync.
 
 ### on_trade_updated() → Stream<TradeUpdate>
+`occurred_at` is Unix seconds from the source daemon event, including
+recovery, republish, and peer-reputation refresh emissions. Locally initiated
+changes use the local clock. Notification consumers use this timestamp for
+presentation and the identity-import history cutoff; replay must never reset it.
+
 Push channel for daemon-driven trade lifecycle changes. Every status a
 Kind 14 dispatch arm syncs is emitted here after the in-memory book
 update and the DB persistence **attempt** — a DB write failure (or a
@@ -349,6 +354,8 @@ them before the dispatch arms run. Screens filter by `order_id`.
 TradeUpdate {
   order_id: String
   status: OrderStatus   # the status just persisted; Pending on maker resync
+  reason: TradeUpdateReason?  # optional cause for local/cancellation transitions
+  occurred_at: i64      # Unix seconds: daemon event time, or local action time
 }
 ```
 

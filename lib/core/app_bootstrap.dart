@@ -304,6 +304,9 @@ void _restoreNwcConnection(String nwcUri, ProviderContainer container) {
 
 /// The route on screen, or null before the router has one.
 String? _currentLocation() {
+  if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+    return null;
+  }
   try {
     return appRouter.routerDelegate.currentConfiguration.uri.toString();
   } catch (_) {

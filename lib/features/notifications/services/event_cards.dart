@@ -88,34 +88,43 @@ class EventCards {
 
   Future<void> onChatMessage(ChatMessage message) async {
     if (message.isMine || message.messageType == MessageType.system) return;
-    if (!isEnabled(NotificationEvent.newMessages)) return;
+    final notifier = notifications();
+    if (notifier.hasProcessedChatMessage(message.id)) return;
     final fromSolver = message.messageType == MessageType.admin;
-    if (!fromSolver &&
-        currentLocation() == AppRoute.chatRoomPath(message.tradeId)) {
-      return;
-    }
+    final cardId = NotificationModel.chatCardId(
+      message.tradeId,
+      fromSolver: fromSolver,
+    );
+    final readRevision = notifier.readRevision(cardId);
     final at = _secondsToDate(message.createdAt);
-    if (await _predatesIdentity(at)) return;
-    await notifications().addChatMessage(
+    final predatesIdentity = await _predatesIdentity(at);
+    await notifier.addChatMessage(
       messageId: message.id,
-      cardId: NotificationModel.chatCardId(
-        message.tradeId,
-        fromSolver: fromSolver,
-      ),
-      fold:
-          (existing) => NotificationModel.chatMessages(
-            tradeId: message.tradeId,
-            fromSolver: fromSolver,
-            // A card the user already read starts counting again.
-            count:
-                existing == null || existing.isRead
-                    ? 1
-                    : existing.chatUnreadCount + 1,
-            at:
-                existing != null && existing.timestamp.isAfter(at)
-                    ? existing.timestamp
-                    : at,
-          ),
+      cardId: cardId,
+      fold: (existing) {
+        // Evaluate at commit time, after identity lookup and queued writes.
+        // Even if the room has since closed, a read during those awaits wins.
+        if (message.isRead ||
+            predatesIdentity ||
+            !isEnabled(NotificationEvent.newMessages) ||
+            notifier.readRevision(cardId) != readRevision ||
+            (!fromSolver &&
+                currentLocation() == AppRoute.chatRoomPath(message.tradeId))) {
+          return null;
+        }
+        return NotificationModel.chatMessages(
+          tradeId: message.tradeId,
+          fromSolver: fromSolver,
+          count:
+              existing == null || existing.isRead
+                  ? 1
+                  : existing.chatUnreadCount + 1,
+          at:
+              existing != null && existing.timestamp.isAfter(at)
+                  ? existing.timestamp
+                  : at,
+        );
+      },
     );
   }
 

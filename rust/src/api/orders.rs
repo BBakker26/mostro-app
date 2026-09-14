@@ -1790,7 +1790,7 @@ async fn adopt_range_remainder(
             crate::api::logging::short_id(order_id),
         ),
     );
-    emit_trade_update(order_id, OrderStatus::Pending);
+    emit_trade_update_at(order_id, OrderStatus::Pending, None, event_ts);
     true
 }
 
@@ -3346,7 +3346,7 @@ async fn dispatch_mostro_message(
                 // snapshot (issue #305). Persist it so the add-invoice screen
                 // and trade detail can show who took the order.
                 if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
-                    persist_peer_reputation(&order_id, rating, reviews, days).await;
+                    persist_peer_reputation(&order_id, rating, reviews, days, event_ts).await;
                 } else {
                     log::debug!(
                         "[orders] daemon-msg AddInvoice for order={order_id}: no Order or Peer payload, ignoring"
@@ -3444,7 +3444,7 @@ async fn dispatch_mostro_message(
                     // (issue #305). Persist it for the pay-invoice screen and
                     // trade detail rather than discarding the whole message.
                     if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
-                        persist_peer_reputation(&order_id, rating, reviews, days).await;
+                        persist_peer_reputation(&order_id, rating, reviews, days, event_ts).await;
                     } else {
                         log::warn!(
                             "[orders] daemon-msg PayInvoice payload is not a PaymentRequest"
@@ -4858,7 +4858,7 @@ async fn resync_republished_maker_order(
             );
         }
     }
-    emit_trade_update(order_id, OrderStatus::Pending);
+    emit_trade_update_at(order_id, OrderStatus::Pending, None, event_ts);
     true
 }
 
@@ -7214,7 +7214,13 @@ fn trade_updates_tx() -> &'static broadcast::Sender<crate::api::types::TradeUpda
 /// wake `tradeInfoStreamProvider`; it never changes state. When the book has
 /// no row for the order yet, the persisted snapshot is still read the next
 /// time the trade loads, so a missing emission only delays the live update.
-async fn persist_peer_reputation(order_id: &str, rating: f64, reviews: u32, days: u32) {
+async fn persist_peer_reputation(
+    order_id: &str,
+    rating: f64,
+    reviews: u32,
+    days: u32,
+    occurred_at: i64,
+) {
     crate::api::logging::blog_info(
         "orders",
         format!(
@@ -7231,7 +7237,7 @@ async fn persist_peer_reputation(order_id: &str, rating: f64, reviews: u32, days
         }
     }
     if let Some(info) = order_book().get_order(order_id).await {
-        emit_trade_update(order_id, info.status);
+        emit_trade_update_at(order_id, info.status, None, occurred_at);
     }
 }
 
@@ -7843,6 +7849,51 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn replayed_peer_reputation_preserves_its_daemon_timestamp() {
+        use mostro_core::message::{Action, Payload, Peer};
+        let db = bond_test_db().await;
+        let id = uuid::Uuid::new_v4();
+        let row = seam_trade_row(&id.to_string(), OrderStatus::Active);
+        db.save_trade(&row).await.unwrap();
+        order_book().upsert_order(row.order.clone()).await;
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_mostro_message(
+            daemon_message(
+                id,
+                Action::AddInvoice,
+                Some(Payload::Peer(Peer {
+                    pubkey: String::new(),
+                    reputation: Some(mostro_core::user::UserInfo {
+                        rating: 4.0,
+                        reviews: 4,
+                        operating_days: 64,
+                    }),
+                })),
+                1000,
+            ),
+            "review-old-peer",
+            "ff00ff99",
+            row.trade_key_index,
+        )
+        .await;
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(update) = rx.recv().await {
+                    if update.order_id == id.to_string() {
+                        break update;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("peer update");
+        assert_eq!(
+            event.occurred_at, 1000,
+            "replayed reputation must not appear new"
+        );
+    }
+
     use super::*;
     use crate::api::types::TradeRole;
     use crate::mostro::pending::register_dispute_request;

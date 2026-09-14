@@ -150,16 +150,13 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   Future<void> _markRead() async {
     final notifications = ref.read(notificationsProvider.notifier);
+    // Record read intent before either storage call yields. The notifier can
+    // mark the persisted card even while its initial load is still pending.
+    final cardRead = notifications.markAsRead(
+      NotificationModel.chatCardId(widget.orderId, fromSolver: false),
+    );
     await _markReadWith(ref.read(chatRoomsNotifierProvider.notifier));
-    // The Notifications card for this chat is what the user is reading now.
-    // No card is added while the room is open, so marking it here is enough.
-    // After the await on purpose: this starts in initState, where a provider
-    // must not change.
-    if (notifications.mounted) {
-      await notifications.markAsRead(
-        NotificationModel.chatCardId(widget.orderId, fromSolver: false),
-      );
-    }
+    await cardRead;
   }
 
   /// [rooms] is passed in rather than read from `ref` so [_flushMarkRead]

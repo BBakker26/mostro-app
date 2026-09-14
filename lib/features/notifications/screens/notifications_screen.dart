@@ -54,8 +54,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 (context) => [
                   PopupMenuItem(
                     value: _MenuAction.markAllRead,
-                    child:
-                        Text(AppLocalizations.of(context).markAllAsReadMenuItem),
+                    child: Text(
+                      AppLocalizations.of(context).markAllAsReadMenuItem,
+                    ),
                   ),
                   PopupMenuItem(
                     value: _MenuAction.clearAll,
@@ -110,7 +111,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 
     final disputeGroups =
         sortedGroups
-            .where((g) => g.any((n) => n.type == NotificationType.dispute))
+            .where((g) => g.any((n) => n.isDisputeNotification))
             .toList();
     final systemCount = systemItems.length + (backupActive ? 1 : 0);
 

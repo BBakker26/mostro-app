@@ -23,7 +23,7 @@
 /// Streams: `on_new_message(trade_id)`, `on_unread_count_changed()`,
 /// `on_attachment_progress(message_id)`.
 use anyhow::{anyhow, bail, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{broadcast, RwLock};
 
@@ -228,6 +228,42 @@ impl MessageStore {
         self.ensure_hydrated(trade_id).await;
         let store = self.messages.read().await;
         store.get(trade_id).cloned().unwrap_or_default()
+    }
+
+    /// Reconcile notification delivery from storage, independently of relay
+    /// dedup. Memory wins, including messages read since the DB query began.
+    async fn notification_backlog(&self) -> Result<VecDeque<ChatMessage>> {
+        let persisted = match crate::db::app_db::db() {
+            Some(db) => db.list_unread_messages().await?,
+            None => Vec::new(),
+        };
+        let mut by_id: HashMap<String, ChatMessage> =
+            persisted.into_iter().map(|m| (m.id.clone(), m)).collect();
+        for msg in self.messages.read().await.values().flatten() {
+            if notification_candidate(msg) {
+                by_id.insert(msg.id.clone(), msg.clone());
+            } else {
+                by_id.remove(&msg.id);
+            }
+        }
+        let mut unread: Vec<_> = by_id.into_values().filter(notification_candidate).collect();
+        unread.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        Ok(unread.into())
+    }
+
+    /// A queued clone may have been read while Dart processed an earlier
+    /// event. Use the cache's fresh read flag before delivering it.
+    async fn notification_candidate_now(&self, mut msg: ChatMessage) -> Option<ChatMessage> {
+        if let Some(current) = self
+            .messages
+            .read()
+            .await
+            .get(&msg.trade_id)
+            .and_then(|messages| messages.iter().find(|m| m.id == msg.id))
+        {
+            msg = current.clone();
+        }
+        notification_candidate(&msg).then_some(msg)
     }
 
     async fn mark_as_read(&self, trade_id: &str) {
@@ -723,13 +759,14 @@ pub async fn on_new_message(trade_id: String) -> Result<MessageStream> {
     Ok(MessageStream { rx, trade_id })
 }
 
-/// Stream that emits every new message, of every trade — sent and received,
-/// peer and admin alike, since both go through the same store. The
-/// Notifications screen's chat cards read it (issue #474); per-screen
-/// consumers want [`on_new_message`].
+/// Incoming unread messages for notification cards, with at-least-once
+/// delivery. Replays durable unread history on startup, channel lag and
+/// every minute (including after resume), so a failed Dart persistence write
+/// or a crash between the Rust and Dart commits is retried without a relay.
+/// Consumers must deduplicate by message id, including deliberately suppressed
+/// messages. Per-screen consumers want [`on_new_message`] instead.
 pub async fn on_any_new_message() -> Result<AnyMessageStream> {
-    let rx = message_store().new_message_tx.subscribe();
-    Ok(AnyMessageStream { rx })
+    Ok(AnyMessageStream::new(message_store()))
 }
 
 /// Stream that emits the updated global unread count after any read/write.
@@ -764,20 +801,69 @@ impl MessageStream {
     }
 }
 
+fn notification_candidate(msg: &ChatMessage) -> bool {
+    !msg.is_mine && !msg.is_read && msg.message_type != MessageType::System
+}
+
 pub struct AnyMessageStream {
     rx: broadcast::Receiver<ChatMessage>,
+    pending: VecDeque<ChatMessage>,
+    replay_at: crate::rt::time::Instant,
 }
 
 impl AnyMessageStream {
+    fn new(store: &MessageStore) -> Self {
+        Self {
+            rx: store.new_message_tx.subscribe(),
+            pending: VecDeque::new(),
+            replay_at: crate::rt::time::Instant::now(),
+        }
+    }
+
     pub async fn next(&mut self) -> Option<ChatMessage> {
+        self.next_from(message_store()).await
+    }
+
+    async fn next_from(&mut self, store: &MessageStore) -> Option<ChatMessage> {
+        use crate::rt::time::{timeout, Duration, Instant};
         loop {
-            match self.rx.recv().await {
-                Ok(msg) => return Some(msg),
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    log::warn!("[messages] any-message stream lagged, dropped {n} messages");
+            if let Some(msg) = self.pending.pop_front() {
+                if let Some(msg) = store.notification_candidate_now(msg).await {
+                    return Some(msg);
+                }
+                continue;
+            }
+            if Instant::now() >= self.replay_at {
+                match store.notification_backlog().await {
+                    Ok(backlog) => self.pending = backlog,
+                    Err(e) => {
+                        log::warn!("[messages] notification recovery failed, will retry: {e}")
+                    }
+                }
+                self.replay_at = Instant::now() + Duration::from_secs(60);
+                if !self.pending.is_empty() {
                     continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+            match timeout(
+                self.replay_at.saturating_duration_since(Instant::now()),
+                self.rx.recv(),
+            )
+            .await
+            {
+                Ok(Ok(msg)) => {
+                    if let Some(msg) = store.notification_candidate_now(msg).await {
+                        return Some(msg);
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                    log::warn!(
+                        "[messages] notification stream lagged by {n}; recovering stored messages"
+                    );
+                    self.replay_at = Instant::now();
+                }
+                Ok(Err(broadcast::error::RecvError::Closed)) => return None,
+                Err(_) => {} // Retry durable unread messages, even without new traffic.
             }
         }
     }
@@ -1587,6 +1673,91 @@ async fn rebuild_session(
 
 #[cfg(test)]
 mod tests {
+    fn notification_test_message(trade_id: &str, index: i64) -> ChatMessage {
+        ChatMessage {
+            id: format!("{trade_id}-{index}"),
+            trade_id: trade_id.into(),
+            sender_pubkey: "peer".into(),
+            content: "hello".into(),
+            message_type: MessageType::Peer,
+            is_mine: false,
+            is_read: false,
+            has_attachment: false,
+            attachment: None,
+            created_at: index,
+        }
+    }
+
+    #[tokio::test]
+    async fn notification_stream_recovers_every_message_after_lag() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let mut stream = AnyMessageStream::new(&store);
+        // Exhaust startup reconciliation first, so this tests actual lag recovery.
+        stream.replay_at = crate::rt::time::Instant::now() + std::time::Duration::from_secs(60);
+        for i in 0..70 {
+            store
+                .add_message(notification_test_message(&trade_id, i))
+                .await;
+        }
+        let mut received = Vec::new();
+        while received.len() < 70 {
+            let msg =
+                tokio::time::timeout(std::time::Duration::from_secs(5), stream.next_from(&store))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            if msg.trade_id == trade_id {
+                received.push(msg.created_at);
+            }
+        }
+        assert_eq!(received, (0..70).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn notification_stream_retries_without_another_relay_message() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        store
+            .add_message(notification_test_message(&trade_id, 1))
+            .await;
+        // No receiver existed at send time. Startup still recovers the message.
+        let mut stream = AnyMessageStream::new(&store);
+        for _ in 0..2 {
+            loop {
+                let msg = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    stream.next_from(&store),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                if msg.trade_id == trade_id {
+                    break;
+                }
+            }
+            // Simulate the recovery deadline after a failed Dart write.
+            stream.pending.clear();
+            stream.replay_at = crate::rt::time::Instant::now();
+        }
+    }
+
+    #[tokio::test]
+    async fn notification_stream_drops_queued_messages_read_since_snapshot() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let msg = notification_test_message(&trade_id, 1);
+        store.add_message(msg.clone()).await;
+        store.mark_as_read(&trade_id).await;
+        assert!(store.notification_candidate_now(msg).await.is_none());
+        assert!(!store
+            .notification_backlog()
+            .await
+            .unwrap()
+            .iter()
+            .any(|m| m.trade_id == trade_id));
+    }
+
     use super::*;
 
     #[test]
@@ -1613,7 +1784,7 @@ mod tests {
         let mut stream = on_any_new_message().await.unwrap();
         let first = uuid::Uuid::new_v4().to_string();
         let second = uuid::Uuid::new_v4().to_string();
-        for trade_id in [&first, &second] {
+        for (index, trade_id) in [&first, &second].into_iter().enumerate() {
             message_store()
                 .add_message(ChatMessage {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -1625,7 +1796,7 @@ mod tests {
                     is_read: false,
                     has_attachment: false,
                     attachment: None,
-                    created_at: 1,
+                    created_at: index as i64 + 1,
                 })
                 .await;
         }

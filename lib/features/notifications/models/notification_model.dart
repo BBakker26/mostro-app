@@ -16,6 +16,7 @@ enum NotificationType {
   invoiceRequest,
   orderTaken,
   bondSlashed,
+
   /// A slashed bond's share is claimable, or was paid (docs/ANTI_ABUSE_BOND.md §8.5).
   bondClaim,
 }
@@ -91,8 +92,9 @@ class NotificationModel {
       isRead: json['isRead'] as bool? ?? false,
       orderId: json['orderId'] as String?,
       disputeId: json['disputeId'] as String?,
-      detail: (json['detail'] as Map<String, dynamic>?)
-          ?.map((k, v) => MapEntry(k, v as String)),
+      detail: (json['detail'] as Map<String, dynamic>?)?.map(
+        (k, v) => MapEntry(k, v as String),
+      ),
     );
   }
 
@@ -273,6 +275,19 @@ class NotificationModel {
   /// trade rather than the peer chat.
   bool get isSolverChatCard => _isChatCard && _chatFromSolver;
 
+  /// Classification for the Disputes filter, including persisted status cards
+  /// whose type stays tradeUpdate so tapping still opens the trade detail.
+  bool get isDisputeNotification =>
+      type == NotificationType.dispute ||
+      isSolverChatCard ||
+      (_isTradeStatus &&
+          const {
+            'dispute',
+            'canceledByAdmin',
+            'settledByAdmin',
+            'completedByAdmin',
+          }.contains(detail?[_tradeStatusKey]));
+
   factory NotificationModel.backupReminder() {
     return NotificationModel(
       id: const Uuid().v4(),
@@ -420,9 +435,10 @@ class NotificationModel {
     return {
       l10n.bondSlashedDetailOrder: orderId ?? '',
       l10n.bondSlashedDetailAmount: '$amount sats',
-      l10n.bondSlashedDetailCause: d[_bondCauseKey] == _bondCauseDispute
-          ? l10n.bondSlashedCauseDispute
-          : l10n.bondSlashedCauseTimeout,
+      l10n.bondSlashedDetailCause:
+          d[_bondCauseKey] == _bondCauseDispute
+              ? l10n.bondSlashedCauseDispute
+              : l10n.bondSlashedCauseTimeout,
       if (fiatCode != null && fiatAmount != null)
         l10n.bondSlashedDetailFiat: '$fiatAmount $fiatCode',
       if (paymentMethod != null && paymentMethod.isNotEmpty)

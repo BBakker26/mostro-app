@@ -161,13 +161,14 @@ class SembastNotificationsStore {
   ///
   /// In one transaction: returns null when [messageId] was already counted;
   /// otherwise marks it, hands [fold] the card as stored (null when there is
-  /// none, or the user deleted it) and writes what [fold] returns. The ledger
-  /// is the same one [saveIfUnprocessed] uses, under a `msg:` prefix, so a
+  /// none, or the user deleted it) and writes what [fold] returns. A null
+  /// result consumes a deliberately suppressed event without creating a card.
+  /// The ledger is the same one [saveIfUnprocessed] uses, under a `msg:` prefix, so a
   /// message never counts twice even after its card was cleared.
   Future<NotificationModel?> saveChatMessage({
     required String messageId,
     required String cardId,
-    required NotificationModel Function(NotificationModel? existing) fold,
+    required NotificationModel? Function(NotificationModel? existing) fold,
   }) async {
     final db = await _open();
     return db.transaction((txn) async {
@@ -180,8 +181,29 @@ class SembastNotificationsStore {
               ? null
               : NotificationModel.fromJson(Map<String, dynamic>.from(raw));
       final card = fold(existing);
-      await _upsert(txn, card);
+      if (card != null) await _upsert(txn, card);
       return card;
+    });
+  }
+
+  /// Read the latest stored card in the transaction, including when initial
+  /// hydration has not populated the notifier yet. Never save a stale UI copy.
+  Future<List<NotificationModel>> markRead({String? id}) async {
+    final db = await _open();
+    return db.transaction((txn) async {
+      final records = await _store.find(
+        txn,
+        finder: id == null ? null : Finder(filter: Filter.byKey(id)),
+      );
+      final updated = <NotificationModel>[];
+      for (final record in records) {
+        final card = NotificationModel.fromJson(
+          Map<String, dynamic>.from(record.value),
+        ).copyWith(isRead: true);
+        await _upsert(txn, card);
+        updated.add(card);
+      }
+      return updated;
     });
   }
 
@@ -241,6 +263,34 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
 
   final SembastNotificationsStore? store;
 
+  // Commit and publish mutations in invocation order. Loads remain separate
+  // and merge with committed state, so a slow hydration never blocks a read.
+  Future<void> _mutationTail = Future<void>.value();
+  final Set<String> _processedMessages = {};
+  final Map<String, int> _readRevisions = {};
+  int _readClock = 0;
+  int _allReadRevision = 0;
+
+  /// Capture before processing an event; a read during any await invalidates it.
+  int readRevision(String cardId) {
+    final revision = _readRevisions[cardId] ?? 0;
+    return revision > _allReadRevision ? revision : _allReadRevision;
+  }
+
+  /// Avoid secure-storage reads and transactions for this session's replays.
+  bool hasProcessedChatMessage(String messageId) =>
+      _processedMessages.contains(messageId);
+
+  Future<void> _mutate(Future<void> Function() operation) {
+    final next = _mutationTail.then((_) async {
+      if (mounted) await operation();
+    });
+    _mutationTail = next.catchError((Object e, StackTrace st) {
+      debugPrint('NotificationsNotifier: mutation failed: $e\n$st');
+    });
+    return next;
+  }
+
   /// Ids deleted while a load was reading the store. The snapshot the load
   /// returns still holds them, so the merge must not bring them back.
   final Set<String> _deletedDuringLoad = {};
@@ -267,7 +317,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
     _loadsInFlight++;
     try {
       final loaded = await store!.loadAll();
-      if (_wipedDuringLoad) return;
+      if (!mounted || _wipedDuringLoad) return;
       final byId = {
         for (final n in loaded)
           if (!_deletedDuringLoad.contains(n.id)) n.id: n,
@@ -292,7 +342,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
   /// Adds a locally-generated notification (unique id). Idempotent by id: a
   /// same-id entry is left untouched rather than replaced, so read state is
   /// never reset. For externally-sourced, replayable events use [addIfNew].
-  Future<void> add(NotificationModel notification) async {
+  Future<void> add(NotificationModel notification) => _mutate(() async {
     if (state.any((n) => n.id == notification.id)) return;
     state = [notification, ...state];
     try {
@@ -300,7 +350,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
     } catch (e) {
       debugPrint('NotificationsNotifier: failed to persist add: $e');
     }
-  }
+  });
 
   /// Adds an externally-sourced notification keyed by a stable source event id,
   /// exactly once. A replay of an already-processed id (even after the record
@@ -312,7 +362,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
   /// both the database and the state untouched, so the event stays unprocessed
   /// and the next replay retries it instead of the in-memory guard hiding a
   /// half-applied record.
-  Future<void> addIfNew(NotificationModel notification) async {
+  Future<void> addIfNew(NotificationModel notification) => _mutate(() async {
     if (state.any((n) => n.id == notification.id)) return;
     final store = this.store;
     if (store == null) {
@@ -326,34 +376,42 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
       debugPrint('NotificationsNotifier: failed to persist addIfNew: $e');
       return;
     }
-    if (recorded) state = [notification, ...state];
+    if (recorded && mounted) state = [notification, ...state];
+  });
+
+  Future<void> markAsRead(String id) {
+    _readRevisions[id] = ++_readClock;
+    return _markRead(id: id);
   }
 
-  Future<void> markAsRead(String id) async {
-    state = [
-      for (final n in state)
-        if (n.id == id) n.copyWith(isRead: true) else n,
-    ];
-    final updated = state.where((n) => n.id == id).firstOrNull;
-    if (updated == null) return;
+  Future<void> markAllAsRead() {
+    _allReadRevision = ++_readClock;
+    return _markRead();
+  }
+
+  Future<void> _markRead({String? id}) => _mutate(() async {
     try {
-      await store?.save(updated);
+      final updated =
+          store == null
+              ? [
+                for (final n in state)
+                  if (id == null || n.id == id) n.copyWith(isRead: true),
+              ]
+              : await store!.markRead(id: id);
+      if (!mounted) return;
+      final byId = {for (final n in state) n.id: n};
+      for (final n in updated) {
+        byId[n.id] = n;
+      }
+      state =
+          byId.values.toList()
+            ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     } catch (e) {
-      debugPrint('NotificationsNotifier: failed to persist markAsRead: $e');
+      debugPrint('NotificationsNotifier: failed to persist mark-read: $e');
     }
-  }
+  });
 
-  void markAllAsRead() {
-    state = [for (final n in state) n.copyWith(isRead: true)];
-    // One transaction for the batch, rather than one independent commit per
-    // notification. Still fire-and-forget: ordering does not matter here, and
-    // the in-memory state is already updated.
-    store?.saveAll(state).catchError((Object e) {
-      debugPrint('NotificationsNotifier: failed to persist markAllAsRead: \$e');
-    });
-  }
-
-  Future<void> delete(String id) async {
+  Future<void> delete(String id) => _mutate(() async {
     if (_loadsInFlight > 0) _deletedDuringLoad.add(id);
     state = state.where((n) => n.id != id).toList();
     try {
@@ -361,9 +419,9 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
     } catch (e) {
       debugPrint('NotificationsNotifier: failed to persist delete: $e');
     }
-  }
+  });
 
-  Future<void> deleteAll() async {
+  Future<void> deleteAll() => _mutate(() async {
     if (_loadsInFlight > 0) _wipedDuringLoad = true;
     state = [];
     try {
@@ -371,7 +429,7 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
     } catch (e) {
       debugPrint('NotificationsNotifier: failed to persist deleteAll: $e');
     }
-  }
+  });
 
   /// Records one chat message on its trade's card (see
   /// [SembastNotificationsStore.saveChatMessage]): the card moves to the top
@@ -381,11 +439,14 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
   Future<void> addChatMessage({
     required String messageId,
     required String cardId,
-    required NotificationModel Function(NotificationModel? existing) fold,
-  }) async {
+    required NotificationModel? Function(NotificationModel? existing) fold,
+  }) => _mutate(() async {
+    if (_processedMessages.contains(messageId)) return;
     final store = this.store;
     if (store == null) {
-      _putOnTop(fold(state.where((n) => n.id == cardId).firstOrNull));
+      final card = fold(state.where((n) => n.id == cardId).firstOrNull);
+      _processedMessages.add(messageId);
+      if (card != null) _putOnTop(card);
       return;
     }
     final NotificationModel? card;
@@ -399,10 +460,12 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
       debugPrint('NotificationsNotifier: failed to persist chat card: $e');
       return;
     }
+    _processedMessages.add(messageId);
     if (card != null) _putOnTop(card);
-  }
+  });
 
   void _putOnTop(NotificationModel card) {
+    if (!mounted) return;
     // A new message brings a deleted card back on purpose; a load in flight
     // must not drop it again.
     _deletedDuringLoad.remove(card.id);

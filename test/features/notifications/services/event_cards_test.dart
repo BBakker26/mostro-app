@@ -219,6 +219,20 @@ void main() {
       expect(stateOf(notifier), isEmpty);
     });
 
+    test(
+      'a message suppressed in an open chat stays suppressed after restart',
+      () async {
+        location = AppRoute.chatRoomPath('order-1');
+        await cards.onChatMessage(message('seen'));
+        location = null;
+        final restarted = await openNotifier();
+        await cardsFor(restarted).onChatMessage(message('seen'));
+        expect(stateOf(restarted), isEmpty);
+        await cardsFor(restarted).onChatMessage(message('new'));
+        expect(stateOf(restarted).single.chatUnreadCount, 1);
+      },
+    );
+
     test('a card the user read starts counting again', () async {
       await cards.onChatMessage(message('m1'));
       await notifier.markAsRead('chat-order-1');

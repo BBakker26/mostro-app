@@ -66,9 +66,13 @@ jobs:
 
       # Rust toolchain is required by flutter_rust_bridge_codegen to regenerate
       # the Dart bindings, so the drift check below can compare them with the committed lib/src/rust/.
-      # Pinned to match the rust job (see note above).
+      # Pinned to match the rust job (see note above). rustfmt is not in the action's minimal
+      # profile; without it codegen writes rust/src/frb_generated.rs unformatted and the drift
+      # check reports the whole file.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          components: rustfmt
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2

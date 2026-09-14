@@ -67,6 +67,13 @@ Run the full verify before committing and before requesting review:
 
 The repository ships **no git hooks**. These checks run in CI on every pull request. Run them locally before you push.
 
+Clones that ran the old `scripts/setup-hooks.sh`, directly or through `frb-generate.sh`, still have its copies in `.git/hooks/`. Git does not remove those copies when the scripts leave the repository, so they keep regenerating code after pulls and running the old pre-commit checks. Remove them once per clone. This only deletes files that carry the installer's marker, so any hooks of your own stay:
+
+```bash
+hooks="$(git rev-parse --git-common-dir)/hooks"
+grep -l 'installed by scripts/setup-hooks.sh' "$hooks"/* 2>/dev/null | xargs -r rm --
+```
+
 ### Generated code
 
 The flutter_rust_bridge bindings (`lib/src/rust/`, `rust/src/frb_generated.rs`) and the localizations (`lib/l10n/app_localizations*.dart`) are **committed**. A fresh clone, a `git pull` or a branch switch builds as-is, with nothing to regenerate first.

@@ -61,6 +61,15 @@ class TokenHandoff {
     return _attempt();
   }
 
+  /// Forget the pending token and its retry: the user turned push off, and
+  /// a retry landing afterwards would hand Rust a token they just let go.
+  void discard() {
+    _timer?.cancel();
+    _timer = null;
+    _pending = null;
+    _platform = null;
+  }
+
   Future<void> _attempt() async {
     final token = _pending;
     final platform = _platform;

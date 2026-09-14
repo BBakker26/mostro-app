@@ -1149,7 +1149,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get chooseNotificationEventsSubtitle =>
-      'Choisissez quels événements déclenchent les notifications push.';
+      'Choisissez quels événements affichent une notification dans l’app.';
 
   @override
   String get notifTradeUpdatesTitle => 'Mises à jour des transactions';
@@ -2497,7 +2497,60 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Les notifications ne contiennent ni montants ni contreparties : elles vous signalent seulement qu’il y a quelque chose à voir.';
+      'Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google et signale seulement qu’il y a quelque chose à voir.';
+
+  @override
+  String get pushMasterToggleTitle => 'Notifications push';
+
+  @override
+  String get pushMasterToggleSubtitle =>
+      'Réveille l’app quand une mise à jour d’échange ou un message arrive. La notification elle-même ne contient rien.';
+
+  @override
+  String get pushStatusOff =>
+      'Désactivées : rien n’est enregistré auprès du serveur push';
+
+  @override
+  String get pushStatusNoToken => 'En attente du jeton push de cet appareil';
+
+  @override
+  String get pushStatusIdle => 'Activées : aucun échange ouvert à enregistrer';
+
+  @override
+  String pushStatusRegistered(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Enregistré pour $count échanges',
+      one: 'Enregistré pour 1 échange',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pushStatusLastRegistered(String ago) {
+    return 'dernier enregistrement $ago';
+  }
+
+  @override
+  String get pushStatusUnreachable =>
+      'Serveur push injoignable : nouvelle tentative';
+
+  @override
+  String get pushStatusNodeRefused =>
+      'Ce nœud Mostro n’est pas accepté par le serveur push';
+
+  @override
+  String get pushStatusRateLimited =>
+      'Serveur push saturé : nouvelle tentative sous peu';
+
+  @override
+  String get pushUnsupportedPlatform =>
+      'Les notifications push ne sont pas disponibles sur cette plateforme';
+
+  @override
+  String get pushToggleSaveFailed =>
+      'Impossible de modifier les notifications push';
 
   @override
   String get pushNewMessageBody => 'Vous avez un nouveau message';

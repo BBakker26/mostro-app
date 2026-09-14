@@ -129,4 +129,19 @@ void main() {
     expect(h.pending, isNull);
     // The old token's timer was cancelled; firing it would be a no-op.
   });
+
+  test('discard drops a pending token so no retry hands it over', () async {
+    // Opt-out while a token is still waiting for storage: a retry that
+    // landed afterwards would give Rust a token the user just let go.
+    failures = [Exception('StorageUnavailable')];
+    final h = handoff();
+    await h.offer('t1', PushPlatform.android);
+    expect(h.pending, 't1');
+
+    h.discard();
+    await h.retryPending();
+
+    expect(h.pending, isNull);
+    expect(handed, isEmpty);
+  });
 }

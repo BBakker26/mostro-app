@@ -1146,7 +1146,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get chooseNotificationEventsSubtitle =>
-      'Elige qué eventos activan las notificaciones push.';
+      'Elige qué eventos muestran una notificación en la app.';
 
   @override
   String get notifTradeUpdatesTitle => 'Actualizaciones de operaciones';
@@ -2488,7 +2488,60 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Las notificaciones no incluyen montos ni contrapartes: solo te avisan de que hay algo que ver.';
+      'Las notificaciones no incluyen montos ni contrapartes. Un push pasa por los servidores de Google y solo dice que hay algo que ver.';
+
+  @override
+  String get pushMasterToggleTitle => 'Notificaciones push';
+
+  @override
+  String get pushMasterToggleSubtitle =>
+      'Despierta la app cuando llega una actualización de operación o un mensaje. La notificación en sí no lleva nada.';
+
+  @override
+  String get pushStatusOff =>
+      'Desactivadas: nada registrado en el servidor push';
+
+  @override
+  String get pushStatusNoToken => 'Esperando el token push de este dispositivo';
+
+  @override
+  String get pushStatusIdle =>
+      'Activadas: no hay operaciones abiertas que registrar';
+
+  @override
+  String pushStatusRegistered(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Registrado para $count operaciones',
+      one: 'Registrado para 1 operación',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pushStatusLastRegistered(String ago) {
+    return 'último registro $ago';
+  }
+
+  @override
+  String get pushStatusUnreachable => 'Servidor push inaccesible: reintentando';
+
+  @override
+  String get pushStatusNodeRefused =>
+      'El servidor push no acepta este nodo Mostro';
+
+  @override
+  String get pushStatusRateLimited =>
+      'Servidor push saturado: reintentando en breve';
+
+  @override
+  String get pushUnsupportedPlatform =>
+      'Las notificaciones push no están disponibles en esta plataforma';
+
+  @override
+  String get pushToggleSaveFailed =>
+      'No se pudieron cambiar las notificaciones push';
 
   @override
   String get pushNewMessageBody => 'Tienes un mensaje nuevo';

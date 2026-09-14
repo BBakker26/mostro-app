@@ -35,6 +35,11 @@ class PushNotificationService {
   /// Kept from the first [initialize] so [retryInitialize] can pass it on.
   ProviderContainer? _container;
 
+  /// Push is off in Settings: no token is handed to Rust until [reacquire].
+  /// Without this, FCM regenerating a deleted token (or a refresh) would
+  /// give Rust a token the user let go.
+  bool _released = false;
+
   /// Test seam — production pushes on the global [appRouter].
   @visibleForTesting
   void Function(String destination)? navigate;
@@ -101,7 +106,10 @@ class PushNotificationService {
     _fcm.onTokenRefresh.listen((token) {
       _handOver(token);
     });
-    await _handOverToken();
+    //    Off in Settings survives a restart: no token is acquired, so the
+    //    one deleted on opt-out is not recreated behind the user's back.
+    if (!await _enabledInRust()) _released = true;
+    if (!_released) await _handOverToken();
 
     // 4. Foreground messages carry nothing to act on (§2.3): the foreground
     //    subscription already delivers the event and the in-app card. The
@@ -169,6 +177,7 @@ class PushNotificationService {
   }
 
   Future<void> _handOver(String token) async {
+    if (_released) return;
     final platform = platformFor(kIsWeb, defaultTargetPlatform);
     if (platform == null) return;
     await _handoff.offer(token, platform);
@@ -184,6 +193,52 @@ class PushNotificationService {
       return;
     }
     await initialize(container: _container);
+  }
+
+  /// The persisted master toggle. Unknown — storage not up yet — reads as
+  /// on: Rust gates every registration on the setting anyway, so handing a
+  /// token over to a disabled Rust registers nothing.
+  Future<bool> _enabledInRust() async {
+    try {
+      return (await push_api.getPushStatus()).enabled;
+    } catch (e) {
+      debugPrint('[push] push setting unavailable, assuming on: $e');
+      return true;
+    }
+  }
+
+  /// Push turned off in Settings (docs/PUSH_NOTIFICATIONS.md §7.4). Rust has
+  /// already unregistered everything; the device token goes too, FCM stops
+  /// minting a new one, and none is handed to Rust until [reacquire].
+  Future<void> release() async {
+    _released = true;
+    _handoff.discard();
+    if (!isSupported) return;
+    try {
+      await _fcm.setAutoInitEnabled(false);
+      await _fcm.deleteToken();
+    } catch (e) {
+      debugPrint('[push] device token not deleted: $e');
+    }
+    await push_api.clearPushToken();
+  }
+
+  /// Push turned back on: a fresh token for Rust to register the current
+  /// trades with. If the first [initialize] never got past the permission,
+  /// it runs now.
+  Future<void> reacquire() async {
+    _released = false;
+    if (!isSupported) return;
+    try {
+      await _fcm.setAutoInitEnabled(true);
+    } catch (e) {
+      debugPrint('[push] FCM auto-init not re-enabled: $e');
+    }
+    if (!_initStarted) {
+      await initialize(container: _container);
+      return;
+    }
+    await _handOverToken();
   }
 
   /// Whether the OS is refusing to show this app's notifications.

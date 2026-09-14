@@ -182,6 +182,28 @@ void main() {
       expect(_colorOf(tester, 'Not set'), SettingsPalette.dark.warnInk);
     });
 
+    testWidgets('saving a lightning address closes the dialog cleanly', (
+      tester,
+    ) async {
+      await _pump(tester, const SettingsScreen());
+
+      await tester.tap(find.text('Not set'));
+      await tester.pumpAndSettle();
+      final dialog = find.byType(AlertDialog);
+      await tester.enterText(
+        find.descendant(of: dialog, matching: find.byType(TextField)),
+        'alice@example.com',
+      );
+      await tester.tap(
+        find.descendant(of: dialog, matching: find.text('Save')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('alice@example.com'), findsOneWidget);
+    });
+
     testWidgets('shows a connected wallet by name, un-warned', (tester) async {
       await _pump(
         tester,

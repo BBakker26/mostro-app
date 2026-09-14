@@ -7,12 +7,12 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `classify`, `clear_node_refusal`, `client`, `current_wanted`, `emit_status`, `issuing_nodes_of_live_trades`, `last_report`, `load_state`, `mirror_path`, `note_failure`, `post`, `production_server`, `reconcile_core`, `reconcile_with`, `request_reconcile`, `save_registrations`, `start_push_timer`, `status_of`, `status_tx`, `unregister_all`, `write_mirror`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `HttpPushServer`, `PushState`, `ReconcileReport`, `ServerOutcome`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `register`, `unregister`
+// These functions are ignored because they are not marked as `pub`: `classify`, `clear_node_refusal`, `client`, `current_wanted`, `emit_status`, `issuing_nodes_of_live_trades`, `last_notify`, `last_report`, `load_state`, `mirror_path`, `note_failure`, `notify_peer_with`, `post`, `production_server`, `reconcile_core`, `reconcile_with`, `request_reconcile`, `save_registrations`, `start_push_timer`, `status_of`, `status_tx`, `unregister_all`, `wake_peer`, `write_mirror`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `HttpPushServer`, `NotifyOutcome`, `PushState`, `ReconcileReport`, `ServerOutcome`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `notify`, `register`, `unregister`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`, `default`
-// These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `register`, `unregister`
+// These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `notify`, `register`, `unregister`
 
 /// Bring what the push server holds in step with what is wanted, now.
 /// Single-flight: a pass in progress finishes first, and a request that

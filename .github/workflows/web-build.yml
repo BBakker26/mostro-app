@@ -106,8 +106,8 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      # lib/src/rust/ is gitignored and produced on the fly; without it the web
-      # build fails to compile. The script also verifies the FRB pins agree.
+      # lib/src/rust/ is committed, but the bundle is built from freshly generated
+      # bindings (ci.yml checks the two agree). The script also verifies the FRB pins agree.
       - name: Generate Rust bridge bindings
         run: ./scripts/frb-generate.sh
 

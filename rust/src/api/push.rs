@@ -250,6 +250,9 @@ fn write_mirror(state: &PushState) {
             (Some(token), true, false) => std::fs::write(
                 &path,
                 serde_json::json!({
+                    // The job cannot ask Rust for the URL; the mirror is the
+                    // single source of truth it re-POSTs from.
+                    "server_url": crate::config::push_server_url(),
                     "token": token,
                     "platform": state.platform.map(|p| p.as_wire()),
                     "registrations": live,

@@ -3173,6 +3173,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceFieldHint => 'lnbc… or user@domain';
 
   @override
+  String get invoiceFieldPromptLabel => 'Paste your invoice here';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Lightning invoice';
+
+  @override
+  String get invoiceFieldAddressLabel => 'Lightning address';
+
+  @override
+  String get invoiceScanButton => 'Scan';
+
+  @override
+  String get invoiceReplaceButton => 'Replace';
+
+  @override
+  String get invoiceFieldSemantics => 'Lightning invoice or address, required';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Lightning invoice for $sats sats';
+  }
+
+  @override
   String get invoiceValidAddress =>
       'Valid address · the invoice will be requested on sending';
 

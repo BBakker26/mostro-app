@@ -3202,6 +3202,30 @@ class AppLocalizationsIt extends AppLocalizations {
   String get invoiceFieldHint => 'lnbc… o utente@dominio';
 
   @override
+  String get invoiceFieldPromptLabel => 'Incolla qui la tua fattura';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Fattura Lightning';
+
+  @override
+  String get invoiceFieldAddressLabel => 'Indirizzo Lightning';
+
+  @override
+  String get invoiceScanButton => 'Scansiona';
+
+  @override
+  String get invoiceReplaceButton => 'Sostituisci';
+
+  @override
+  String get invoiceFieldSemantics =>
+      'Fattura o indirizzo Lightning, obbligatorio';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Fattura Lightning da $sats sats';
+  }
+
+  @override
   String get invoiceValidAddress =>
       'Indirizzo valido · la fattura verrà richiesta all\'invio';
 

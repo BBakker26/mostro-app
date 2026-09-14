@@ -5420,6 +5420,48 @@ abstract class AppLocalizations {
   /// **'lnbc… or user@domain'**
   String get invoiceFieldHint;
 
+  /// 17a label of the empty invoice field, in the imperative, so the buyer sees where to write
+  ///
+  /// In en, this message translates to:
+  /// **'Paste your invoice here'**
+  String get invoiceFieldPromptLabel;
+
+  /// 17b label of the invoice field once it holds something; also the title of the full-invoice sheet
+  ///
+  /// In en, this message translates to:
+  /// **'Lightning invoice'**
+  String get invoiceFieldFilledLabel;
+
+  /// 17b label of the invoice field when it holds a valid Lightning address; also its screen reader label and the full-value sheet title
+  ///
+  /// In en, this message translates to:
+  /// **'Lightning address'**
+  String get invoiceFieldAddressLabel;
+
+  /// 17a/17b button under the invoice field that scans a QR code
+  ///
+  /// In en, this message translates to:
+  /// **'Scan'**
+  String get invoiceScanButton;
+
+  /// 17b button that replaces the invoice with the clipboard content
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get invoiceReplaceButton;
+
+  /// Screen reader label of the invoice text field
+  ///
+  /// In en, this message translates to:
+  /// **'Lightning invoice or address, required'**
+  String get invoiceFieldSemantics;
+
+  /// Screen reader label of the filled invoice field: the decoded amount, not the whole string
+  ///
+  /// In en, this message translates to:
+  /// **'Lightning invoice for {sats} sats'**
+  String invoiceFilledSemantics(String sats);
+
   /// 13a validation row for a Lightning address or LNURL
   ///
   /// In en, this message translates to:

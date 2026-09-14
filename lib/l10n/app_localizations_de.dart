@@ -3211,6 +3211,30 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceFieldHint => 'lnbc… oder nutzer@domain';
 
   @override
+  String get invoiceFieldPromptLabel => 'Rechnung hier einfügen';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Lightning-Rechnung';
+
+  @override
+  String get invoiceFieldAddressLabel => 'Lightning-Adresse';
+
+  @override
+  String get invoiceScanButton => 'Scannen';
+
+  @override
+  String get invoiceReplaceButton => 'Ersetzen';
+
+  @override
+  String get invoiceFieldSemantics =>
+      'Lightning-Rechnung oder -Adresse, erforderlich';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Lightning-Rechnung über $sats Sats';
+  }
+
+  @override
   String get invoiceValidAddress =>
       'Gültige Adresse · die Rechnung wird beim Senden angefordert';
 

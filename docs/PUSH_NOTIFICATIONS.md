@@ -801,9 +801,30 @@ first row and the contract is rewritten (T1.4).
 
 ### 9.2 Notifications screen
 
-Launch-from-notification lands here. No new card type: what the wake was about shows up
-as the ordinary in-app cards produced by the resync (trade update, new message, claim,
+Launch-from-notification lands here. No push-specific card: what the wake was about shows
+up as the ordinary in-app cards produced by the resync (trade update, new message, claim,
 slash…).
+
+The trade and chat cards come from `lib/features/notifications/services/event_cards.dart`
+(#474), fed by `on_trade_updated` and `on_any_new_message` from startup, replay included:
+
+- **Trade status** — one card per order and status (`trade-<order>-<status>[-<reason>]`,
+  through `addIfNew`), dated by `TradeUpdate.occurred_at` (the daemon message's
+  `created_at`). None for the book's `pending` / `in-progress`, the maker's own bond or the
+  user's own cancel. Dispute statuses and solver chat cards are included in
+  the Disputes filter. Tap → trade detail.
+- **Chat** — one card per trade (`chat-<order>`, the solver's apart as
+  `chat-<order>-solver`), counting messages since the card was last read; each message id
+  is counted once through the `processed_events` ledger. None for the user's own messages
+  or while that chat is open in the foreground; opening the chat marks it read,
+  including cards still loading or being processed. Rust recovers unread messages
+  from storage at startup, after stream lag and every 60 seconds, so interrupted
+  card writes retry without a relay replay. Suppressed messages are also recorded
+  in the ledger. Tap → the chat (the
+  solver's → trade detail).
+- **Filters** — the Settings toggles (payments, disputes, trade updates, messages), and
+  anything older than the identity's `created_at`, so a restore does not replay history
+  the user already lived through as news.
 
 ### 9.3 The OS notification
 

@@ -39,6 +39,9 @@ import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show rawTradesProvider;
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/features/notifications/services/event_cards.dart';
+import 'package:mostro/core/app_routes.dart' show appRouter;
+import 'package:mostro/src/rust/api/messages.dart' as messages_api;
 
 /// Starts the application.
 ///
@@ -176,6 +179,10 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // than dropping it (a receiver must exist at send time).
   final bondSlashedStream = await bond_api.onBondSlashed();
   final bondClaimStream = await bond_api.onBondClaimUpdated();
+  // Same reason for the Notifications cards (issue #474): the startup replay
+  // of the node's history is what tells the user what happened while away.
+  final tradeUpdateStream = await orders_api.onTradeUpdated();
+  final chatMessageStream = await messages_api.onAnyNewMessage();
 
   // Initialize the Nostr relay pool. `null` means the compiled-in defaults
   // (config.rs); a non-empty seed list replaces them entirely.
@@ -216,6 +223,17 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
 
   _consumeBondSlashed(bondSlashedStream, container);
   _consumeBondClaims(bondClaimStream, container);
+
+  final eventCards = EventCards(
+    notifications: () => container.read(notificationsProvider.notifier),
+    // Read from disk, not the prefs provider: its first load is async, and
+    // the startup replay must not slip cards past a toggle that is off.
+    isEnabled: (event) => prefs.getBool(event.prefsKey) ?? true,
+    identityCreatedAt: IdentityService.createdAt,
+    currentLocation: _currentLocation,
+  );
+  pumpEvents('trade-cards', tradeUpdateStream.next, eventCards.onTradeUpdate);
+  pumpEvents('chat-cards', chatMessageStream.next, eventCards.onChatMessage);
 
   // Resume = resync in Rust, then re-hydrate every notifier from the bridge
   // (issue #308, docs/PUSH_NOTIFICATIONS.md §10). Attached before runApp so
@@ -282,6 +300,18 @@ void _restoreNwcConnection(String nwcUri, ProviderContainer container) {
       debugPrint('[nwc] wallet restore failed: $e');
     }
   });
+}
+
+/// The route on screen, or null before the router has one.
+String? _currentLocation() {
+  if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+    return null;
+  }
+  try {
+    return appRouter.routerDelegate.currentConfiguration.uri.toString();
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Consumes bond-slashed notices from [stream] and records an in-app

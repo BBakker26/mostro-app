@@ -1790,7 +1790,7 @@ async fn adopt_range_remainder(
             crate::api::logging::short_id(order_id),
         ),
     );
-    emit_trade_update(order_id, OrderStatus::Pending);
+    emit_trade_update_at(order_id, OrderStatus::Pending, None, event_ts);
     true
 }
 
@@ -1820,6 +1820,7 @@ async fn rebuild_trade_from_dm(
     order_id: &str,
     trade_pubkey_hex: &str,
     trade_index: u32,
+    occurred_at: i64,
 ) -> Option<crate::api::types::TradeInfo> {
     use mostro_core::message::Action;
     // Actions that never describe a live trade to recover: NewOrder owns
@@ -1922,7 +1923,7 @@ async fn rebuild_trade_from_dm(
             kind.action,
         ),
     );
-    emit_trade_update(order_id, status);
+    emit_trade_update_at(order_id, status, None, occurred_at);
     Some(trade)
 }
 
@@ -1938,6 +1939,7 @@ async fn persist_late_create_confirmation(
     kind: &mostro_core::message::MessageKind,
     trade_pubkey_hex: &str,
     trade_index: u32,
+    occurred_at: i64,
 ) {
     let Some(mostro_core::message::Payload::Order(order)) = &kind.payload else {
         crate::api::logging::blog_warn(
@@ -1994,7 +1996,7 @@ async fn persist_late_create_confirmation(
             crate::api::logging::short_id(daemon_id),
         ),
     );
-    emit_trade_update(daemon_id, status);
+    emit_trade_update_at(daemon_id, status, None, occurred_at);
 }
 
 /// Cancel an active trade cooperatively.
@@ -2931,7 +2933,8 @@ async fn dispatch_mostro_message(
             let oid = order_id.to_string();
             if !status_write_blocked(&oid, &kind.action, event_ts).await {
                 if let Some(rebuilt) =
-                    rebuild_trade_from_dm(kind, &oid, trade_pubkey_hex, trade_index).await
+                    rebuild_trade_from_dm(kind, &oid, trade_pubkey_hex, trade_index, event_ts)
+                        .await
                 {
                     row_state = RowState::Exists(Box::new(rebuilt));
                 }
@@ -3016,6 +3019,7 @@ async fn dispatch_mostro_message(
                             kind,
                             trade_pubkey_hex,
                             pending.trade_index,
+                            event_ts,
                         )
                         .await;
                     }
@@ -3172,10 +3176,11 @@ async fn dispatch_mostro_message(
                         // Push the cancellation to Dart: after a wipe there is
                         // no DB row left to poll, and after a timeout republish
                         // the book reads `pending` — screens need this signal.
-                        emit_trade_update_with(
+                        emit_trade_update_at(
                             &oid,
                             crate::api::types::OrderStatus::Canceled,
                             reason,
+                            event_ts,
                         );
                     }
                     // No row was ever written for this order here — a wipe by
@@ -3192,7 +3197,12 @@ async fn dispatch_mostro_message(
                                 crate::api::logging::short_id(&oid),
                             ),
                         );
-                        emit_trade_update(&oid, crate::api::types::OrderStatus::Canceled);
+                        emit_trade_update_at(
+                            &oid,
+                            crate::api::types::OrderStatus::Canceled,
+                            None,
+                            event_ts,
+                        );
                     }
                     _ => {
                         // The trade is over and no wipe is coming: its
@@ -3225,7 +3235,12 @@ async fn dispatch_mostro_message(
                                     crate::api::logging::short_id(&oid),
                                 ),
                             );
-                            emit_trade_update(&oid, crate::api::types::OrderStatus::Canceled);
+                            emit_trade_update_at(
+                                &oid,
+                                crate::api::types::OrderStatus::Canceled,
+                                None,
+                                event_ts,
+                            );
                         }
                     }
                 }
@@ -3304,7 +3319,7 @@ async fn dispatch_mostro_message(
                             kind.action,
                         ),
                     );
-                    emit_trade_update(&order_id, new_status);
+                    emit_trade_update_at(&order_id, new_status, None, event_ts);
                 }
             }
         }
@@ -3331,7 +3346,7 @@ async fn dispatch_mostro_message(
                 // snapshot (issue #305). Persist it so the add-invoice screen
                 // and trade detail can show who took the order.
                 if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
-                    persist_peer_reputation(&order_id, rating, reviews, days).await;
+                    persist_peer_reputation(&order_id, rating, reviews, days, event_ts).await;
                 } else {
                     log::debug!(
                         "[orders] daemon-msg AddInvoice for order={order_id}: no Order or Peer payload, ignoring"
@@ -3387,7 +3402,7 @@ async fn dispatch_mostro_message(
                         crate::api::logging::short_id(&order_id),
                     ),
                 );
-                emit_trade_update(&order_id, new_status);
+                emit_trade_update_at(&order_id, new_status, None, event_ts);
             }
         }
         // Mostro sends PayInvoice to the seller with the hold invoice bolt11
@@ -3429,7 +3444,7 @@ async fn dispatch_mostro_message(
                     // (issue #305). Persist it for the pay-invoice screen and
                     // trade detail rather than discarding the whole message.
                     if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
-                        persist_peer_reputation(&order_id, rating, reviews, days).await;
+                        persist_peer_reputation(&order_id, rating, reviews, days, event_ts).await;
                     } else {
                         log::warn!(
                             "[orders] daemon-msg PayInvoice payload is not a PaymentRequest"
@@ -3480,7 +3495,12 @@ async fn dispatch_mostro_message(
                         crate::api::logging::short_id(&order_id),
                     ),
                 );
-                emit_trade_update(&order_id, crate::api::types::OrderStatus::WaitingPayment);
+                emit_trade_update_at(
+                    &order_id,
+                    crate::api::types::OrderStatus::WaitingPayment,
+                    None,
+                    event_ts,
+                );
             }
         }
         // Handle remaining status-update actions from the daemon by syncing
@@ -3564,7 +3584,7 @@ async fn dispatch_mostro_message(
                             kind.action,
                         ),
                     );
-                    emit_trade_update(&order_id, status);
+                    emit_trade_update_at(&order_id, status, None, event_ts);
                 }
                 if settled {
                     // The seller hears nothing further from the daemon about
@@ -3859,7 +3879,12 @@ async fn dispatch_mostro_message(
                 }
             }
             persist_bond(&order_id, &bond).await;
-            emit_trade_update(&order_id, crate::api::types::OrderStatus::WaitingTakerBond);
+            emit_trade_update_at(
+                &order_id,
+                crate::api::types::OrderStatus::WaitingTakerBond,
+                None,
+                event_ts,
+            );
         }
         action => {
             log::debug!("[orders] daemon-msg unhandled action={action:?}");
@@ -4833,7 +4858,7 @@ async fn resync_republished_maker_order(
             );
         }
     }
-    emit_trade_update(order_id, OrderStatus::Pending);
+    emit_trade_update_at(order_id, OrderStatus::Pending, None, event_ts);
     true
 }
 
@@ -7189,7 +7214,13 @@ fn trade_updates_tx() -> &'static broadcast::Sender<crate::api::types::TradeUpda
 /// wake `tradeInfoStreamProvider`; it never changes state. When the book has
 /// no row for the order yet, the persisted snapshot is still read the next
 /// time the trade loads, so a missing emission only delays the live update.
-async fn persist_peer_reputation(order_id: &str, rating: f64, reviews: u32, days: u32) {
+async fn persist_peer_reputation(
+    order_id: &str,
+    rating: f64,
+    reviews: u32,
+    days: u32,
+    occurred_at: i64,
+) {
     crate::api::logging::blog_info(
         "orders",
         format!(
@@ -7206,11 +7237,13 @@ async fn persist_peer_reputation(order_id: &str, rating: f64, reviews: u32, days
         }
     }
     if let Some(info) = order_book().get_order(order_id).await {
-        emit_trade_update(order_id, info.status);
+        emit_trade_update_at(order_id, info.status, None, occurred_at);
     }
 }
 
-/// Broadcasts a trade lifecycle change to any active [`TradeUpdatesStream`].
+/// Broadcasts a trade lifecycle change to any active [`TradeUpdatesStream`],
+/// dated now. A change carried by a daemon message uses
+/// [`emit_trade_update_at`] with the message's own timestamp instead.
 pub(crate) fn emit_trade_update(order_id: &str, status: crate::api::types::OrderStatus) {
     emit_trade_update_with(order_id, status, None);
 }
@@ -7223,10 +7256,23 @@ pub(crate) fn emit_trade_update_with(
     status: crate::api::types::OrderStatus,
     reason: Option<crate::api::types::TradeUpdateReason>,
 ) {
+    emit_trade_update_at(order_id, status, reason, crate::rt::unix_now());
+}
+
+/// [`emit_trade_update_with`] dated `occurred_at` (Unix seconds). The Kind 14
+/// dispatch passes the event's `created_at`, so a history replay after a
+/// restore reads as the past it is rather than as news (issue #474).
+pub(crate) fn emit_trade_update_at(
+    order_id: &str,
+    status: crate::api::types::OrderStatus,
+    reason: Option<crate::api::types::TradeUpdateReason>,
+    occurred_at: i64,
+) {
     let _ = trade_updates_tx().send(crate::api::types::TradeUpdate {
         order_id: order_id.to_string(),
         status,
         reason,
+        occurred_at,
     });
     // Every status a trade can take changes what the push server should
     // hold for its key (a wipe, a terminal outcome, a new bond window).
@@ -7803,6 +7849,51 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn replayed_peer_reputation_preserves_its_daemon_timestamp() {
+        use mostro_core::message::{Action, Payload, Peer};
+        let db = bond_test_db().await;
+        let id = uuid::Uuid::new_v4();
+        let row = seam_trade_row(&id.to_string(), OrderStatus::Active);
+        db.save_trade(&row).await.unwrap();
+        order_book().upsert_order(row.order.clone()).await;
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_mostro_message(
+            daemon_message(
+                id,
+                Action::AddInvoice,
+                Some(Payload::Peer(Peer {
+                    pubkey: String::new(),
+                    reputation: Some(mostro_core::user::UserInfo {
+                        rating: 4.0,
+                        reviews: 4,
+                        operating_days: 64,
+                    }),
+                })),
+                1000,
+            ),
+            "review-old-peer",
+            "ff00ff99",
+            row.trade_key_index,
+        )
+        .await;
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(update) = rx.recv().await {
+                    if update.order_id == id.to_string() {
+                        break update;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("peer update");
+        assert_eq!(
+            event.occurred_at, 1000,
+            "replayed reputation must not appear new"
+        );
+    }
+
     use super::*;
     use crate::api::types::TradeRole;
     use crate::mostro::pending::register_dispute_request;
@@ -10715,16 +10806,18 @@ mod tests {
             Some("3000"),
             "the applied event's timestamp must be recorded",
         );
-        // Nothing older reached the UI on the way down: one update, not three.
+        // Nothing older reached the UI on the way down: one update, not three,
+        // dated by the daemon message that carried it rather than by when the
+        // replay ran (issue #474).
         let mut emitted = Vec::new();
         while let Ok(update) = rx.try_recv() {
             if update.order_id == order_id {
-                emitted.push(update.status);
+                emitted.push((update.status, update.occurred_at));
             }
         }
         assert_eq!(
             emitted,
-            vec![crate::api::types::OrderStatus::Dispute],
+            vec![(crate::api::types::OrderStatus::Dispute, 3_000)],
             "a refused replay must not emit a TradeUpdate",
         );
     }

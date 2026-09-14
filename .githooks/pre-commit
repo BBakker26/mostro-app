@@ -17,6 +17,8 @@ echo "▶ cargo check (wasm32)..."
 (cd rust && cargo check --target wasm32-unknown-unknown 2>&1)
 
 echo "▶ flutter analyze..."
-flutter analyze 2>&1
+# Git exports GIT_DIR/GIT_INDEX_FILE to hooks; the flutter tool inherits them and reads its
+# own SDK version from this repo instead ("0.0.0-unknown"), so pub resolution fails.
+env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE flutter analyze 2>&1
 
 echo "✓ All checks passed"

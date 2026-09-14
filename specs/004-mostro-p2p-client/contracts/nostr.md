@@ -222,15 +222,10 @@ relay-status and connection-state streams.
 
 ---
 
-### register_push_token(token: String, platform: String) → ()
-Register a push notification token with the push server for background
-trade event notifications.
-
-**Side effects**: Sends token to push server. Server monitors relays
-for tradeKey.public in p-tag and sends silent push. No message content
-is transmitted.
-
-**Errors**: `PushServerUnavailable`.
+### Push registration
+Moved to `contracts/push.md`: Dart hands the device token to
+`set_push_token`, and Rust owns which trade pubkeys the push server holds it
+for (`docs/PUSH_NOTIFICATIONS.md` §7.1).
 
 ### on_relay_auto_synced() → Stream<Vec<String>>
 Emits when new relays are auto-synced from daemon's kind 10002 events.

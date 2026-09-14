@@ -276,7 +276,9 @@ User preferences stored locally.
 store: the Flutter layer persists it and re-applies it on launch, so the user's
 choice survives a restart), `bond_claim_retained_nodes` (JSON map of node
 pubkey → unix seconds: nodes the user switched away from, kept on the kind-14
-filter until then so a claim they issue still arrives).
+filter until then so a claim they issue still arrives), `push_enabled`,
+`push_token`, `push_platform`, `push_registrations` and `push_node_refusals`
+(push registration state, `contracts/push.md`).
 
 ---
 

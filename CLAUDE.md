@@ -102,24 +102,17 @@ bridged by flutter_rust_bridge.
   a mismatched CLI yields bindings that fail to compile, with an error that never mentions
   versions (see issue #205). `--check` verifies without generating.
 - FRB scans only `crate::api` → changes in `nostr/`, `crypto/`, `mostro/`, etc. need no regen.
-- **Regenerate after pulling, too — not just after your own edits.** `lib/src/rust/` and
-  `lib/l10n/app_localizations*.dart` are gitignored, so a `git pull` that brings in someone
-  else's `rust/src/api/` field or `.arb` key leaves your copies stale. CI regenerates both
-  before it analyses (`ci.yml` → `frb-generate.sh`, `flutter gen-l10n`), so green CI proves
-  nothing about your checkout. The failure is loud but misdirected — the analyzer blames
-  whatever *uses* the missing field, so a stale `TradeInfo` reads as a broken test helper
-  rather than as out-of-date bindings. If `flutter analyze` reports a field or l10n getter
-  that plainly exists in `rust/src/api/types.rs` or `lib/l10n/*.arb`, regenerate before
-  believing it. **Automate it:** `./scripts/setup-hooks.sh` copies `.githooks/` into this
-  clone's `.git/hooks/`, where `post-merge`/`post-checkout`/`post-rewrite` regenerate both
-  whenever the pull, branch switch, or rebase touched `rust/src/api/`, `pubspec.yaml`, or
-  an `.arb` (no-op otherwise). `frb-generate.sh` runs that installer itself, so the first
-  codegen in a clone arms the hooks and later codegen refreshes them;
-  `./scripts/setup-hooks.sh --check` reports the state without changing it.
-  **Copies, not `core.hooksPath=.githooks`:** pointing that config at a tracked directory
-  makes `git checkout` execute hook code from the ref being checked out, so
-  `gh pr checkout` on a contributor's branch would run their script. `.git/hooks` is not
-  tracked, so a hostile branch is inert. Edit `.githooks/` and re-run the installer.
+- **Generated code is committed:** `lib/src/rust/`, `rust/src/frb_generated.rs` and
+  `lib/l10n/app_localizations*.dart`. A pull or branch switch builds as-is. Regenerate in the
+  **same commit** as the `rust/src/api/` or `.arb` change that caused it. Never hand-edit or
+  hand-merge these files. `ci.yml` ("Check generated code is committed") regenerates both and
+  fails on any difference. The fix is to rerun `./scripts/frb-generate.sh` and
+  `flutter gen-l10n`, then commit the result.
+- **The repo ships no git hooks.** They used to regenerate the ignored copies after a pull.
+  Committing the output made them unnecessary, so don't reintroduce them.
+- **Conflicts in generated files:** resolve the sources first. Then take either side of the
+  generated files (`git checkout --theirs -- <paths>`), regenerate, stage and continue. Full
+  procedure: `CONTRIBUTING.md` → "Resolving conflicts in generated files".
 
 ## Transport (protocol v2)
 - **Daemon messages** (new-order, take, release, cancel, dispute, rate, invoice, restore):

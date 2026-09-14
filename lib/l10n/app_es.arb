@@ -828,6 +828,7 @@
   "pushMasterToggleTitle": "Notificaciones push",
   "pushMasterToggleSubtitle": "Despierta la app cuando llega una actualización de operación o un mensaje. La notificación en sí no lleva nada.",
   "pushStatusOff": "Desactivadas: nada registrado en el servidor push",
+  "pushStatusCleanupPending": "{count, plural, =1{Desactivadas — queda 1 registro push por eliminar} other{Desactivadas — quedan {count} registros push por eliminar}}",
   "pushStatusNoToken": "Esperando el token push de este dispositivo",
   "pushStatusIdle": "Activadas: no hay operaciones abiertas que registrar",
   "pushStatusRegistered": "{count, plural, =1{Registrado para 1 operación} other{Registrado para {count} operaciones}}",

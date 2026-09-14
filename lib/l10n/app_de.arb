@@ -828,6 +828,7 @@
   "pushMasterToggleTitle": "Push-Benachrichtigungen",
   "pushMasterToggleSubtitle": "Weckt die App, wenn ein Trade-Update oder eine Nachricht eintrifft. Die Benachrichtigung selbst enthält nichts.",
   "pushStatusOff": "Aus – nichts ist beim Push-Server registriert",
+  "pushStatusCleanupPending": "{count, plural, =1{Aus — 1 Push-Registrierung muss noch entfernt werden} other{Aus — {count} Push-Registrierungen müssen noch entfernt werden}}",
   "pushStatusNoToken": "Warte auf das Push-Token dieses Geräts",
   "pushStatusIdle": "An – keine offenen Trades zu registrieren",
   "pushStatusRegistered": "{count, plural, =1{Für 1 Trade registriert} other{Für {count} Trades registriert}}",

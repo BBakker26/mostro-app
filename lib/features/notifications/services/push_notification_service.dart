@@ -31,14 +31,27 @@ class PushNotificationService {
 
   /// Guards [initialize] against a second run attaching duplicate listeners.
   bool _initStarted = false;
+  Future<void> _deviceTail = Future.value();
 
-  /// Kept from the first [initialize] so [retryInitialize] can pass it on.
-  ProviderContainer? _container;
+  /// Startup and permission recovery also acquire tokens, so they share the
+  /// same device queue as the master toggle's release/reacquire operations.
+  Future<void> _serialize(Future<void> Function() operation) {
+    final result = _deviceTail.then((_) => operation());
+    _deviceTail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return result;
+  }
 
   /// Push is off in Settings: no token is handed to Rust until [reacquire].
   /// Without this, FCM regenerating a deleted token (or a refresh) would
   /// give Rust a token the user let go.
   bool _released = false;
+
+  /// Token delivery is suspended until the OS permission has been checked.
+  /// Kept separate from opt-out so a later permission grant can retry.
+  bool _permissionDenied = true;
 
   /// Test seam — production pushes on the global [appRouter].
   @visibleForTesting
@@ -61,8 +74,11 @@ class PushNotificationService {
   /// that lands (T4.5).
   bool get isSupported => platformFor(kIsWeb, defaultTargetPlatform) != null;
 
-  Future<void> initialize({ProviderContainer? container}) async {
-    _container = container ?? _container;
+  Future<void> initialize({ProviderContainer? container}) {
+    return _serialize(_initialize);
+  }
+
+  Future<void> _initialize() async {
     if (!isSupported) return;
     // Steps below attach stream listeners that are never cancelled, so a
     // second run would double every token hand-over. This is a separate
@@ -76,6 +92,7 @@ class PushNotificationService {
       _fcmInstance = FirebaseMessaging.instance;
     } catch (e) {
       debugPrint('[push] Firebase not available: $e');
+      _initStarted = false;
       return;
     }
 
@@ -94,8 +111,13 @@ class PushNotificationService {
       debugPrint('[push] permission denied');
       // Nothing is attached yet, so a later grant may run this again.
       _initStarted = false;
+      await _suspendForPermission();
       return;
     }
+
+    // Apply the saved preference before a refresh listener can deliver any
+    // token. An opt-out that happened during this await must stay in force.
+    if (!await _enabledInRust()) _released = true;
 
     // 2. Register the display-only background handler.
     FirebaseMessaging.onBackgroundMessage(pushBackgroundHandler);
@@ -106,10 +128,7 @@ class PushNotificationService {
     _fcm.onTokenRefresh.listen((token) {
       _handOver(token);
     });
-    //    Off in Settings survives a restart: no token is acquired, so the
-    //    one deleted on opt-out is not recreated behind the user's back.
-    if (!await _enabledInRust()) _released = true;
-    if (!_released) await _handOverToken();
+    if (!_released) await _acquireIfAllowed();
 
     // 4. Foreground messages carry nothing to act on (§2.3): the foreground
     //    subscription already delivers the event and the in-app card. The
@@ -177,7 +196,7 @@ class PushNotificationService {
   }
 
   Future<void> _handOver(String token) async {
-    if (_released) return;
+    if (_released || _permissionDenied) return;
     final platform = platformFor(kIsWeb, defaultTargetPlatform);
     if (platform == null) return;
     await _handoff.offer(token, platform);
@@ -187,12 +206,19 @@ class PushNotificationService {
   /// denied: the first run stopped before acquiring a token or attaching
   /// listeners. Once a run has got past the permission step, only a token
   /// Rust could not take yet is worth retrying.
-  Future<void> retryInitialize() async {
+  Future<void> retryInitialize() => _serialize(_retryInitialize);
+
+  Future<void> _retryInitialize() async {
     if (_initStarted) {
-      await _handoff.retryPending();
+      if (_released) return;
+      if (_permissionDenied) {
+        await _acquireIfAllowed();
+      } else {
+        await _handoff.retryPending();
+      }
       return;
     }
-    await initialize(container: _container);
+    await _initialize();
   }
 
   /// The persisted master toggle. Unknown — storage not up yet — reads as
@@ -208,9 +234,16 @@ class PushNotificationService {
   }
 
   /// Push turned off in Settings (docs/PUSH_NOTIFICATIONS.md §7.4). Rust has
-  /// already unregistered everything; the device token goes too, FCM stops
-  /// minting a new one, and none is handed to Rust until [reacquire].
-  Future<void> release() async {
+  /// already attempted to unregister everything. The device token goes too;
+  /// FCM stops minting one, and none reaches Rust until [reacquire].
+  Future<void> release() {
+    // Block handoffs immediately, including a getToken already in flight.
+    _released = true;
+    _handoff.discard();
+    return _serialize(_release);
+  }
+
+  Future<void> _release() async {
     _released = true;
     _handoff.discard();
     if (!isSupported) return;
@@ -226,19 +259,45 @@ class PushNotificationService {
   /// Push turned back on: a fresh token for Rust to register the current
   /// trades with. If the first [initialize] never got past the permission,
   /// it runs now.
-  Future<void> reacquire() async {
-    _released = false;
+  Future<void> reacquire() => _serialize(_reacquire);
+
+  Future<void> _reacquire() async {
     if (!isSupported) return;
+    _released = false;
+    if (!_initStarted) {
+      await _initialize();
+      return;
+    }
+    await _acquireIfAllowed();
+  }
+
+  Future<void> _acquireIfAllowed() async {
+    if (_released) return;
+    // Gate refresh callbacks while the current permission is being read.
+    _permissionDenied = true;
+    if (await isSystemPermissionDenied()) {
+      await _suspendForPermission();
+      return;
+    }
+    if (_released) return;
+    _permissionDenied = false;
     try {
       await _fcm.setAutoInitEnabled(true);
     } catch (e) {
       debugPrint('[push] FCM auto-init not re-enabled: $e');
     }
-    if (!_initStarted) {
-      await initialize(container: _container);
-      return;
-    }
+    if (_released) return;
     await _handOverToken();
+  }
+
+  Future<void> _suspendForPermission() async {
+    _permissionDenied = true;
+    _handoff.discard();
+    try {
+      await push_api.clearPushToken();
+    } catch (e) {
+      debugPrint('[push] token not cleared after permission denial: $e');
+    }
   }
 
   /// Whether the OS is refusing to show this app's notifications.

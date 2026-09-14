@@ -4280,6 +4280,12 @@ abstract class AppLocalizations {
   /// **'Off — nothing is registered with the push server'**
   String get pushStatusOff;
 
+  /// Push is off locally, but the server has not confirmed removing these registrations
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Off — removal of 1 push registration is pending} other{Off — removal of {count} push registrations is pending}}'**
+  String pushStatusCleanupPending(int count);
+
   /// Status line when push is on but the device has not produced a push token yet
   ///
   /// In en, this message translates to:

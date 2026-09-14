@@ -2478,6 +2478,17 @@ class AppLocalizationsEn extends AppLocalizations {
       'Off — nothing is registered with the push server';
 
   @override
+  String pushStatusCleanupPending(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Off — removal of $count push registrations is pending',
+      one: 'Off — removal of 1 push registration is pending',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get pushStatusNoToken => 'Waiting for this device\'s push token';
 
   @override

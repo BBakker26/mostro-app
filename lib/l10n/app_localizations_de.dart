@@ -2511,6 +2511,17 @@ class AppLocalizationsDe extends AppLocalizations {
   String get pushStatusOff => 'Aus – nichts ist beim Push-Server registriert';
 
   @override
+  String pushStatusCleanupPending(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Aus — $count Push-Registrierungen müssen noch entfernt werden',
+      one: 'Aus — 1 Push-Registrierung muss noch entfernt werden',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get pushStatusNoToken => 'Warte auf das Push-Token dieses Geräts';
 
   @override

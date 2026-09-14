@@ -27,6 +27,7 @@ class _FakeBridge extends PushBridge {
   final bool failSet;
   PushStatus _current;
   final updates = StreamController<PushStatus>();
+  int watches = 0;
 
   @override
   Future<PushStatus> status() async => _current;
@@ -36,10 +37,12 @@ class _FakeBridge extends PushBridge {
     calls.log.add('setEnabled($enabled)');
     if (failSet) throw Exception('StorageUnavailable');
     _current = _status(enabled: enabled);
+    updates.add(_current);
   }
 
   @override
   Future<Future<PushStatus> Function()> watch() async {
+    watches++;
     final queue = StreamIterator(updates.stream);
     return () async {
       await queue.moveNext();
@@ -49,19 +52,26 @@ class _FakeBridge extends PushBridge {
 }
 
 class _FakeDevice implements PushDevice {
-  _FakeDevice(this.calls, {this.failRelease = false});
+  _FakeDevice(this.calls, {this.failRelease = false, this.releaseGate});
 
   final _Calls calls;
   final bool failRelease;
+  final Completer<void>? releaseGate;
+  bool hasToken = true;
 
   @override
   Future<void> release() async {
     calls.log.add('release');
     if (failRelease) throw Exception('deleteToken failed');
+    await releaseGate?.future;
+    hasToken = false;
   }
 
   @override
-  Future<void> reacquire() async => calls.log.add('reacquire');
+  Future<void> reacquire() async {
+    calls.log.add('reacquire');
+    hasToken = true;
+  }
 }
 
 void main() {
@@ -76,8 +86,7 @@ void main() {
       final ok = await toggle.set(false);
 
       expect(ok, isTrue);
-      // The token is still needed to unregister: deleting it first would
-      // leave the server holding registrations nobody can take back.
+      // Persist opt-out and attempt server cleanup before device cleanup.
       expect(calls.log, ['setEnabled(false)', 'release']);
     });
 
@@ -111,8 +120,7 @@ void main() {
     );
 
     test('a device failure does not undo what Rust already did', () async {
-      // Rust holds the setting and has already unregistered; a token that
-      // could not be deleted is harmless once nothing is registered with it.
+      // Rust holds the preference; status still reports any pending cleanup.
       final calls = _Calls();
       final toggle = PushToggle(
         bridge: _FakeBridge(calls),
@@ -124,22 +132,97 @@ void main() {
       expect(ok, isTrue);
     });
 
-    test('tells the screen to re-read the status once done', () async {
-      var changed = 0;
+    test('shares the pending target and clears it after a failure', () async {
+      final pending = <bool?>[];
       final calls = _Calls();
       final toggle = PushToggle(
-        bridge: _FakeBridge(calls),
+        bridge: _FakeBridge(calls, failSet: true),
         device: _FakeDevice(calls),
-        onChanged: () => changed++,
+        onPendingChanged: pending.add,
       );
 
       await toggle.set(false);
 
-      expect(changed, 1);
+      expect(pending, [false, null]);
     });
+
+    test('queues activation behind an opt-out from an earlier visit', () async {
+      final calls = _Calls();
+      final gate = Completer<void>();
+      final device = _FakeDevice(calls, releaseGate: gate);
+      final container = createContainer(
+        overrides: [
+          pushBridgeProvider.overrideWithValue(_FakeBridge(calls)),
+          pushDeviceProvider.overrideWithValue(device),
+        ],
+      );
+      final firstVisit = container.listen(
+        pushTogglePendingProvider,
+        (_, __) {},
+      );
+      final off = container.read(pushToggleProvider).set(false);
+      await Future<void>.delayed(Duration.zero);
+      firstVisit.close();
+
+      // A reopened screen sees the same active transaction.
+      expect(container.read(pushTogglePendingProvider), false);
+      final on = container.read(pushToggleProvider).set(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.log, ['setEnabled(false)', 'release']);
+      gate.complete();
+      expect(await Future.wait([off, on]), [true, true]);
+      expect(calls.log, [
+        'setEnabled(false)',
+        'release',
+        'setEnabled(true)',
+        'reacquire',
+      ]);
+      expect(device.hasToken, isTrue);
+      expect(container.read(pushTogglePendingProvider), isNull);
+    });
+
+    test(
+      'a failed device operation does not block a later activation',
+      () async {
+        final calls = _Calls();
+        final toggle = PushToggle(
+          bridge: _FakeBridge(calls),
+          device: _FakeDevice(calls, failRelease: true),
+        );
+        expect(await Future.wait([toggle.set(false), toggle.set(true)]), [
+          true,
+          true,
+        ]);
+        expect(calls.log.last, 'reacquire');
+      },
+    );
   });
 
   group('pushStatusProvider', () {
+    test('reuses one reader across visits and toggle transactions', () async {
+      final calls = _Calls();
+      final bridge = _FakeBridge(calls);
+      final container = createContainer(
+        overrides: [
+          pushBridgeProvider.overrideWithValue(bridge),
+          pushDeviceProvider.overrideWithValue(_FakeDevice(calls)),
+        ],
+      );
+      for (var i = 0; i < 3; i++) {
+        final visit = container.listen(pushStatusProvider, (_, __) {});
+        await Future<void>.delayed(Duration.zero);
+        visit.close();
+        await Future<void>.delayed(Duration.zero);
+      }
+      await container.read(pushToggleProvider).set(false);
+      await Future<void>.delayed(Duration.zero);
+      final reopened = container.listen(pushStatusProvider, (_, __) {});
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.watches, 1);
+      expect(container.read(pushStatusProvider).requireValue.enabled, isFalse);
+      reopened.close();
+    });
+
     test('starts from the persisted status, then follows the stream', () async {
       final calls = _Calls();
       final bridge = _FakeBridge(calls, initial: _status(registered: 1));

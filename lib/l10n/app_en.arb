@@ -3286,6 +3286,15 @@
   "@pushStatusOff": {
     "description": "Status line under the master push toggle when push is turned off"
   },
+  "pushStatusCleanupPending": "{count, plural, =1{Off — removal of 1 push registration is pending} other{Off — removal of {count} push registrations is pending}}",
+  "@pushStatusCleanupPending": {
+    "description": "Push is off locally, but the server has not confirmed removing these registrations",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "pushStatusNoToken": "Waiting for this device's push token",
   "@pushStatusNoToken": {
     "description": "Status line when push is on but the device has not produced a push token yet"

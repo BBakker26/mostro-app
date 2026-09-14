@@ -472,6 +472,48 @@ void main() {
       );
     });
 
+    testWidgets('push off warns about registrations awaiting removal', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(push: _push(enabled: false, registered: 3)),
+      );
+      const copy = 'Off — removal of 3 push registrations is pending';
+      expect(find.text(copy), findsOneWidget);
+      expect(_colorOf(tester, copy), SettingsPalette.dark.warnInk);
+      expect(
+        find.text('Off — nothing is registered with the push server'),
+        findsNothing,
+      );
+    });
+
+    testWidgets(
+      'a reopened screen remains disabled during the shared transaction',
+      (tester) async {
+        final container = await _pump(
+          tester,
+          const NotificationSettingsScreen(),
+        );
+        container.read(pushTogglePendingProvider.notifier).state = false;
+        await tester.pumpAndSettle();
+        await tester.pumpWidget(_app(container, const SizedBox.shrink()));
+        await tester.pumpAndSettle();
+        await tester.pumpWidget(
+          _app(container, const NotificationSettingsScreen()),
+        );
+        await tester.pumpAndSettle();
+        final toggle = tester.widget<MostroToggle>(_masterToggle);
+        expect(toggle.value, isFalse);
+        expect(toggle.onChanged, isNull);
+
+        container.read(pushTogglePendingProvider.notifier).state = null;
+        await tester.pumpAndSettle();
+        expect(tester.widget<MostroToggle>(_masterToggle).onChanged, isNotNull);
+      },
+    );
+
     testWidgets('an unsupported platform shows an info row, not a toggle', (
       tester,
     ) async {

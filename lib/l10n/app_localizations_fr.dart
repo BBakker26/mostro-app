@@ -2511,6 +2511,17 @@ class AppLocalizationsFr extends AppLocalizations {
       'Désactivées : rien n’est enregistré auprès du serveur push';
 
   @override
+  String pushStatusCleanupPending(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Désactivées — suppression de $count inscriptions push en attente',
+      one: 'Désactivées — suppression de 1 inscription push en attente',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get pushStatusNoToken => 'En attente du jeton push de cet appareil';
 
   @override

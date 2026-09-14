@@ -64,8 +64,10 @@ final pushSupportedProvider = Provider<bool>(
   (ref) => PushNotificationService.instance.isSupported,
 );
 
-/// The persisted status, then one per reconcile while the screen is open.
-final pushStatusProvider = StreamProvider.autoDispose<PushStatus>((ref) async* {
+/// One reader for the process lifetime. A pending Rust `next()` cannot be
+/// cancelled from Dart, so screen disposal or a toggle must not recreate it.
+/// Rust emits the resulting status before each mutation returns.
+final pushStatusProvider = StreamProvider<PushStatus>((ref) async* {
   final bridge = ref.watch(pushBridgeProvider);
   final next = await bridge.watch();
   yield await bridge.status();
@@ -74,29 +76,47 @@ final pushStatusProvider = StreamProvider.autoDispose<PushStatus>((ref) async* {
   }
 });
 
+/// The active transaction's target, shared across visits to Settings.
+final pushTogglePendingProvider = StateProvider<bool?>((ref) => null);
+
 /// Turns push on or off end to end (§7.4).
 ///
-/// Rust goes first both ways. Off: the unregister needs the token, so the
-/// token is let go only after Rust has unregistered everything it knows
-/// about. On: Rust clears the node refusals and is ready before the device
-/// hands a fresh token over.
+/// Rust goes first both ways. Off persists the preference and attempts every
+/// unregister before releasing the device token; failed removals remain in
+/// the status for retry. On clears refusals before acquiring a fresh token.
 class PushToggle {
   PushToggle({
     required PushBridge bridge,
     required PushDevice device,
-    VoidCallback? onChanged,
+    ValueChanged<bool?>? onPendingChanged,
   }) : _bridge = bridge,
        _device = device,
-       _onChanged = onChanged;
+       _onPendingChanged = onPendingChanged;
 
   final PushBridge _bridge;
   final PushDevice _device;
-  final VoidCallback? _onChanged;
+  final ValueChanged<bool?>? _onPendingChanged;
+  Future<void> _tail = Future.value();
 
   /// False when the setting could not be saved, and nothing changed. A
-  /// device-side failure after that is logged, not reported: Rust holds the
-  /// setting, and a token nothing is registered with is harmless.
-  Future<bool> set(bool enabled) async {
+  /// device-side failure after that does not undo the persisted preference.
+  /// Queue the entire transaction, including device I/O, across callers.
+  Future<bool> set(bool enabled) {
+    final result = _tail.then((_) => _set(enabled));
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return result;
+  }
+
+  Future<bool> _set(bool enabled) async {
+    _onPendingChanged?.call(enabled);
+    try {
+      return await _apply(enabled);
+    } finally {
+      _onPendingChanged?.call(null);
+    }
+  }
+
+  Future<bool> _apply(bool enabled) async {
     try {
       await _bridge.setEnabled(enabled);
     } catch (e) {
@@ -112,7 +132,6 @@ class PushToggle {
     } catch (e) {
       debugPrint('[push_settings] device side of the toggle failed: $e');
     }
-    _onChanged?.call();
     return true;
   }
 }
@@ -121,6 +140,7 @@ final pushToggleProvider = Provider<PushToggle>(
   (ref) => PushToggle(
     bridge: ref.watch(pushBridgeProvider),
     device: ref.watch(pushDeviceProvider),
-    onChanged: () => ref.invalidate(pushStatusProvider),
+    onPendingChanged:
+        (value) => ref.read(pushTogglePendingProvider.notifier).state = value,
   ),
 );

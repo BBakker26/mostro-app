@@ -25,7 +25,7 @@ PushStatus _status({
 
 void main() {
   group('pushStatusLine', () {
-    test('off wins over everything else', () {
+    test('off retains outstanding server cleanup as a warning', () {
       final line = pushStatusLine(
         _status(
           enabled: false,
@@ -35,7 +35,26 @@ void main() {
         now: _now,
       );
 
+      expect(line.kind, PushStatusLineKind.cleanupPending);
+      expect(line.count, 3);
+      expect(line.isWarning, isTrue);
+    });
+
+    test('off reports cleanup even after the device token was cleared', () {
+      final line = pushStatusLine(
+        _status(enabled: false, hasToken: false, registered: 1),
+        now: _now,
+      );
+      expect(line.kind, PushStatusLineKind.cleanupPending);
+    });
+
+    test('off reports completed cleanup only when no registrations remain', () {
+      final line = pushStatusLine(
+        _status(enabled: false, lastError: 'PushServerUnreachable'),
+        now: _now,
+      );
       expect(line.kind, PushStatusLineKind.off);
+      expect(line.isWarning, isFalse);
     });
 
     test('a refusal still in force reads as refused', () {
@@ -123,6 +142,7 @@ void main() {
       for (final kind in PushStatusLineKind.values) {
         final warning = switch (kind) {
           PushStatusLineKind.refused ||
+          PushStatusLineKind.cleanupPending ||
           PushStatusLineKind.unreachable ||
           PushStatusLineKind.rateLimited => true,
           _ => false,

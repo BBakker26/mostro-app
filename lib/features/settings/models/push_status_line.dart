@@ -8,6 +8,9 @@ enum PushStatusLineKind {
   /// The master toggle is off.
   off,
 
+  /// Off locally, but the server has not confirmed every removal yet.
+  cleanupPending,
+
   /// The operator's `403` for the active node is still in force.
   refused,
 
@@ -42,6 +45,7 @@ class PushStatusLine {
   /// Whether the line reports something the user may want to know is wrong.
   bool get isWarning => switch (kind) {
     PushStatusLineKind.refused ||
+    PushStatusLineKind.cleanupPending ||
     PushStatusLineKind.unreachable ||
     PushStatusLineKind.rateLimited => true,
     _ => false,
@@ -56,7 +60,14 @@ class PushStatusLine {
 /// No token is checked before the failure markers, so a device still waiting
 /// for its token is not reported as a server problem.
 PushStatusLine pushStatusLine(PushStatus status, {required DateTime now}) {
-  if (!status.enabled) return const PushStatusLine(PushStatusLineKind.off);
+  if (!status.enabled) {
+    return status.registered > 0
+        ? PushStatusLine(
+          PushStatusLineKind.cleanupPending,
+          count: status.registered,
+        )
+        : const PushStatusLine(PushStatusLineKind.off);
+  }
   final refusedUntil = status.nodeRefusedUntil;
   if (refusedUntil != null && _fromSecs(refusedUntil.toInt()).isAfter(now)) {
     return const PushStatusLine(PushStatusLineKind.refused);

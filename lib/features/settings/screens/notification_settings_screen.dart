@@ -152,17 +152,18 @@ class _PushMasterRowState extends ConsumerState<_PushMasterRow> {
     final book = OrderBookPalette.of(context);
     final pal = SettingsPalette.of(context);
     final status = ref.watch(pushStatusProvider).valueOrNull;
+    final activeTarget = ref.watch(pushTogglePendingProvider);
     ref.listen(pushStatusProvider, (_, next) {
       if (!_busy && _pending != null && next.valueOrNull?.enabled == _pending) {
         setState(() => _pending = null);
       }
     });
     // Unknown reads as on, the persisted default (§8.1).
-    final value = _pending ?? status?.enabled ?? true;
+    final value = activeTarget ?? _pending ?? status?.enabled ?? true;
     // No line while a change is on its way: the old status would contradict
     // the toggle the user just flipped.
     final line =
-        status == null || _pending != null
+        status == null || _pending != null || activeTarget != null
             ? null
             : pushStatusLine(status, now: clock.now());
     final title = l10n.pushMasterToggleTitle;
@@ -221,7 +222,7 @@ class _PushMasterRowState extends ConsumerState<_PushMasterRow> {
           MostroToggle(
             value: value,
             semanticLabel: title,
-            onChanged: _busy ? null : _set,
+            onChanged: _busy || activeTarget != null ? null : _set,
           ),
         ],
       ),
@@ -258,6 +259,9 @@ class _PushMasterRowState extends ConsumerState<_PushMasterRow> {
     PushStatusLine line,
   ) => switch (line.kind) {
     PushStatusLineKind.off => l10n.pushStatusOff,
+    PushStatusLineKind.cleanupPending => l10n.pushStatusCleanupPending(
+      line.count,
+    ),
     PushStatusLineKind.refused => l10n.pushStatusNodeRefused,
     PushStatusLineKind.noToken => l10n.pushStatusNoToken,
     PushStatusLineKind.unreachable => l10n.pushStatusUnreachable,

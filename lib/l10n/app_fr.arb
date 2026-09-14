@@ -828,6 +828,7 @@
   "pushMasterToggleTitle": "Notifications push",
   "pushMasterToggleSubtitle": "Réveille l’app quand une mise à jour d’échange ou un message arrive. La notification elle-même ne contient rien.",
   "pushStatusOff": "Désactivées : rien n’est enregistré auprès du serveur push",
+  "pushStatusCleanupPending": "{count, plural, =1{Désactivées — suppression de 1 inscription push en attente} other{Désactivées — suppression de {count} inscriptions push en attente}}",
   "pushStatusNoToken": "En attente du jeton push de cet appareil",
   "pushStatusIdle": "Activées : aucun échange ouvert à enregistrer",
   "pushStatusRegistered": "{count, plural, =1{Enregistré pour 1 échange} other{Enregistré pour {count} échanges}}",

@@ -110,7 +110,7 @@ Run this whenever you add or change public functions in `rust/src/api/`:
 ./scripts/frb-generate.sh
 ```
 
-The wrapper verifies your codegen CLI matches the version pinned in `pubspec.yaml` before generating. The generated files live in `lib/src/rust/` and are gitignored — they are produced on the fly, locally and in CI, so there is nothing to commit.
+The wrapper verifies your codegen CLI matches the version pinned in `pubspec.yaml` before generating. The generated files live in `lib/src/rust/` (plus `rust/src/frb_generated.rs`) and are **committed**. Commit them together with the `rust/src/api/` change; CI fails when they drift. See `CONTRIBUTING.md` → "Generated code".
 
 ---
 

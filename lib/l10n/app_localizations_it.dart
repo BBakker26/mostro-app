@@ -3202,6 +3202,27 @@ class AppLocalizationsIt extends AppLocalizations {
   String get invoiceFieldHint => 'lnbc… o utente@dominio';
 
   @override
+  String get invoiceFieldPromptLabel => 'Incolla qui la tua fattura';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Fattura Lightning';
+
+  @override
+  String get invoiceScanButton => 'Scansiona';
+
+  @override
+  String get invoiceReplaceButton => 'Sostituisci';
+
+  @override
+  String get invoiceFieldSemantics =>
+      'Fattura o indirizzo Lightning, obbligatorio';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Fattura Lightning da $sats sats';
+  }
+
+  @override
   String get invoiceValidAddress =>
       'Indirizzo valido · la fattura verrà richiesta all\'invio';
 
@@ -3290,5 +3311,153 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
+  }
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceTitle =>
+      'In attesa della fattura dell\'acquirente';
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceMessage =>
+      'Lo scambio prosegue quando l\'acquirente aggiunge una fattura Lightning.';
+
+  @override
+  String get tradeCardWaitingPaymentTitle =>
+      'In attesa del pagamento del venditore';
+
+  @override
+  String get tradeCardWaitingPaymentMessage =>
+      'Lo scambio prosegue quando il venditore paga la fattura hold.';
+
+  @override
+  String get tradeCardWaitingTakerBondTitle =>
+      'Pagamento del deposito in sospeso';
+
+  @override
+  String get tradeCardWaitingTakerBondMessage =>
+      'Il deposito anti-abuso di chi accetta l\'ordine deve essere pagato prima dell\'inizio dello scambio.';
+
+  @override
+  String get tradeCardActiveTitle => 'Scambio attivo';
+
+  @override
+  String get tradeCardActiveMessage =>
+      'I sats sono bloccati. L\'acquirente può ora inviare il pagamento fiat.';
+
+  @override
+  String get tradeCardFiatSentTitle => 'Fiat segnato come inviato';
+
+  @override
+  String get tradeCardFiatSentMessage =>
+      'L\'acquirente ha segnato il pagamento fiat come inviato.';
+
+  @override
+  String get tradeCardSettledHoldInvoiceTitle => 'Sats rilasciati';
+
+  @override
+  String get tradeCardSettledHoldInvoiceMessage =>
+      'Il venditore ha rilasciato i sats. Il pagamento all\'acquirente è in arrivo.';
+
+  @override
+  String get tradeCardSuccessTitle => 'Scambio completato';
+
+  @override
+  String get tradeCardSuccessMessage =>
+      'Lo scambio si è concluso con successo.';
+
+  @override
+  String get tradeCardCanceledTitle => 'Scambio annullato';
+
+  @override
+  String get tradeCardCanceledMessage => 'Lo scambio è stato annullato.';
+
+  @override
+  String get tradeCardExpiredTitle => 'Ordine scaduto';
+
+  @override
+  String get tradeCardExpiredMessage =>
+      'L\'ordine è scaduto prima che lo scambio potesse proseguire.';
+
+  @override
+  String get tradeCardCooperativelyCanceledTitle =>
+      'Scambio annullato di comune accordo';
+
+  @override
+  String get tradeCardCooperativelyCanceledMessage =>
+      'Entrambe le parti hanno accettato di annullare lo scambio.';
+
+  @override
+  String get tradeCardDisputeTitle => 'Disputa aperta';
+
+  @override
+  String get tradeCardDisputeMessage =>
+      'È stata aperta una disputa su questo scambio.';
+
+  @override
+  String get tradeCardCanceledByAdminTitle => 'Annullato dal mediatore';
+
+  @override
+  String get tradeCardCanceledByAdminMessage =>
+      'Il mediatore della disputa ha annullato lo scambio.';
+
+  @override
+  String get tradeCardSettledByAdminTitle => 'Risolto dal mediatore';
+
+  @override
+  String get tradeCardSettledByAdminMessage =>
+      'Il mediatore della disputa ha rilasciato i sats all\'acquirente.';
+
+  @override
+  String get tradeCardCompletedByAdminTitle => 'Completato dal mediatore';
+
+  @override
+  String get tradeCardCompletedByAdminMessage =>
+      'Il mediatore della disputa ha completato lo scambio.';
+
+  @override
+  String get tradeCardUpdatedTitle => 'Scambio aggiornato';
+
+  @override
+  String get tradeCardUpdatedMessage =>
+      'Lo stato di questo scambio è cambiato.';
+
+  @override
+  String get tradeCardCanceledByMakerMessage =>
+      'Il creatore ha annullato l\'ordine.';
+
+  @override
+  String get tradeCardCanceledBondLostRaceMessage =>
+      'Un altro utente ha preso questo ordine prima che il deposito fosse pagato.';
+
+  @override
+  String get tradeCardCanceledBondExpiredMessage =>
+      'La fattura del deposito è scaduta senza essere pagata.';
+
+  @override
+  String get chatCardTitle => 'Nuovi messaggi';
+
+  @override
+  String get chatCardSolverTitle => 'Messaggi dal mediatore';
+
+  @override
+  String chatCardMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count nuovi messaggi dalla tua controparte',
+      one: '1 nuovo messaggio dalla tua controparte',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String chatCardSolverMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count nuovi messaggi dal mediatore della disputa',
+      one: '1 nuovo messaggio dal mediatore della disputa',
+    );
+    return '$_temp0';
   }
 }

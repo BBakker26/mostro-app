@@ -3211,6 +3211,27 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceFieldHint => 'lnbc… oder nutzer@domain';
 
   @override
+  String get invoiceFieldPromptLabel => 'Rechnung hier einfügen';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Lightning-Rechnung';
+
+  @override
+  String get invoiceScanButton => 'Scannen';
+
+  @override
+  String get invoiceReplaceButton => 'Ersetzen';
+
+  @override
+  String get invoiceFieldSemantics =>
+      'Lightning-Rechnung oder -Adresse, erforderlich';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Lightning-Rechnung über $sats Sats';
+  }
+
+  @override
   String get invoiceValidAddress =>
       'Gültige Adresse · die Rechnung wird beim Senden angefordert';
 
@@ -3299,5 +3320,152 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours Std. $minutes';
+  }
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceTitle =>
+      'Warte auf die Rechnung des Käufers';
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceMessage =>
+      'Der Handel geht weiter, sobald der Käufer eine Lightning-Rechnung hinzufügt.';
+
+  @override
+  String get tradeCardWaitingPaymentTitle =>
+      'Warte auf die Zahlung des Verkäufers';
+
+  @override
+  String get tradeCardWaitingPaymentMessage =>
+      'Der Handel geht weiter, sobald der Verkäufer die Hold-Rechnung bezahlt.';
+
+  @override
+  String get tradeCardWaitingTakerBondTitle => 'Kautionszahlung ausstehend';
+
+  @override
+  String get tradeCardWaitingTakerBondMessage =>
+      'Die Anti-Missbrauchs-Kaution des Nehmers muss vor Handelsbeginn bezahlt werden.';
+
+  @override
+  String get tradeCardActiveTitle => 'Handel aktiv';
+
+  @override
+  String get tradeCardActiveMessage =>
+      'Die Sats sind gesperrt. Der Käufer kann jetzt die Fiat-Zahlung senden.';
+
+  @override
+  String get tradeCardFiatSentTitle => 'Fiat als gesendet markiert';
+
+  @override
+  String get tradeCardFiatSentMessage =>
+      'Der Käufer hat die Fiat-Zahlung als gesendet markiert.';
+
+  @override
+  String get tradeCardSettledHoldInvoiceTitle => 'Sats freigegeben';
+
+  @override
+  String get tradeCardSettledHoldInvoiceMessage =>
+      'Der Verkäufer hat die Sats freigegeben. Die Auszahlung an den Käufer ist unterwegs.';
+
+  @override
+  String get tradeCardSuccessTitle => 'Handel abgeschlossen';
+
+  @override
+  String get tradeCardSuccessMessage =>
+      'Der Handel wurde erfolgreich abgeschlossen.';
+
+  @override
+  String get tradeCardCanceledTitle => 'Handel storniert';
+
+  @override
+  String get tradeCardCanceledMessage => 'Der Handel wurde storniert.';
+
+  @override
+  String get tradeCardExpiredTitle => 'Order abgelaufen';
+
+  @override
+  String get tradeCardExpiredMessage =>
+      'Die Order ist abgelaufen, bevor der Handel weitergehen konnte.';
+
+  @override
+  String get tradeCardCooperativelyCanceledTitle =>
+      'Handel einvernehmlich storniert';
+
+  @override
+  String get tradeCardCooperativelyCanceledMessage =>
+      'Beide Parteien haben der Stornierung des Handels zugestimmt.';
+
+  @override
+  String get tradeCardDisputeTitle => 'Streitfall eröffnet';
+
+  @override
+  String get tradeCardDisputeMessage =>
+      'Zu diesem Handel wurde ein Streitfall eröffnet.';
+
+  @override
+  String get tradeCardCanceledByAdminTitle => 'Vom Schlichter storniert';
+
+  @override
+  String get tradeCardCanceledByAdminMessage =>
+      'Der Streitschlichter hat den Handel storniert.';
+
+  @override
+  String get tradeCardSettledByAdminTitle => 'Vom Schlichter beigelegt';
+
+  @override
+  String get tradeCardSettledByAdminMessage =>
+      'Der Streitschlichter hat die Sats an den Käufer freigegeben.';
+
+  @override
+  String get tradeCardCompletedByAdminTitle => 'Vom Schlichter abgeschlossen';
+
+  @override
+  String get tradeCardCompletedByAdminMessage =>
+      'Der Streitschlichter hat den Handel abgeschlossen.';
+
+  @override
+  String get tradeCardUpdatedTitle => 'Handel aktualisiert';
+
+  @override
+  String get tradeCardUpdatedMessage =>
+      'Der Status dieses Handels hat sich geändert.';
+
+  @override
+  String get tradeCardCanceledByMakerMessage =>
+      'Der Ersteller hat die Order storniert.';
+
+  @override
+  String get tradeCardCanceledBondLostRaceMessage =>
+      'Ein anderer Nutzer hat diese Order genommen, bevor die Kaution bezahlt wurde.';
+
+  @override
+  String get tradeCardCanceledBondExpiredMessage =>
+      'Die Kautionsrechnung ist unbezahlt abgelaufen.';
+
+  @override
+  String get chatCardTitle => 'Neue Nachrichten';
+
+  @override
+  String get chatCardSolverTitle => 'Nachrichten vom Schlichter';
+
+  @override
+  String chatCardMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count neue Nachrichten von deinem Handelspartner',
+      one: '1 neue Nachricht von deinem Handelspartner',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String chatCardSolverMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count neue Nachrichten vom Streitschlichter',
+      one: '1 neue Nachricht vom Streitschlichter',
+    );
+    return '$_temp0';
   }
 }

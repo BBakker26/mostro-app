@@ -3173,6 +3173,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceFieldHint => 'lnbc… or user@domain';
 
   @override
+  String get invoiceFieldPromptLabel => 'Paste your invoice here';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Lightning invoice';
+
+  @override
+  String get invoiceScanButton => 'Scan';
+
+  @override
+  String get invoiceReplaceButton => 'Replace';
+
+  @override
+  String get invoiceFieldSemantics => 'Lightning invoice or address, required';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Lightning invoice for $sats sats';
+  }
+
+  @override
   String get invoiceValidAddress =>
       'Valid address · the invoice will be requested on sending';
 
@@ -3260,5 +3280,148 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
+  }
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceTitle =>
+      'Waiting for the buyer\'s invoice';
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceMessage =>
+      'The trade continues once the buyer adds a Lightning invoice.';
+
+  @override
+  String get tradeCardWaitingPaymentTitle =>
+      'Waiting for the seller\'s payment';
+
+  @override
+  String get tradeCardWaitingPaymentMessage =>
+      'The trade continues once the seller pays the hold invoice.';
+
+  @override
+  String get tradeCardWaitingTakerBondTitle => 'Bond payment pending';
+
+  @override
+  String get tradeCardWaitingTakerBondMessage =>
+      'The taker\'s anti-abuse bond must be paid before the trade starts.';
+
+  @override
+  String get tradeCardActiveTitle => 'Trade active';
+
+  @override
+  String get tradeCardActiveMessage =>
+      'The sats are locked. The buyer can now send the fiat payment.';
+
+  @override
+  String get tradeCardFiatSentTitle => 'Fiat marked as sent';
+
+  @override
+  String get tradeCardFiatSentMessage =>
+      'The buyer marked the fiat payment as sent.';
+
+  @override
+  String get tradeCardSettledHoldInvoiceTitle => 'Sats released';
+
+  @override
+  String get tradeCardSettledHoldInvoiceMessage =>
+      'The seller released the sats. The buyer\'s payout is on its way.';
+
+  @override
+  String get tradeCardSuccessTitle => 'Trade completed';
+
+  @override
+  String get tradeCardSuccessMessage => 'The trade finished successfully.';
+
+  @override
+  String get tradeCardCanceledTitle => 'Trade canceled';
+
+  @override
+  String get tradeCardCanceledMessage => 'The trade was canceled.';
+
+  @override
+  String get tradeCardExpiredTitle => 'Order expired';
+
+  @override
+  String get tradeCardExpiredMessage =>
+      'The order expired before the trade could continue.';
+
+  @override
+  String get tradeCardCooperativelyCanceledTitle =>
+      'Trade canceled by agreement';
+
+  @override
+  String get tradeCardCooperativelyCanceledMessage =>
+      'Both parties agreed to cancel the trade.';
+
+  @override
+  String get tradeCardDisputeTitle => 'Dispute opened';
+
+  @override
+  String get tradeCardDisputeMessage => 'A dispute was opened on this trade.';
+
+  @override
+  String get tradeCardCanceledByAdminTitle => 'Canceled by the resolver';
+
+  @override
+  String get tradeCardCanceledByAdminMessage =>
+      'The dispute resolver canceled the trade.';
+
+  @override
+  String get tradeCardSettledByAdminTitle => 'Settled by the resolver';
+
+  @override
+  String get tradeCardSettledByAdminMessage =>
+      'The dispute resolver released the sats to the buyer.';
+
+  @override
+  String get tradeCardCompletedByAdminTitle => 'Completed by the resolver';
+
+  @override
+  String get tradeCardCompletedByAdminMessage =>
+      'The dispute resolver completed the trade.';
+
+  @override
+  String get tradeCardUpdatedTitle => 'Trade updated';
+
+  @override
+  String get tradeCardUpdatedMessage => 'The status of this trade changed.';
+
+  @override
+  String get tradeCardCanceledByMakerMessage => 'The maker canceled the order.';
+
+  @override
+  String get tradeCardCanceledBondLostRaceMessage =>
+      'Another user took this order before the bond was paid.';
+
+  @override
+  String get tradeCardCanceledBondExpiredMessage =>
+      'The bond invoice expired unpaid.';
+
+  @override
+  String get chatCardTitle => 'New messages';
+
+  @override
+  String get chatCardSolverTitle => 'Messages from the resolver';
+
+  @override
+  String chatCardMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count new messages from your trade partner',
+      one: '1 new message from your trade partner',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String chatCardSolverMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count new messages from the dispute resolver',
+      one: '1 new message from the dispute resolver',
+    );
+    return '$_temp0';
   }
 }

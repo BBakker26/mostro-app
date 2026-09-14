@@ -723,6 +723,15 @@ pub async fn on_new_message(trade_id: String) -> Result<MessageStream> {
     Ok(MessageStream { rx, trade_id })
 }
 
+/// Stream that emits every new message, of every trade — sent and received,
+/// peer and admin alike, since both go through the same store. The
+/// Notifications screen's chat cards read it (issue #474); per-screen
+/// consumers want [`on_new_message`].
+pub async fn on_any_new_message() -> Result<AnyMessageStream> {
+    let rx = message_store().new_message_tx.subscribe();
+    Ok(AnyMessageStream { rx })
+}
+
 /// Stream that emits the updated global unread count after any read/write.
 pub async fn on_unread_count_changed() -> Result<UnreadCountStream> {
     let rx = message_store().unread_tx.subscribe();
@@ -749,6 +758,25 @@ impl MessageStream {
                 Ok(msg) if msg.trade_id == self.trade_id => return Some(msg),
                 Ok(_) => continue, // different trade
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+}
+
+pub struct AnyMessageStream {
+    rx: broadcast::Receiver<ChatMessage>,
+}
+
+impl AnyMessageStream {
+    pub async fn next(&mut self) -> Option<ChatMessage> {
+        loop {
+            match self.rx.recv().await {
+                Ok(msg) => return Some(msg),
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log::warn!("[messages] any-message stream lagged, dropped {n} messages");
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => return None,
             }
         }
@@ -1576,6 +1604,44 @@ mod tests {
             chat_subscription_id(ChatChannel::Peer, order),
             chat_subscription_id(ChatChannel::Dispute, order)
         );
+    }
+
+    /// Issue #474: the Notifications cards read one stream for every trade's
+    /// chat, where the per-trade stream drops all but one.
+    #[tokio::test]
+    async fn the_any_message_stream_carries_every_trade() {
+        let mut stream = on_any_new_message().await.unwrap();
+        let first = uuid::Uuid::new_v4().to_string();
+        let second = uuid::Uuid::new_v4().to_string();
+        for trade_id in [&first, &second] {
+            message_store()
+                .add_message(ChatMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    trade_id: trade_id.clone(),
+                    sender_pubkey: "peer".into(),
+                    content: "hi".into(),
+                    message_type: MessageType::Peer,
+                    is_mine: false,
+                    is_read: false,
+                    has_attachment: false,
+                    attachment: None,
+                    created_at: 1,
+                })
+                .await;
+        }
+
+        // Parallel tests share the store, so only our two trades count.
+        let mut seen = Vec::new();
+        while seen.len() < 2 {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+                .await
+                .expect("a message within 5s")
+                .expect("stream open");
+            if msg.trade_id == first || msg.trade_id == second {
+                seen.push(msg.trade_id);
+            }
+        }
+        assert_eq!(seen, vec![first, second]);
     }
 
     #[test]

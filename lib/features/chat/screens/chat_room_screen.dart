@@ -11,6 +11,8 @@ import 'package:mostro/features/chat/widgets/info_panels.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
+import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
@@ -146,8 +148,19 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
   }
 
-  Future<void> _markRead() =>
-      _markReadWith(ref.read(chatRoomsNotifierProvider.notifier));
+  Future<void> _markRead() async {
+    final notifications = ref.read(notificationsProvider.notifier);
+    await _markReadWith(ref.read(chatRoomsNotifierProvider.notifier));
+    // The Notifications card for this chat is what the user is reading now.
+    // No card is added while the room is open, so marking it here is enough.
+    // After the await on purpose: this starts in initState, where a provider
+    // must not change.
+    if (notifications.mounted) {
+      await notifications.markAsRead(
+        NotificationModel.chatCardId(widget.orderId, fromSolver: false),
+      );
+    }
+  }
 
   /// [rooms] is passed in rather than read from `ref` so [_flushMarkRead]
   /// can run it from [dispose].

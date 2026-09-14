@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 import 'package:mostro/features/notifications/models/notification_model.dart';
 
@@ -155,6 +154,34 @@ class SembastNotificationsStore {
       await _processed.record(notification.id).put(txn, true);
       await _upsert(txn, notification);
       return true;
+    });
+  }
+
+  /// Folds one chat message into its trade's card, exactly once per message.
+  ///
+  /// In one transaction: returns null when [messageId] was already counted;
+  /// otherwise marks it, hands [fold] the card as stored (null when there is
+  /// none, or the user deleted it) and writes what [fold] returns. The ledger
+  /// is the same one [saveIfUnprocessed] uses, under a `msg:` prefix, so a
+  /// message never counts twice even after its card was cleared.
+  Future<NotificationModel?> saveChatMessage({
+    required String messageId,
+    required String cardId,
+    required NotificationModel Function(NotificationModel? existing) fold,
+  }) async {
+    final db = await _open();
+    return db.transaction((txn) async {
+      final ledgerKey = 'msg:$messageId';
+      if (await _processed.record(ledgerKey).get(txn) ?? false) return null;
+      await _processed.record(ledgerKey).put(txn, true);
+      final raw = await _store.record(cardId).get(txn);
+      final existing =
+          raw == null
+              ? null
+              : NotificationModel.fromJson(Map<String, dynamic>.from(raw));
+      final card = fold(existing);
+      await _upsert(txn, card);
+      return card;
     });
   }
 
@@ -346,34 +373,40 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
     }
   }
 
-  // ── Bridge stubs ────────────────────────────────────────────────────────────
-
-  /// Called from bridge listener for on_trade_updated events.
-  void onTradeUpdated(String orderId, String status) {
-    final notification = NotificationModel(
-      id: const Uuid().v4(),
-      type: NotificationType.tradeUpdate,
-      title: 'Trade updated',
-      message: 'Order $orderId status changed to $status.',
-      timestamp: DateTime.now(),
-      orderId: orderId,
-      detail: {'Order': orderId, 'Status': status},
-    );
-    add(notification);
+  /// Records one chat message on its trade's card (see
+  /// [SembastNotificationsStore.saveChatMessage]): the card moves to the top
+  /// with what [fold] made of it, and a message already counted changes
+  /// nothing. A failed write leaves state as it was, so a later delivery of
+  /// the same message retries.
+  Future<void> addChatMessage({
+    required String messageId,
+    required String cardId,
+    required NotificationModel Function(NotificationModel? existing) fold,
+  }) async {
+    final store = this.store;
+    if (store == null) {
+      _putOnTop(fold(state.where((n) => n.id == cardId).firstOrNull));
+      return;
+    }
+    final NotificationModel? card;
+    try {
+      card = await store.saveChatMessage(
+        messageId: messageId,
+        cardId: cardId,
+        fold: fold,
+      );
+    } catch (e) {
+      debugPrint('NotificationsNotifier: failed to persist chat card: $e');
+      return;
+    }
+    if (card != null) _putOnTop(card);
   }
 
-  /// Called from bridge listener for on_new_message events.
-  void onNewMessage(String orderId) {
-    final notification = NotificationModel(
-      id: const Uuid().v4(),
-      type: NotificationType.message,
-      title: 'New message',
-      message: 'You have a new message for order $orderId.',
-      timestamp: DateTime.now(),
-      orderId: orderId,
-      detail: {'Order': orderId},
-    );
-    add(notification);
+  void _putOnTop(NotificationModel card) {
+    // A new message brings a deleted card back on purpose; a load in flight
+    // must not drop it again.
+    _deletedDuringLoad.remove(card.id);
+    state = [card, ...state.where((n) => n.id != card.id)];
   }
 }
 

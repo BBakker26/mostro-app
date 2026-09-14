@@ -206,10 +206,14 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 
     switch (n.type) {
       case NotificationType.ratingReceived:
-      case NotificationType.tradeUpdate:
         n.orderId != null
             ? context.push(AppRoute.rateUserPath(n.orderId!))
             : noId();
+      // A peer chat card opens that chat; the solver's opens the trade,
+      // like a trade status card (the default below).
+      case NotificationType.message
+          when n.orderId != null && !n.isSolverChatCard:
+        context.push(AppRoute.chatRoomPath(n.orderId!));
       case NotificationType.paymentReceived:
       case NotificationType.payment:
         n.orderId != null

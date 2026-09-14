@@ -40,9 +40,10 @@ class _PaymentMethodPickerScreenState
   void _toggle(String method) {
     final notifier = ref.read(selectedPaymentMethodsProvider.notifier);
     final current = notifier.state;
-    notifier.state = current.contains(method)
-        ? current.where((m) => m != method).toList()
-        : [...current, method];
+    notifier.state =
+        current.contains(method)
+            ? current.where((m) => m != method).toList()
+            : [...current, method];
   }
 
   void _removeCustom(String method) {
@@ -87,9 +88,10 @@ class _PaymentMethodPickerScreenState
     final custom = ref.watch(customPaymentMethodsProvider);
 
     final query = _query.trim().toLowerCase();
-    final visible = query.isEmpty
-        ? catalogue
-        : catalogue.where((m) => m.toLowerCase().contains(query)).toList();
+    final visible =
+        query.isEmpty
+            ? catalogue
+            : catalogue.where((m) => m.toLowerCase().contains(query)).toList();
     final canAddCustom = sanitizeCustomMethod(_customDraft).isNotEmpty;
 
     return Scaffold(
@@ -184,32 +186,31 @@ class _PaymentMethodPickerScreenState
               const SizedBox(width: 12),
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child:
-                    FilledButton(
-                      onPressed: canAddCustom ? _addCustom : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: palette.lime,
-                        foregroundColor: palette.onLime,
-                        disabledBackgroundColor: create.ctaDisabledBg,
-                        disabledForegroundColor: create.ctaDisabledInk,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        minimumSize: Size.zero,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        textStyle: const TextStyle(
-                          fontFamily: AppFonts.ui,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      child: Text(l10n.paymentMethodAdd),
-                    ).withAutomationId(
-                      AutomationIds.orderCreatePaymentMethodCustomAdd,
+                child: FilledButton(
+                  onPressed: canAddCustom ? _addCustom : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: palette.lime,
+                    foregroundColor: palette.onLime,
+                    disabledBackgroundColor: create.ctaDisabledBg,
+                    disabledForegroundColor: create.ctaDisabledInk,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
                     ),
+                    minimumSize: Size.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    textStyle: const TextStyle(
+                      fontFamily: AppFonts.ui,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  child: Text(l10n.paymentMethodAdd),
+                ).withAutomationId(
+                  AutomationIds.orderCreatePaymentMethodCustomAdd,
+                ),
               ),
             ],
           ),

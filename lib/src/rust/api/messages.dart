@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `active_chats`, `add_message`, `admin_chat_context`, `advance_cursor`, `budget_ok`, `chat_context`, `chat_still_relevant`, `chat_subscription_id`, `cursor_key`, `ensure_durable`, `ensure_hydrated`, `get_messages`, `guard_key`, `handle_chat_event`, `id_prefix`, `insert`, `is_known`, `is_supported_mime_type`, `load_chat_cursor`, `mark_as_read`, `message_store`, `message_type`, `mime_to_file_type`, `new`, `new`, `new`, `new`, `parse_chat_payload`, `peer_to_wake`, `persist_decrypted_attachment`, `publish_chat_payload_for`, `publish_chat_payload`, `quota_exceeded`, `rebuild_session`, `reject`, `resubscribe_active_chats`, `run_chat_subscription`, `safe_filename`, `session_or_rebuild`, `store_chat_cursor`, `store_outgoing_admin_message`, `subscribe_incoming_chat`, `try_take`, `unread_count_inner`
+// These functions are ignored because they are not marked as `pub`: `active_chats`, `add_message`, `admin_chat_context`, `advance_cursor`, `budget_ok`, `chat_context`, `chat_still_relevant`, `chat_subscription_id`, `cursor_key`, `ensure_durable`, `ensure_hydrated`, `get_messages`, `guard_key`, `handle_chat_event`, `id_prefix`, `insert`, `is_known`, `is_supported_mime_type`, `load_chat_cursor`, `mark_as_read`, `message_store`, `message_type`, `mime_to_file_type`, `new`, `new`, `new`, `new`, `new`, `next_from`, `notification_backlog`, `notification_candidate_now`, `notification_candidate`, `parse_chat_payload`, `peer_to_wake`, `persist_decrypted_attachment`, `publish_chat_payload_for`, `publish_chat_payload`, `quota_exceeded`, `rebuild_session`, `reject`, `resubscribe_active_chats`, `run_chat_subscription`, `safe_filename`, `session_or_rebuild`, `store_chat_cursor`, `store_outgoing_admin_message`, `subscribe_incoming_chat`, `try_take`, `unread_count_inner`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BoundedIdSet`, `ChatChannel`, `ChatContext`, `ChatRxState`, `MessageStore`, `PublishedChat`, `TokenBucket`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `eq`, `fmt`, `fmt`
 
@@ -82,6 +82,15 @@ Future<DownloadStatus?> getAttachmentStatus({required String messageId}) =>
 Future<MessageStream> onNewMessage({required String tradeId}) =>
     RustLib.instance.api.crateApiMessagesOnNewMessage(tradeId: tradeId);
 
+/// Incoming unread messages for notification cards, with at-least-once
+/// delivery. Replays durable unread history on startup, channel lag and
+/// every minute (including after resume), so a failed Dart persistence write
+/// or a crash between the Rust and Dart commits is retried without a relay.
+/// Consumers must deduplicate by message id, including deliberately suppressed
+/// messages. Per-screen consumers want [`on_new_message`] instead.
+Future<AnyMessageStream> onAnyNewMessage() =>
+    RustLib.instance.api.crateApiMessagesOnAnyNewMessage();
+
 /// Stream that emits the updated global unread count after any read/write.
 Future<UnreadCountStream> onUnreadCountChanged() =>
     RustLib.instance.api.crateApiMessagesOnUnreadCountChanged();
@@ -92,6 +101,11 @@ Future<AttachmentProgressStream> onAttachmentProgress({
 }) => RustLib.instance.api.crateApiMessagesOnAttachmentProgress(
   messageId: messageId,
 );
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AnyMessageStream>>
+abstract class AnyMessageStream implements RustOpaqueInterface {
+  Future<ChatMessage?> next();
+}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<AttachmentProgressStream>>
 abstract class AttachmentProgressStream implements RustOpaqueInterface {

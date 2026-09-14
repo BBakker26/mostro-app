@@ -1,24 +1,17 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mostro/core/app_routes.dart';
+import 'package:mostro/features/notifications/services/local_notifications.dart';
+import 'package:mostro/features/notifications/services/push_background_handler.dart';
 import 'package:mostro/features/notifications/services/push_refresh_job.dart';
+import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/features/notifications/services/token_handoff.dart';
 import 'package:mostro/src/rust/api/push.dart' as push_api;
 import 'package:mostro/src/rust/api/types.dart';
-
-/// Background message handler — must be a top-level function.
-///
-/// Display-only, by rule (docs/PUSH_NOTIFICATIONS.md §6 principle 2, issue
-/// #308): it must never initialise the Rust core, open the database or
-/// decrypt anything. The push is a doorbell, not a courier — every state
-/// change comes from the one Rust core, in the foreground, through the
-/// resume resync. Phase 2 gives it the one thing it may do: note that a
-/// wake arrived.
-@pragma('vm:entry-point')
-Future<void> _backgroundMessageHandler(RemoteMessage message) async {
-  debugPrint('[push] background message: ${message.messageId}');
-}
 
 /// The device side of push notifications: Firebase, the OS permission, and
 /// the device token, which is handed to Rust and nothing else.
@@ -41,6 +34,10 @@ class PushNotificationService {
 
   /// Kept from the first [initialize] so [retryInitialize] can pass it on.
   ProviderContainer? _container;
+
+  /// Test seam — production pushes on the global [appRouter].
+  @visibleForTesting
+  void Function(String destination)? navigate;
 
   /// The bridge hand-over, with its retry while storage is not ready.
   final TokenHandoff _handoff = TokenHandoff(
@@ -77,6 +74,10 @@ class PushNotificationService {
       return;
     }
 
+    // 0. The channel the server's visible push names, with the importance
+    //    the app wants (§3.2). Before the permission: the channel needs none.
+    await ensurePushNotificationChannel();
+
     // 1. Request permission (required on iOS, shows dialog; Android 13+ also).
     final settings = await _fcm.requestPermission(
       alert: true,
@@ -91,7 +92,7 @@ class PushNotificationService {
     }
 
     // 2. Register the display-only background handler.
-    FirebaseMessaging.onBackgroundMessage(_backgroundMessageHandler);
+    FirebaseMessaging.onBackgroundMessage(pushBackgroundHandler);
 
     // 3. Hand the token to Rust — on every refresh, and now. The refresh
     //    listener is attached first: a rotation that lands while the first
@@ -102,14 +103,46 @@ class PushNotificationService {
     await _handOverToken();
 
     // 4. Foreground messages carry nothing to act on (§2.3): the foreground
-    //    subscription already delivers the event and the in-app card.
+    //    subscription already delivers the event and the in-app card. The
+    //    one useful thing a push says while the app is up is that the
+    //    relays had something for us — if the pool is not connected, that
+    //    is a reason to reconnect now rather than on its own backoff.
     FirebaseMessaging.onMessage.listen((message) {
       debugPrint('[push] foreground message: ${message.data['type']}');
+      unawaited(_nudgeIfOffline());
     });
+
+    // 5. A tap on the OS notification. There is no payload to route on
+    //    (§2.3): the app opens on Notifications, where the resync's in-app
+    //    cards say what the wake was about. Warm (the app was in the
+    //    background) and cold (the tap launched it) alike.
+    FirebaseMessaging.onMessageOpenedApp.listen((_) => _openNotifications());
+    final launch = await _fcm.getInitialMessage();
+    if (launch != null) _openNotifications();
 
     // 5. The refresh that outlives the process: the OS re-POSTs the
     //    registrations Rust mirrored, every 12 h, app running or not.
     await schedulePushRefresh();
+  }
+
+  Future<void> _nudgeIfOffline() async {
+    try {
+      final state = await nostr_api.getConnectionState();
+      if (state == ConnectionState.online) return;
+      final outcome = await nostr_api.resync();
+      debugPrint('[push] foreground nudge: online=${outcome.online}');
+    } catch (e) {
+      debugPrint('[push] foreground nudge failed: $e');
+    }
+  }
+
+  void _openNotifications() {
+    final go = navigate ?? (destination) => appRouter.push(destination);
+    try {
+      go(AppRoute.notifications);
+    } catch (e) {
+      debugPrint('[push] could not open notifications: $e');
+    }
   }
 
   Future<void> _handOverToken() async {

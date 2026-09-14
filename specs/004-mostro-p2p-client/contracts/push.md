@@ -95,6 +95,9 @@ asks it to wake the peer's trade pubkey with `POST /api/notify`.
 - Peer chat only. The dispute channel does not ring its solver.
 - Not from the web build until the server answers CORS
   (mostro-push-server#44).
+- No relay, no wake: an envelope every relay rejected (`send_event` is still
+  `Ok` with an empty success set) reached no one, so it rings nobody and
+  cannot debounce the wake of a retry that does land.
 - No reveal, no wake: before the peer reveal (#334) there is no peer pubkey
   and the message stays local-only anyway.
 

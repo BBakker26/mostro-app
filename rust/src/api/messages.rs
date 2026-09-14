@@ -315,7 +315,23 @@ pub(crate) async fn publish_chat_payload_for(
     ctx: &ChatContext,
     payload: &str,
 ) -> Result<nostr_sdk::prelude::Event> {
-    publish_chat_payload(ctx, payload).await
+    publish_chat_payload(ctx, payload).await.map(|p| p.inner)
+}
+
+/// A chat envelope handed to the pool.
+struct PublishedChat {
+    /// The signed inner event: the message's durable identity.
+    inner: nostr_sdk::prelude::Event,
+    /// Whether at least one relay accepted the envelope. `send_event` returns
+    /// `Ok` even when every relay rejected it.
+    delivered: bool,
+}
+
+/// The peer to wake after a publish, if any: only an envelope some relay
+/// accepted is worth a wake. Waking for one that reached nobody rings the
+/// peer for nothing and debounces the wake of the retry that does land.
+fn peer_to_wake(delivered: bool, peer_hex: &str) -> Option<&str> {
+    delivered.then_some(peer_hex)
 }
 
 /// Record a message we just sent to the solver, mirroring what `send_message`
@@ -342,10 +358,7 @@ pub(crate) async fn store_outgoing_admin_message(
     let _ = message_store().add_message(msg).await;
 }
 
-async fn publish_chat_payload(
-    ctx: &ChatContext,
-    payload: &str,
-) -> Result<nostr_sdk::prelude::Event> {
+async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<PublishedChat> {
     let (outer, inner) =
         crate::nostr::transport::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
             .await?;
@@ -378,7 +391,10 @@ async fn publish_chat_payload(
             ),
         );
     }
-    Ok(inner)
+    Ok(PublishedChat {
+        inner,
+        delivered: !output.success.is_empty(),
+    })
 }
 
 /// Send an encrypted text message to the trade counterparty.
@@ -436,13 +452,15 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
                             return Err(e);
                         }
                         Err(e) => log::warn!("[messages] send_message trade={trade_id}: {e}"),
-                        Ok(inner) => {
-                            id = inner.id.to_hex();
-                            created_at = inner.created_at.as_secs() as i64;
+                        Ok(published) => {
+                            id = published.inner.id.to_hex();
+                            created_at = published.inner.created_at.as_secs() as i64;
                             // The envelope's `p` tag is `pub(K_conv)`, which
                             // the push server cannot match: ask it to ring the
                             // peer's trade key (docs/PUSH_NOTIFICATIONS.md §7.3).
-                            crate::api::push::wake_peer(peer_hex);
+                            if let Some(peer) = peer_to_wake(published.delivered, peer_hex) {
+                                crate::api::push::wake_peer(peer);
+                            }
                         }
                     }
                 }
@@ -577,10 +595,12 @@ pub async fn send_file(
             Err(e) => log::warn!("[messages] send_file trade={trade_id}: {e}"),
             Ok(ctx) => match publish_chat_payload(&ctx, &payload).await {
                 Err(e) => log::warn!("[messages] send_file trade={trade_id}: {e}"),
-                Ok(inner) => {
-                    published_id = Some(inner.id.to_hex());
-                    msg_created_at = inner.created_at.as_secs() as i64;
-                    crate::api::push::wake_peer(peer_hex);
+                Ok(published) => {
+                    published_id = Some(published.inner.id.to_hex());
+                    msg_created_at = published.inner.created_at.as_secs() as i64;
+                    if let Some(peer) = peer_to_wake(published.delivered, peer_hex) {
+                        crate::api::push::wake_peer(peer);
+                    }
                 }
             },
         }
@@ -1592,6 +1612,20 @@ async fn rebuild_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PEER: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+
+    #[test]
+    fn a_message_no_relay_accepted_wakes_nobody() {
+        // `send_message` and `send_file` both gate `wake_peer` on this: an
+        // empty `output.success` still comes back as `Ok` from the pool.
+        assert_eq!(peer_to_wake(false, PEER), None);
+    }
+
+    #[test]
+    fn a_message_some_relay_accepted_wakes_the_peer() {
+        assert_eq!(peer_to_wake(true, PEER), Some(PEER));
+    }
 
     #[test]
     fn the_two_channels_of_one_order_never_collide() {

@@ -64,6 +64,10 @@ normative list):
   comes online.
 - Isolation: chat runs on its own task and bounded channels; it can never
   block the order state machine, the daemon transport, or a dispute.
+- Push wake: once a peer message or attachment pointer reached the relays,
+  the sender asks the push server to ring the counterparty's trade pubkey,
+  debounced per peer and fire-and-forget (`contracts/push.md`, *Peer wake*).
+  The dispute channel does not.
 
 ## Functions
 

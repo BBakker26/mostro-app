@@ -825,6 +825,7 @@
   "notificationsSystemDenied": "Les notifications sont désactivées dans les réglages du système.",
   "openSystemSettingsAction": "Ouvrir les réglages",
   "notificationsPrivacyFootnote": "Les notifications ne contiennent ni montants ni contreparties : elles vous signalent seulement qu’il y a quelque chose à voir.",
+  "pushNewMessageBody": "Vous avez un nouveau message",
   "notificationPrefSaveFailed": "Impossible d’enregistrer cette préférence",
   "logsScreenTitle": "Journaux",
   "logFilterAll": "Tous",

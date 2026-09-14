@@ -825,6 +825,7 @@
   "notificationsSystemDenied": "Le notifiche sono disattivate nelle impostazioni di sistema.",
   "openSystemSettingsAction": "Apri impostazioni",
   "notificationsPrivacyFootnote": "Le notifiche non includono importi né controparti: ti avvisano solo che c’è qualcosa da vedere.",
+  "pushNewMessageBody": "Hai un nuovo messaggio",
   "notificationPrefSaveFailed": "Impossibile salvare la preferenza",
   "logsScreenTitle": "Registri",
   "logFilterAll": "Tutti",

@@ -4,6 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/features/notifications/services/local_notifications.dart';
 import 'package:mostro/features/notifications/services/push_background_handler.dart';
+import 'package:mostro/features/settings/providers/notification_prefs_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -61,6 +62,78 @@ void main() {
       }
       expect(await consumeWakePending(), isTrue);
       expect(await consumeWakePending(), isFalse);
+    });
+  });
+
+  group('a peer chat wake', () {
+    late List<(String, String)> shown;
+    Future<void> record(String title, String body) async =>
+        shown.add((title, body));
+
+    setUp(() => shown = []);
+
+    test('shows one content-free notice in the stored language', () async {
+      SharedPreferences.setMockInitialValues({kLanguagePrefKey: 'es-MX'});
+
+      await handleBackgroundWake({'type': kChatWakeType}, show: record);
+
+      expect(shown, [('Mostro', 'Tienes un mensaje nuevo')]);
+      expect(await consumeWakePending(), isTrue, reason: 'still a wake');
+    });
+
+    test(
+      'falls back to English for a language the app does not ship',
+      () async {
+        SharedPreferences.setMockInitialValues({kLanguagePrefKey: 'pt'});
+
+        await handleBackgroundWake({'type': kChatWakeType}, show: record);
+
+        expect(shown.single.$2, 'You have a new message');
+      },
+    );
+
+    test('is silent when message notifications are turned off', () async {
+      SharedPreferences.setMockInitialValues({kNewMessagesPrefKey: false});
+
+      await handleBackgroundWake({'type': kChatWakeType}, show: record);
+
+      expect(shown, isEmpty);
+      expect(
+        await consumeWakePending(),
+        isTrue,
+        reason: 'the resync still runs',
+      );
+    });
+
+    test(
+      'a trade update is left to the notification the OS already shows',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+
+        await handleBackgroundWake({'type': 'trade_update'}, show: record);
+
+        expect(shown, isEmpty);
+      },
+    );
+
+    test('a notice that fails to render never breaks the handler', () async {
+      SharedPreferences.setMockInitialValues({});
+
+      await expectLater(
+        handleBackgroundWake({
+          'type': kChatWakeType,
+        }, show: (_, __) async => throw StateError('no platform')),
+        completes,
+      );
+    });
+
+    test('its preference keys match the ones Settings writes', () {
+      expect(kNewMessagesPrefKey, NotificationEvent.newMessages.prefsKey);
+      final settings =
+          File(
+            'lib/features/settings/providers/settings_provider.dart',
+          ).readAsStringSync();
+      expect(settings, contains("'$kLanguagePrefKey'"));
     });
   });
 

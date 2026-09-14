@@ -15,23 +15,55 @@ const kPushChannelName = 'Mostro';
 final FlutterLocalNotificationsPlugin _plugin =
     FlutterLocalNotificationsPlugin();
 
+/// The one notification the app renders itself: a peer's chat message woke
+/// it. A fixed id and tag, so a burst of wakes replaces one notice instead
+/// of stacking several.
+const kChatWakeNotificationId = 38400;
+const _kChatWakeTag = 'mostro-chat';
+
+Future<void> _initialize() => _plugin.initialize(
+  const InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    // Permission is asked by the push service, not here.
+    iOS: DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    ),
+  ),
+);
+
+/// Show the content-free "new message" notice (docs/PUSH_NOTIFICATIONS.md
+/// §7.2, T3.2). Callable from the background isolate: it initialises its own
+/// plugin instance there. [title] and [body] never name a trade, a peer or
+/// the message.
+Future<void> showChatWakeNotification(String title, String body) async {
+  if (kIsWeb) return;
+  await _initialize();
+  await _plugin.show(
+    kChatWakeNotificationId,
+    title,
+    body,
+    const NotificationDetails(
+      android: AndroidNotificationDetails(
+        kPushChannelId,
+        kPushChannelName,
+        importance: Importance.high,
+        priority: Priority.high,
+        tag: _kChatWakeTag,
+      ),
+      iOS: DarwinNotificationDetails(threadIdentifier: _kChatWakeTag),
+    ),
+  );
+}
+
 /// Create the channel with the importance the app wants, once per launch.
 /// Idempotent on the platform side; failures are logged, since a missing
 /// channel degrades the notification's importance but never its delivery.
 Future<void> ensurePushNotificationChannel() async {
   if (kIsWeb) return;
   try {
-    await _plugin.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        // Permission is asked by the push service, not here.
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-      ),
-    );
+    await _initialize();
     await _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin

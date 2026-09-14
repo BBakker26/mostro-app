@@ -5563,6 +5563,228 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{hours} h {minutes}'**
   String invoiceCountdownHours(String hours, String minutes);
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the buyer\'s invoice'**
+  String get tradeCardWaitingBuyerInvoiceTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The trade continues once the buyer adds a Lightning invoice.'**
+  String get tradeCardWaitingBuyerInvoiceMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the seller\'s payment'**
+  String get tradeCardWaitingPaymentTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The trade continues once the seller pays the hold invoice.'**
+  String get tradeCardWaitingPaymentMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Bond payment pending'**
+  String get tradeCardWaitingTakerBondTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The taker\'s anti-abuse bond must be paid before the trade starts.'**
+  String get tradeCardWaitingTakerBondMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Trade active'**
+  String get tradeCardActiveTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The sats are locked. The buyer can now send the fiat payment.'**
+  String get tradeCardActiveMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Fiat marked as sent'**
+  String get tradeCardFiatSentTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The buyer marked the fiat payment as sent.'**
+  String get tradeCardFiatSentMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Sats released'**
+  String get tradeCardSettledHoldInvoiceTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The seller released the sats. The buyer\'s payout is on its way.'**
+  String get tradeCardSettledHoldInvoiceMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Trade completed'**
+  String get tradeCardSuccessTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The trade finished successfully.'**
+  String get tradeCardSuccessMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Trade canceled'**
+  String get tradeCardCanceledTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The trade was canceled.'**
+  String get tradeCardCanceledMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Order expired'**
+  String get tradeCardExpiredTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The order expired before the trade could continue.'**
+  String get tradeCardExpiredMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Trade canceled by agreement'**
+  String get tradeCardCooperativelyCanceledTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Both parties agreed to cancel the trade.'**
+  String get tradeCardCooperativelyCanceledMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Dispute opened'**
+  String get tradeCardDisputeTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'A dispute was opened on this trade.'**
+  String get tradeCardDisputeMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Canceled by the resolver'**
+  String get tradeCardCanceledByAdminTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The dispute resolver canceled the trade.'**
+  String get tradeCardCanceledByAdminMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Settled by the resolver'**
+  String get tradeCardSettledByAdminTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The dispute resolver released the sats to the buyer.'**
+  String get tradeCardSettledByAdminMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Completed by the resolver'**
+  String get tradeCardCompletedByAdminTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The dispute resolver completed the trade.'**
+  String get tradeCardCompletedByAdminMessage;
+
+  /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'Trade updated'**
+  String get tradeCardUpdatedTitle;
+
+  /// Notifications card body for a trade status change (issue #474); role-neutral, both sides see it
+  ///
+  /// In en, this message translates to:
+  /// **'The status of this trade changed.'**
+  String get tradeCardUpdatedMessage;
+
+  /// Notifications card copy for trades and chat (issue #474)
+  ///
+  /// In en, this message translates to:
+  /// **'The maker canceled the order.'**
+  String get tradeCardCanceledByMakerMessage;
+
+  /// Notifications card copy for trades and chat (issue #474)
+  ///
+  /// In en, this message translates to:
+  /// **'Another user took this order before the bond was paid.'**
+  String get tradeCardCanceledBondLostRaceMessage;
+
+  /// Notifications card copy for trades and chat (issue #474)
+  ///
+  /// In en, this message translates to:
+  /// **'The bond invoice expired unpaid.'**
+  String get tradeCardCanceledBondExpiredMessage;
+
+  /// Notifications card copy for trades and chat (issue #474)
+  ///
+  /// In en, this message translates to:
+  /// **'New messages'**
+  String get chatCardTitle;
+
+  /// Notifications card copy for trades and chat (issue #474)
+  ///
+  /// In en, this message translates to:
+  /// **'Messages from the resolver'**
+  String get chatCardSolverTitle;
+
+  /// Notifications chat card body; count is the number of unread messages
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 new message from your trade partner} other{{count} new messages from your trade partner}}'**
+  String chatCardMessage(int count);
+
+  /// Notifications chat card body; count is the number of unread messages
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 new message from the dispute resolver} other{{count} new messages from the dispute resolver}}'**
+  String chatCardSolverMessage(int count);
 }
 
 class _AppLocalizationsDelegate

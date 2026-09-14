@@ -1764,10 +1764,25 @@ class TradeUpdate {
   /// nothing to add.
   final TradeUpdateReason? reason;
 
-  const TradeUpdate({required this.orderId, required this.status, this.reason});
+  /// When the change happened, in Unix seconds: the daemon message's own
+  /// `created_at` for a Kind 14 dispatch, the local clock for everything
+  /// else. A history replay after a restore re-emits old transitions, and
+  /// this is what tells them apart from new ones (issue #474).
+  final PlatformInt64 occurredAt;
+
+  const TradeUpdate({
+    required this.orderId,
+    required this.status,
+    this.reason,
+    required this.occurredAt,
+  });
 
   @override
-  int get hashCode => orderId.hashCode ^ status.hashCode ^ reason.hashCode;
+  int get hashCode =>
+      orderId.hashCode ^
+      status.hashCode ^
+      reason.hashCode ^
+      occurredAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1776,7 +1791,8 @@ class TradeUpdate {
           runtimeType == other.runtimeType &&
           orderId == other.orderId &&
           status == other.status &&
-          reason == other.reason;
+          reason == other.reason &&
+          occurredAt == other.occurredAt;
 }
 
 /// The cause behind a `TradeUpdate` whose wire action carries none.

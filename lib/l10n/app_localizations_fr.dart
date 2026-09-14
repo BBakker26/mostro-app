@@ -3298,4 +3298,150 @@ class AppLocalizationsFr extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
   }
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceTitle =>
+      'En attente de la facture de l\'acheteur';
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceMessage =>
+      'L\'échange reprend dès que l\'acheteur ajoute une facture Lightning.';
+
+  @override
+  String get tradeCardWaitingPaymentTitle =>
+      'En attente du paiement du vendeur';
+
+  @override
+  String get tradeCardWaitingPaymentMessage =>
+      'L\'échange reprend dès que le vendeur paie la facture hold.';
+
+  @override
+  String get tradeCardWaitingTakerBondTitle => 'Paiement de caution en attente';
+
+  @override
+  String get tradeCardWaitingTakerBondMessage =>
+      'La caution anti-abus du preneur doit être payée avant le début de l\'échange.';
+
+  @override
+  String get tradeCardActiveTitle => 'Échange actif';
+
+  @override
+  String get tradeCardActiveMessage =>
+      'Les sats sont bloqués. L\'acheteur peut maintenant envoyer le paiement fiat.';
+
+  @override
+  String get tradeCardFiatSentTitle => 'Fiat marqué comme envoyé';
+
+  @override
+  String get tradeCardFiatSentMessage =>
+      'L\'acheteur a marqué le paiement fiat comme envoyé.';
+
+  @override
+  String get tradeCardSettledHoldInvoiceTitle => 'Sats libérés';
+
+  @override
+  String get tradeCardSettledHoldInvoiceMessage =>
+      'Le vendeur a libéré les sats. Le paiement de l\'acheteur est en route.';
+
+  @override
+  String get tradeCardSuccessTitle => 'Échange terminé';
+
+  @override
+  String get tradeCardSuccessMessage =>
+      'L\'échange s\'est terminé avec succès.';
+
+  @override
+  String get tradeCardCanceledTitle => 'Échange annulé';
+
+  @override
+  String get tradeCardCanceledMessage => 'L\'échange a été annulé.';
+
+  @override
+  String get tradeCardExpiredTitle => 'Ordre expiré';
+
+  @override
+  String get tradeCardExpiredMessage =>
+      'L\'ordre a expiré avant que l\'échange puisse continuer.';
+
+  @override
+  String get tradeCardCooperativelyCanceledTitle =>
+      'Échange annulé d\'un commun accord';
+
+  @override
+  String get tradeCardCooperativelyCanceledMessage =>
+      'Les deux parties ont accepté d\'annuler l\'échange.';
+
+  @override
+  String get tradeCardDisputeTitle => 'Litige ouvert';
+
+  @override
+  String get tradeCardDisputeMessage =>
+      'Un litige a été ouvert sur cet échange.';
+
+  @override
+  String get tradeCardCanceledByAdminTitle => 'Annulé par le médiateur';
+
+  @override
+  String get tradeCardCanceledByAdminMessage =>
+      'Le médiateur du litige a annulé l\'échange.';
+
+  @override
+  String get tradeCardSettledByAdminTitle => 'Réglé par le médiateur';
+
+  @override
+  String get tradeCardSettledByAdminMessage =>
+      'Le médiateur du litige a libéré les sats à l\'acheteur.';
+
+  @override
+  String get tradeCardCompletedByAdminTitle => 'Terminé par le médiateur';
+
+  @override
+  String get tradeCardCompletedByAdminMessage =>
+      'Le médiateur du litige a terminé l\'échange.';
+
+  @override
+  String get tradeCardUpdatedTitle => 'Échange mis à jour';
+
+  @override
+  String get tradeCardUpdatedMessage => 'Le statut de cet échange a changé.';
+
+  @override
+  String get tradeCardCanceledByMakerMessage =>
+      'Le créateur a annulé l\'ordre.';
+
+  @override
+  String get tradeCardCanceledBondLostRaceMessage =>
+      'Un autre utilisateur a pris cet ordre avant le paiement de la caution.';
+
+  @override
+  String get tradeCardCanceledBondExpiredMessage =>
+      'La facture de caution a expiré sans être payée.';
+
+  @override
+  String get chatCardTitle => 'Nouveaux messages';
+
+  @override
+  String get chatCardSolverTitle => 'Messages du médiateur';
+
+  @override
+  String chatCardMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count nouveaux messages de votre contrepartie',
+      one: '1 nouveau message de votre contrepartie',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String chatCardSolverMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count nouveaux messages du médiateur du litige',
+      one: '1 nouveau message du médiateur du litige',
+    );
+    return '$_temp0';
+  }
 }

@@ -18,20 +18,13 @@ final FlutterLocalNotificationsPlugin _plugin =
 /// Create the channel with the importance the app wants, once per launch.
 /// Idempotent on the platform side; failures are logged, since a missing
 /// channel degrades the notification's importance but never its delivery.
+///
+/// The channel does not need the plugin initialised, so it is created first
+/// and on its own: a failed `initialize` (an icon the plugin rejects, say)
+/// must not leave the server's push on a default-importance channel.
 Future<void> ensurePushNotificationChannel() async {
   if (kIsWeb) return;
   try {
-    await _plugin.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        // Permission is asked by the push service, not here.
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-      ),
-    );
     await _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -45,5 +38,20 @@ Future<void> ensurePushNotificationChannel() async {
         );
   } catch (e) {
     debugPrint('[push] notification channel not created: $e');
+  }
+  try {
+    await _plugin.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        // Permission is asked by the push service, not here.
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestBadgePermission: false,
+          requestSoundPermission: false,
+        ),
+      ),
+    );
+  } catch (e) {
+    debugPrint('[push] local notifications not initialised: $e');
   }
 }

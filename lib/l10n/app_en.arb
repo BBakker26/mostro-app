@@ -3274,6 +3274,10 @@
   "@notificationsPrivacyFootnote": {
     "description": "Footnote: what a push notification does not carry"
   },
+  "pushNewMessageBody": "You have a new message",
+  "@pushNewMessageBody": {
+    "description": "Body of the system notification shown when a peer's chat message wakes the app in the background. Content-free on purpose: it never names the trade, the peer or the message."
+  },
   "notificationPrefSaveFailed": "Could not save that preference",
   "@notificationPrefSaveFailed": {
     "description": "Snackbar when a notification preference could not be saved"

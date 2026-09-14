@@ -76,7 +76,8 @@ class PushNotificationService {
 
     // 0. The channel the server's visible push names, with the importance
     //    the app wants (§3.2). Before the permission: the channel needs none.
-    await ensurePushNotificationChannel();
+    //    Its tap callback covers the chat-wake notice the app renders itself.
+    await ensurePushNotificationChannel(onTap: _openNotifications);
 
     // 1. Request permission (required on iOS, shows dialog; Android 13+ also).
     final settings = await _fcm.requestPermission(
@@ -117,8 +118,11 @@ class PushNotificationService {
     //    cards say what the wake was about. Warm (the app was in the
     //    background) and cold (the tap launched it) alike.
     FirebaseMessaging.onMessageOpenedApp.listen((_) => _openNotifications());
+    //    The chat-wake notice is the app's own, so FCM sees neither tap.
     final launch = await _fcm.getInitialMessage();
-    if (launch != null) _openNotifications();
+    if (launch != null || await launchedFromLocalNotification()) {
+      _openNotifications();
+    }
 
     // 5. The refresh that outlives the process: the OS re-POSTs the
     //    registrations Rust mirrored, every 12 h, app running or not.

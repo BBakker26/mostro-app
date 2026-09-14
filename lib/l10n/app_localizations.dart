@@ -4262,6 +4262,12 @@ abstract class AppLocalizations {
   /// **'Notifications carry no amounts and no counterparties: they only tell you there is something to see.'**
   String get notificationsPrivacyFootnote;
 
+  /// Body of the system notification shown when a peer's chat message wakes the app in the background. Content-free on purpose: it never names the trade, the peer or the message.
+  ///
+  /// In en, this message translates to:
+  /// **'You have a new message'**
+  String get pushNewMessageBody;
+
   /// Snackbar when a notification preference could not be saved
   ///
   /// In en, this message translates to:

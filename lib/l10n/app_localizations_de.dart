@@ -2501,6 +2501,9 @@ class AppLocalizationsDe extends AppLocalizations {
       'Benachrichtigungen enthalten keine Beträge und keine Gegenparteien: sie sagen dir nur, dass es etwas zu sehen gibt.';
 
   @override
+  String get pushNewMessageBody => 'Du hast eine neue Nachricht';
+
+  @override
   String get notificationPrefSaveFailed =>
       'Einstellung konnte nicht gespeichert werden';
 

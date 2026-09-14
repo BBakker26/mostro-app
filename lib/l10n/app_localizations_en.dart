@@ -2467,6 +2467,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'Notifications carry no amounts and no counterparties: they only tell you there is something to see.';
 
   @override
+  String get pushNewMessageBody => 'You have a new message';
+
+  @override
   String get notificationPrefSaveFailed => 'Could not save that preference';
 
   @override

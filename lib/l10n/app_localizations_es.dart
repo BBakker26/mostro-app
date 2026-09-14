@@ -2491,6 +2491,9 @@ class AppLocalizationsEs extends AppLocalizations {
       'Las notificaciones no incluyen montos ni contrapartes: solo te avisan de que hay algo que ver.';
 
   @override
+  String get pushNewMessageBody => 'Tienes un mensaje nuevo';
+
+  @override
   String get notificationPrefSaveFailed => 'No se pudo guardar la preferencia';
 
   @override

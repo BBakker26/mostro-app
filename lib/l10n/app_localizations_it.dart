@@ -2493,6 +2493,9 @@ class AppLocalizationsIt extends AppLocalizations {
       'Le notifiche non includono importi né controparti: ti avvisano solo che c’è qualcosa da vedere.';
 
   @override
+  String get pushNewMessageBody => 'Hai un nuovo messaggio';
+
+  @override
   String get notificationPrefSaveFailed => 'Impossibile salvare la preferenza';
 
   @override

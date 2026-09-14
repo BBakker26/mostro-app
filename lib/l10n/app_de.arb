@@ -825,6 +825,7 @@
   "notificationsSystemDenied": "Benachrichtigungen sind in den Systemeinstellungen deaktiviert.",
   "openSystemSettingsAction": "Einstellungen öffnen",
   "notificationsPrivacyFootnote": "Benachrichtigungen enthalten keine Beträge und keine Gegenparteien: sie sagen dir nur, dass es etwas zu sehen gibt.",
+  "pushNewMessageBody": "Du hast eine neue Nachricht",
   "notificationPrefSaveFailed": "Einstellung konnte nicht gespeichert werden",
   "logsScreenTitle": "Protokolle",
   "logFilterAll": "Alle",

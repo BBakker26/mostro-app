@@ -3760,6 +3760,8 @@
   "@invoiceFieldPromptLabel": {"description": "17a label of the empty invoice field, in the imperative, so the buyer sees where to write"},
   "invoiceFieldFilledLabel": "Lightning invoice",
   "@invoiceFieldFilledLabel": {"description": "17b label of the invoice field once it holds something; also the title of the full-invoice sheet"},
+  "invoiceFieldAddressLabel": "Lightning address",
+  "@invoiceFieldAddressLabel": {"description": "17b label of the invoice field when it holds a valid Lightning address; also its screen reader label and the full-value sheet title"},
   "invoiceScanButton": "Scan",
   "@invoiceScanButton": {"description": "17a/17b button under the invoice field that scans a QR code"},
   "invoiceReplaceButton": "Replace",

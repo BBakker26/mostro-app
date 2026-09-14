@@ -731,6 +731,7 @@ class _AddLightningInvoiceScreenState
           onScan: _scan,
           validSats: check is InvoiceCheckValid ? check.sats : null,
           isValid: check is InvoiceCheckValid || check is InvoiceCheckAddress,
+          isAddress: check is InvoiceCheckAddress,
           hasError: error != null || check is InvoiceCheckError,
         ),
         if (error != null) ...[

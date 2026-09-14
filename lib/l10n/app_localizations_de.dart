@@ -3217,6 +3217,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceFieldFilledLabel => 'Lightning-Rechnung';
 
   @override
+  String get invoiceFieldAddressLabel => 'Lightning-Adresse';
+
+  @override
   String get invoiceScanButton => 'Scannen';
 
   @override

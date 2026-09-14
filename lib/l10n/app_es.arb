@@ -1020,6 +1020,7 @@
   "invoiceFieldHint": "lnbc… o usuario@dominio",
   "invoiceFieldPromptLabel": "Pega tu factura aquí",
   "invoiceFieldFilledLabel": "Factura Lightning",
+  "invoiceFieldAddressLabel": "Dirección Lightning",
   "invoiceScanButton": "Escanear",
   "invoiceReplaceButton": "Reemplazar",
   "invoiceFieldSemantics": "Factura o dirección Lightning, requerido",

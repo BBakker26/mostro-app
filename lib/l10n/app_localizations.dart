@@ -5432,6 +5432,12 @@ abstract class AppLocalizations {
   /// **'Lightning invoice'**
   String get invoiceFieldFilledLabel;
 
+  /// 17b label of the invoice field when it holds a valid Lightning address; also its screen reader label and the full-value sheet title
+  ///
+  /// In en, this message translates to:
+  /// **'Lightning address'**
+  String get invoiceFieldAddressLabel;
+
   /// 17a/17b button under the invoice field that scans a QR code
   ///
   /// In en, this message translates to:

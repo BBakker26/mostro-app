@@ -29,6 +29,7 @@ Future<_Harness> _pump(
   bool canPaste = true,
   bool reduceMotion = false,
   int? validSats,
+  bool isAddress = false,
 }) async {
   final h = _Harness();
   addTearDown(h.dispose);
@@ -55,7 +56,8 @@ Future<_Harness> _pump(
               onPaste: canPaste ? () => h.pastes++ : null,
               onScan: () => h.scans++,
               validSats: validSats,
-              isValid: validSats != null,
+              isValid: validSats != null || isAddress,
+              isAddress: isAddress,
             ),
             // Somewhere else to put the focus.
             const TextField(key: Key('other')),
@@ -121,6 +123,21 @@ void main() {
 
     expect(tester.hasRunningAnimations, isFalse);
     expect(await _pulsing(tester), isFalse);
+  });
+
+  testWidgets('a valid address is labelled and announced as an address', (
+    tester,
+  ) async {
+    final h = await _pump(tester, isAddress: true);
+    final semantics = tester.ensureSemantics();
+
+    h.controller.text = 'satoshi@example.com';
+    await tester.pump();
+
+    expect(find.text('LIGHTNING ADDRESS'), findsOneWidget);
+    expect(find.text('LIGHTNING INVOICE'), findsNothing);
+    expect(find.bySemanticsLabel('Lightning address'), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets('without anything to paste, scan takes the row', (tester) async {

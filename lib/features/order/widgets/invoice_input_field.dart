@@ -45,6 +45,7 @@ class InvoiceInputField extends StatefulWidget {
     required this.onScan,
     this.validSats,
     this.isValid = false,
+    this.isAddress = false,
     this.hasError = false,
   });
 
@@ -62,6 +63,10 @@ class InvoiceInputField extends StatefulWidget {
 
   /// Draws the check beside the label.
   final bool isValid;
+
+  /// The input is a Lightning address, not an invoice: labelled and
+  /// announced as such.
+  final bool isAddress;
 
   /// Draws the field's border in the error ink.
   final bool hasError;
@@ -85,6 +90,12 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
   bool _prompting = true;
 
   bool get _hasText => widget.controller.text.isNotEmpty;
+
+  /// What the filled field holds: an address or an invoice.
+  String _filledLabel(AppLocalizations l10n) =>
+      widget.isAddress
+          ? l10n.invoiceFieldAddressLabel
+          : l10n.invoiceFieldFilledLabel;
 
   @override
   void initState() {
@@ -147,7 +158,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      l10n.invoiceFieldFilledLabel.toUpperCase(),
+                      _filledLabel(l10n).toUpperCase(),
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -238,9 +249,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
       children: [
         Expanded(
           child: Text(
-            (_hasText
-                    ? l10n.invoiceFieldFilledLabel
-                    : l10n.invoiceFieldPromptLabel)
+            (_hasText ? _filledLabel(l10n) : l10n.invoiceFieldPromptLabel)
                 .toUpperCase(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -348,7 +357,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
                 label:
                     sats != null && widget.isValid
                         ? l10n.invoiceFilledSemantics(formatInvoiceSats(sats))
-                        : l10n.invoiceFieldFilledLabel,
+                        : _filledLabel(l10n),
                 excludeSemantics: true,
                 button: true,
                 child: GestureDetector(

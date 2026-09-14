@@ -3204,6 +3204,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get invoiceFieldFilledLabel => 'Factura Lightning';
 
   @override
+  String get invoiceFieldAddressLabel => 'Dirección Lightning';
+
+  @override
   String get invoiceScanButton => 'Escanear';
 
   @override

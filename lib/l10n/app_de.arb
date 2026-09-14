@@ -1020,6 +1020,7 @@
   "invoiceFieldHint": "lnbc… oder nutzer@domain",
   "invoiceFieldPromptLabel": "Rechnung hier einfügen",
   "invoiceFieldFilledLabel": "Lightning-Rechnung",
+  "invoiceFieldAddressLabel": "Lightning-Adresse",
   "invoiceScanButton": "Scannen",
   "invoiceReplaceButton": "Ersetzen",
   "invoiceFieldSemantics": "Lightning-Rechnung oder -Adresse, erforderlich",

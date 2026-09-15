@@ -663,11 +663,18 @@ user's own evidence sends do not need a wake (the solver is not a push client).
   persisted registration (whatever run made it), then Dart calls `deleteToken()` and
   forgets `push_token`. The four event toggles stay as they are: they gate the **in-app
   cards**, and their subtitle says so.
+  An unsuccessful unregister remains persisted for retry. The status distinguishes
+  push being off locally from the server confirming all removals; outstanding
+  registrations display a warning with their count.
 - **Master toggle on** → `set_push_enabled(true)`, Dart re-acquires the token,
   `set_push_token`, reconcile registers the current set.
 - **OS permission denied** (10d banner, exists): no token is requested; the Rust side
   sees no token and keeps nothing registered. When the user grants it in system
   settings, the existing `retryInitialize()` path produces a token and reconcile runs.
+  Re-acquisition checks the current permission even when the service initialized
+  earlier. A denied check suspends refresh handoffs and clears the Rust token;
+  granting permission retries without installing duplicate listeners. Master
+  opt-out remains a separate gate and is never undone by a permission grant.
 - **Unsupported platform** (desktop; web when the browser lacks `Notification` /
   `PushManager`, or until the server accepts `web`): `set_push_token` is never
   called; the settings screen shows the unsupported state instead of the toggle.
@@ -675,6 +682,15 @@ user's own evidence sends do not need a wake (the solver is not a push client).
   exposes), read from `PushNotificationService.isSupported` (made public), never
   inferred from "no token": a denied permission also yields no
   token and must show the denied banner, not unsupported copy.
+
+The complete toggle transaction (Rust mutation followed by device I/O) is serialized
+by a process-lived provider. Its pending target disables the master toggle across
+screen visits, so a previous opt-out cannot delete a later activation's token.
+Startup and permission recovery share the device queue with token release and
+re-acquisition; opt-out immediately blocks handoffs from an acquisition in flight.
+The saved master preference is applied before installing the token-refresh listener.
+Settings shares one process-lived push status reader: disposing the screen or
+completing a toggle does not invalidate an uncancellable Rust `next()` call.
 
 ### 7.5 Flow 5 — Token refresh
 

@@ -1131,7 +1131,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get chooseNotificationEventsSubtitle =>
-      'Choose which events trigger push notifications.';
+      'Choose which events show a notification in the app.';
 
   @override
   String get notifTradeUpdatesTitle => 'Trade updates';
@@ -2464,7 +2464,69 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Notifications carry no amounts and no counterparties: they only tell you there is something to see.';
+      'Notifications carry no amounts and no counterparties. A push travels through Google\'s or Apple\'s servers and says only that there is something to see.';
+
+  @override
+  String get pushMasterToggleTitle => 'Push notifications';
+
+  @override
+  String get pushMasterToggleSubtitle =>
+      'Wakes the app when a trade or chat message arrives. The notification itself carries nothing.';
+
+  @override
+  String get pushStatusOff =>
+      'Off — nothing is registered with the push server';
+
+  @override
+  String pushStatusCleanupPending(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Off — removal of $count push registrations is pending',
+      one: 'Off — removal of 1 push registration is pending',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pushStatusNoToken => 'Waiting for this device\'s push token';
+
+  @override
+  String get pushStatusIdle => 'On — no open trades to register';
+
+  @override
+  String pushStatusRegistered(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Registered for $count trades',
+      one: 'Registered for 1 trade',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pushStatusLastRegistered(String ago) {
+    return 'last registered $ago';
+  }
+
+  @override
+  String get pushStatusUnreachable => 'Push server unreachable — retrying';
+
+  @override
+  String get pushStatusNodeRefused =>
+      'This Mostro node is not accepted by the push server';
+
+  @override
+  String get pushStatusRateLimited =>
+      'Push request limit reached — retrying shortly';
+
+  @override
+  String get pushUnsupportedPlatform =>
+      'Push notifications are not available on this platform';
+
+  @override
+  String get pushToggleSaveFailed => 'Could not change push notifications';
 
   @override
   String get pushNewMessageBody => 'You have a new message';

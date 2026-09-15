@@ -3270,7 +3270,7 @@
   "@openSystemSettingsAction": {
     "description": "Action of the denied-permission banner"
   },
-  "notificationsPrivacyFootnote": "Notifications carry no amounts and no counterparties. A push travels through Google's servers and says only that there is something to see.",
+  "notificationsPrivacyFootnote": "Notifications carry no amounts and no counterparties. A push travels through Google's or Apple's servers and says only that there is something to see.",
   "@notificationsPrivacyFootnote": {
     "description": "Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted."
   },
@@ -3329,7 +3329,7 @@
   "@pushStatusNodeRefused": {
     "description": "Status line when the push server operator refuses trades from the active Mostro node"
   },
-  "pushStatusRateLimited": "Push server busy — retrying shortly",
+  "pushStatusRateLimited": "Push request limit reached — retrying shortly",
   "@pushStatusRateLimited": {
     "description": "Status line when the push server asked the app to slow down"
   },

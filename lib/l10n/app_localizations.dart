@@ -4259,7 +4259,7 @@ abstract class AppLocalizations {
   /// Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted.
   ///
   /// In en, this message translates to:
-  /// **'Notifications carry no amounts and no counterparties. A push travels through Google\'s servers and says only that there is something to see.'**
+  /// **'Notifications carry no amounts and no counterparties. A push travels through Google\'s or Apple\'s servers and says only that there is something to see.'**
   String get notificationsPrivacyFootnote;
 
   /// Title of the master push toggle on the notification settings screen
@@ -4325,7 +4325,7 @@ abstract class AppLocalizations {
   /// Status line when the push server asked the app to slow down
   ///
   /// In en, this message translates to:
-  /// **'Push server busy — retrying shortly'**
+  /// **'Push request limit reached — retrying shortly'**
   String get pushStatusRateLimited;
 
   /// Info row replacing the master push toggle on platforms that cannot receive a push (desktop, web for now)

@@ -2497,7 +2497,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google et signale seulement qu’il y a quelque chose à voir.';
+      'Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google ou d’Apple et signale seulement qu’il y a quelque chose à voir.';
 
   @override
   String get pushMasterToggleTitle => 'Notifications push';
@@ -2553,7 +2553,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pushStatusRateLimited =>
-      'Serveur push saturé : nouvelle tentative sous peu';
+      'Limite de requêtes push atteinte : nouvelle tentative sous peu';
 
   @override
   String get pushUnsupportedPlatform =>

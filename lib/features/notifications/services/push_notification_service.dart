@@ -99,14 +99,22 @@ class PushNotificationService {
     // 0. The channel the server's visible push names, with the importance
     //    the app wants (§3.2). Before the permission: the channel needs none.
     //    Its tap callback covers the chat-wake notice the app renders itself.
-    await ensurePushNotificationChannel(onTap: _openNotifications);
-
     // 1. Request permission (required on iOS, shows dialog; Android 13+ also).
-    final settings = await _fcm.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    //    A failure here happens before any listener is attached, so the run
+    //    is undone and [retryInitialize] can start it again.
+    final NotificationSettings settings;
+    try {
+      await ensurePushNotificationChannel(onTap: _openNotifications);
+      settings = await _fcm.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } catch (e) {
+      debugPrint('[push] setup failed before listeners, retryable: $e');
+      _initStarted = false;
+      return;
+    }
     if (settings.authorizationStatus == AuthorizationStatus.denied) {
       debugPrint('[push] permission denied');
       // Nothing is attached yet, so a later grant may run this again.
@@ -239,13 +247,17 @@ class PushNotificationService {
   Future<void> release() {
     // Block handoffs immediately, including a getToken already in flight.
     _released = true;
-    _handoff.discard();
-    return _serialize(_release);
+    final discarded = _handoff.discard();
+    return _serialize(() async {
+      await discarded;
+      await _release();
+    });
   }
 
   Future<void> _release() async {
     _released = true;
-    _handoff.discard();
+    // A hand-over still in flight must land before Rust's token is cleared.
+    await _handoff.discard();
     if (!isSupported) return;
     try {
       await _fcm.setAutoInitEnabled(false);
@@ -292,7 +304,7 @@ class PushNotificationService {
 
   Future<void> _suspendForPermission() async {
     _permissionDenied = true;
-    _handoff.discard();
+    await _handoff.discard();
     try {
       await push_api.clearPushToken();
     } catch (e) {

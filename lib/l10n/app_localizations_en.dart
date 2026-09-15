@@ -2464,7 +2464,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Notifications carry no amounts and no counterparties. A push travels through Google\'s servers and says only that there is something to see.';
+      'Notifications carry no amounts and no counterparties. A push travels through Google\'s or Apple\'s servers and says only that there is something to see.';
 
   @override
   String get pushMasterToggleTitle => 'Push notifications';
@@ -2518,7 +2518,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'This Mostro node is not accepted by the push server';
 
   @override
-  String get pushStatusRateLimited => 'Push server busy — retrying shortly';
+  String get pushStatusRateLimited =>
+      'Push request limit reached — retrying shortly';
 
   @override
   String get pushUnsupportedPlatform =>

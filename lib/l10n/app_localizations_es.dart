@@ -2488,7 +2488,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Las notificaciones no incluyen montos ni contrapartes. Un push pasa por los servidores de Google y solo dice que hay algo que ver.';
+      'Las notificaciones no incluyen montos ni contrapartes. Un push pasa por los servidores de Google o de Apple y solo dice que hay algo que ver.';
 
   @override
   String get pushMasterToggleTitle => 'Notificaciones push';
@@ -2544,7 +2544,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get pushStatusRateLimited =>
-      'Servidor push saturado: reintentando en breve';
+      'Límite de solicitudes push alcanzado: reintentando en breve';
 
   @override
   String get pushUnsupportedPlatform =>

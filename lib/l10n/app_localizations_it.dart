@@ -2490,7 +2490,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Le notifiche non includono importi né controparti. Un push passa dai server di Google e dice solo che c’è qualcosa da vedere.';
+      'Le notifiche non includono importi né controparti. Un push passa dai server di Google o di Apple e dice solo che c’è qualcosa da vedere.';
 
   @override
   String get pushMasterToggleTitle => 'Notifiche push';
@@ -2546,7 +2546,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pushStatusRateLimited =>
-      'Server push occupato: nuovo tentativo a breve';
+      'Limite di richieste push raggiunto: nuovo tentativo a breve';
 
   @override
   String get pushUnsupportedPlatform =>

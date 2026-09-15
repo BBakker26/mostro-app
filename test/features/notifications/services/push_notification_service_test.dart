@@ -50,6 +50,9 @@ class _Messaging extends FirebaseMessagingPlatform {
   final refresh = StreamController<String>.broadcast();
   int tokenRequests = 0;
   int permissionChecks = 0;
+
+  /// Thrown by the next permission request, then cleared.
+  Object? permissionError;
   Completer<String?>? tokenGate;
   Completer<void>? tokenRequested;
   bool hasDeviceToken = false;
@@ -84,6 +87,11 @@ class _Messaging extends FirebaseMessagingPlatform {
     bool providesAppNotificationSettings = false,
   }) async {
     permissionChecks++;
+    final error = permissionError;
+    if (error != null) {
+      permissionError = null;
+      throw error;
+    }
     return settings;
   }
 
@@ -142,7 +150,15 @@ void main() {
       RustLib.initMock(api: api);
       final service = PushNotificationService.instance;
       WorkmanagerPlatform.instance = WorkmanagerAndroid();
-      final initialized = service.initialize();
+      // Setup that fails before any listener is attached must not leave the
+      // service stuck: a later retry runs the whole initialization again.
+      messaging.permissionError = Exception('permission request failed');
+      await service.initialize();
+      messaging.refresh.add('token-before-listeners');
+      await Future<void>.delayed(Duration.zero);
+      expect(api.tokens, 0);
+      expect(api.statusRequested.isCompleted, isFalse);
+      final initialized = service.retryInitialize();
       await api.statusRequested.future;
       final retriedDuringStartup = service.retryInitialize();
       messaging.refresh.add('rotated-test-token');

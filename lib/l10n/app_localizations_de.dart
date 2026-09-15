@@ -2498,7 +2498,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Benachrichtigungen enthalten keine Beträge und keine Gegenparteien. Ein Push läuft über die Server von Google und sagt nur, dass es etwas zu sehen gibt.';
+      'Benachrichtigungen enthalten keine Beträge und keine Gegenparteien. Ein Push läuft über die Server von Google oder Apple und sagt nur, dass es etwas zu sehen gibt.';
 
   @override
   String get pushMasterToggleTitle => 'Push-Benachrichtigungen';
@@ -2522,7 +2522,7 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get pushStatusNoToken => 'Warte auf das Push-Token dieses Geräts';
+  String get pushStatusNoToken => 'Warten auf das Push-Token dieses Geräts';
 
   @override
   String get pushStatusIdle => 'An – keine offenen Trades zu registrieren';
@@ -2540,7 +2540,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String pushStatusLastRegistered(String ago) {
-    return 'zuletzt registriert $ago';
+    return 'Letzte Registrierung: $ago';
   }
 
   @override
@@ -2553,7 +2553,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get pushStatusRateLimited =>
-      'Push-Server ausgelastet – gleich neuer Versuch';
+      'Push-Anfragelimit erreicht – gleich neuer Versuch';
 
   @override
   String get pushUnsupportedPlatform =>

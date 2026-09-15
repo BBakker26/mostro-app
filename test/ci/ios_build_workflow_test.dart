@@ -42,9 +42,17 @@ void main() {
 
       // Assert — a device build (not only analysis) is what exercises Swift,
       // the pods and the Rust staticlib; CI has no Apple certificate, so it
-      // must not try to sign.
-      expect(job, contains('flutter build ios'));
-      expect(job, contains('--no-codesign'));
+      // must not try to sign. The flag must be an argument of that `run:`
+      // line, not text elsewhere in the job or in a trailing `#` comment.
+      final buildCommand = RegExp(
+        r'^\s*run:\s+flutter build ios\b[^#\r\n]*\s--no-codesign\b',
+        multiLine: true,
+      );
+      expect(
+        buildCommand.hasMatch(job),
+        isTrue,
+        reason: 'the ios job has no `run: flutter build ios ... --no-codesign`',
+      );
     });
 
     test('uses the same Flutter as every other job', () {

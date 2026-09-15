@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_routes.dart';
+import 'package:mostro/features/notifications/services/device_token.dart';
 import 'package:mostro/features/notifications/services/local_notifications.dart';
 import 'package:mostro/features/notifications/services/push_background_handler.dart';
 import 'package:mostro/features/notifications/services/push_refresh_job.dart';
@@ -132,11 +133,13 @@ class PushNotificationService {
 
     // 3. Hand the token to Rust — on every refresh, and now. The refresh
     //    listener is attached first: a rotation that lands while the first
-    //    hand-over is in flight must not be missed.
+    //    hand-over is in flight must not be missed. Not awaited: on iOS the
+    //    token waits for APNs (fetchDeviceToken), and nothing below needs it.
+    //    The acquisition still checks the permission and the opt-out first.
     _fcm.onTokenRefresh.listen((token) {
       _handOver(token);
     });
-    if (!_released) await _acquireIfAllowed();
+    if (!_released) unawaited(_acquireIfAllowed());
 
     // 4. Foreground messages carry nothing to act on (§2.3): the foreground
     //    subscription already delivers the event and the in-app card. The
@@ -193,7 +196,11 @@ class PushNotificationService {
     }
     final String? token;
     try {
-      token = await _fcm.getToken(vapidKey: kIsWeb ? vapidKey : null);
+      token = await fetchDeviceToken(
+        waitsForApns: !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS,
+        getApnsToken: _fcm.getAPNSToken,
+        getToken: () => _fcm.getToken(vapidKey: kIsWeb ? vapidKey : null),
+      );
     } catch (e) {
       debugPrint('[push] FCM getToken failed: $e');
       return;

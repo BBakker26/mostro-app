@@ -99,10 +99,11 @@ asks it to wake the peer's trade pubkey with `POST /api/notify`.
 `pub(K_conv)` of (solver key, disputant's trade key), which the listener cannot
 match either, so the wake is the solver client's duty: after each message it
 sends in a dispute, `POST /api/notify` with the disputant's trade pubkey, under
-the rules above. Nothing in this client can do it for the solver, and mostrix
-does not do it yet (`docs/PUSH_NOTIFICATIONS.md` §7.3, §14 item 2): until it
-does, the requirement is unmet and a solver's message reaches a backgrounded
-disputant only on resume.
+the rules above — the same sender-side wake this client performs for peer chat.
+Mostrix does not do it yet ([mostrix#177](https://github.com/MostroP2P/mostrix/issues/177),
+`docs/PUSH_NOTIFICATIONS.md` §7.3, §14 item 2): until it does, the requirement
+is unmet and a solver's message reaches a backgrounded disputant only on resume.
+Registering `pub(K_conv)` from this client instead is rejected (§7.3).
 - Not from the web build until the server answers CORS
   (mostro-push-server#44).
 - No relay, no wake: an envelope every relay rejected (`send_event` is still

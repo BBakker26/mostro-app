@@ -211,9 +211,10 @@ bridged by flutter_rust_bridge.
   the Rust core, the database or protocol state (a test reads its imports); it sets
   `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on
   resume, once, in the foreground core.
-- **Dispute chat must wake, and does not yet.** Its envelope is `p`-tagged to `pub(K_conv)`,
-  which the push server cannot match, so the solver's client must call `/api/notify` for the
-  disputant; mostrix does not. Don't treat it as solved by this client, and don't make peer
-  chat's `wake_peer` ring the solver (§7.3, §14 item 2).
+- **Dispute chat must wake, and does not yet.** Same envelope and same mechanism as peer chat:
+  it is `p`-tagged to `pub(K_conv)`, which the push server cannot match, so the **sender** calls
+  `/api/notify`. For a solver's message the sender is mostrix, which does not yet
+  (mostrix#177). Don't make `wake_peer` ring the solver (not a push client), and don't register
+  `pub(K_conv)` with the push server as a workaround (§7.3 says why).
 
 <!-- MANUAL ADDITIONS END -->

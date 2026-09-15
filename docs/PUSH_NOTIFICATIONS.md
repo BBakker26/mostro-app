@@ -156,7 +156,7 @@ This is the crux, and it differs from v1 because this client speaks protocol v2 
 |---|---|---|---|
 | Daemon → user (every trade action, `pay-bond-invoice`, `add-bond-invoice` and the claim acks, `bond-slashed`, `restore-session` reply) | our **trade pubkey** | yes | listener |
 | Peer chat (chat envelope, `mostro.network/protocol/chat.html`) | `pub(K_conv)` — an HKDF derivation of the two trade keys' ECDH secret | **no** | sender calls `/api/notify` with the **peer's trade pubkey** |
-| Dispute chat (same envelope keyed to the solver's pubkey) | `pub(K_conv)` of (our trade key, solver key) | **no** | **required**: the solver's client calls `/api/notify` with the disputant's trade pubkey — **mostrix does not yet** (§7.3, §14) |
+| Dispute chat (same envelope keyed to the solver's pubkey) | `pub(K_conv)` of (our trade key, solver key) | **no** | **required**: the solver's client calls `/api/notify` with the disputant's trade pubkey — **mostrix does not yet**, [mostrix#177](https://github.com/MostroP2P/mostrix/issues/177) (§7.3, §14) |
 | Announcements (kind 38387, #319) | none | no | not a push case |
 
 v1 had a third case: dispute admin DMs arrived as kind 1059 `p`-tagged to the trade
@@ -662,10 +662,18 @@ Dispute chat: **MUST wake the disputant, and does not yet.** The solver's envelo
 `p`-tagged to `pub(K_conv)`, which the listener cannot match, so the duty is the same
 as a peer's: after each message it sends in a dispute, the solver's client **MUST**
 `POST /api/notify { trade_pubkey: <disputant's trade pubkey> }`, with the rules above
-(one attempt, debounced, result ignored). This client cannot do it on the solver's
-behalf; mostrix does not do it today (§14 item 2). Until it does, a solver's message
-reaches a backgrounded disputant only on resume. The user's own evidence sends need no
-wake: the solver is not a push client.
+(one attempt, debounced, result ignored). It is the same mechanism as peer chat: the
+difference is only that the sender here is the solver's client, and mostrix does not
+call `/api/notify` yet ([mostrix#177](https://github.com/MostroP2P/mostrix/issues/177),
+§14 item 2). Until it does, a solver's message reaches a backgrounded disputant only
+on resume. The user's own evidence sends need no wake: the solver is not a push client.
+
+Considered and rejected: this client registering `pub(K_conv)` of the solver
+conversation with the push server, so the listener matches the envelope without the
+solver's help. Every send of our own carries the same `p` tag and would wake our own
+device; `pub(K_conv)` is public on the relays, so anyone could flood that address into
+pushes (the attack class of #246); and the server would learn which device takes part
+in which conversation. The wake stays the sender's duty, in both chats.
 
 ### 7.4 Flow 4 — Opt-out and permission
 
@@ -1104,9 +1112,11 @@ matrix.
    Until then the default is the Fly host, overridable by `PUSH_SERVER_URL`.
 2. **Dispute chat wake — required, not yet met.** Dispute chat MUST wake the disputant
    (§2.4, §7.3). The solver client (mostrix) must call `/api/notify` with the
-   disputant's trade pubkey after each message it sends in a dispute. No upstream
-   issue exists yet (searched MostroP2P/mostrix for `notify` and `push`): open one.
-   Until it lands, dispute messages while backgrounded are seen on resume only.
+   disputant's trade pubkey after each message it sends in a dispute, exactly as this
+   client does for peer chat. Tracked upstream as
+   [mostrix#177](https://github.com/MostroP2P/mostrix/issues/177), which also asks for
+   the peer-chat wake when Mostrix trades as a user. Until it lands, dispute messages
+   while backgrounded are seen on resume only.
 3. **Grace period length.** 24 h is a guess at "what still arrives after terminal".
    Verify against the daemon's post-`Success` traffic (`rate-received`, admin outcomes)
    during Phase 1 manual testing and adjust the constant.

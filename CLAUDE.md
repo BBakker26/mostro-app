@@ -203,10 +203,13 @@ bridged by flutter_rust_bridge.
   title and `data.type ∈ { trade_update, chat_wake }` — no event id, order or sender — so
   nothing may route or decide on payload fields beyond `type`. What the wake was about comes
   from `resync()` and the in-app cards.
-- **Push registration is Rust-owned and persisted.** Dart only hands over the device token
+- **Push registration is Rust-owned and persisted.** Dart hands over the device token
   (`set_push_token`); `rust/src/api/push.rs` decides which trade pubkeys the server holds it
   for, persisted in `push_registrations`, so a restart, token refresh or opt-out acts on the
-  full set. Don't add a Dart-side pubkey set or register from Dart.
+  full set. Dart never chooses, holds or edits that set. The one Dart path that POSTs
+  `/api/register` is the OS-scheduled refresh (`push_refresh_job.dart`, T1.5): it replays
+  exactly what Rust mirrored to `push_mirror.json`, without the core, so registrations outlive
+  the server's 48 h TTL while the app stays closed. Keep it — it is required, not a violation.
 - **The FCM background handler is display-only.** `push_background_handler.dart` never touches
   the Rust core, the database or protocol state (a test reads its imports); it sets
   `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on

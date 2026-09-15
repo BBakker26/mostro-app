@@ -57,8 +57,13 @@ class PushNotificationService {
   /// Web needs a browser with push, a VAPID key and the `PUSH_WEB_ENABLED`
   /// switch, which stays off until the push server accepts web (§3.5, T4.5);
   /// until then it reads as unsupported.
-  bool get isSupported =>
-      platformFor(kIsWeb, defaultTargetPlatform, webPush: _webPush) != null;
+  bool get isSupported => _platform != null;
+
+  /// The platform a token is registered under. One answer for the capability
+  /// and for every hand-over: web tokens need [_webPush] passed through, or
+  /// they are dropped before Rust ever sees them.
+  PushPlatform? get _platform =>
+      platformFor(kIsWeb, defaultTargetPlatform, webPush: _webPush);
 
   static bool get _webPush =>
       kIsWeb &&
@@ -188,7 +193,7 @@ class PushNotificationService {
   }
 
   Future<void> _handOver(String token) async {
-    final platform = platformFor(kIsWeb, defaultTargetPlatform);
+    final platform = _platform;
     if (platform == null) return;
     await _handoff.offer(token, platform);
   }

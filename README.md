@@ -224,7 +224,7 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 | Platform | Status |
 |----------|--------|
 | Android 5.0+ | Supported |
-| iOS 13+ | Supported |
+| iOS 14+ | Supported |
 | Web (PWA) | Supported (WASM) |
 | macOS 10.15+ | Supported |
 | Windows 10+ | Supported |

@@ -111,6 +111,8 @@ Two things keep web push off today, and both are deliberate:
 After a `flutterfire configure`, copy the new web values into the worker's
 `firebase.initializeApp` block; the test above names what differs.
 
-A closed tab refreshes nothing: a web registration lives 48 h past the last time a
-tab ran the app (§2.6). Safari offers push only to an installed PWA, which the
+A closed tab does not refresh the **push server registration**: the server forgets it
+48 h after the last `/api/register`, and only a tab running the app sends another, so
+reopening the app is what refreshes it (§2.6). The browser's service worker is separate
+and does not expire with it. Safari offers push only to an installed PWA, which the
 deployed bundle is not, so it reads as unsupported.

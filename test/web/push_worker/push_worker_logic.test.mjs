@@ -8,9 +8,73 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { notificationTarget, noticeFor, CHAT_WAKE_BODIES } = require('../../../web/push_worker_logic.js');
+const {
+  notificationTarget,
+  noticeFor,
+  openNotifications,
+  CHAT_WAKE_BODIES,
+  OPEN_NOTIFICATIONS,
+} = require('../../../web/push_worker_logic.js');
 
 const WORKER = 'https://mostro.network/app/firebase-messaging-sw.js';
+
+// A stand-in for the worker's `clients`: records what the tap asked of it.
+function fakeClients(urls) {
+  const calls = { matchAll: [], openWindow: [], messages: [], focused: [] };
+  const tabs = urls.map((url) => ({
+    url,
+    postMessage: (message) => calls.messages.push({ url, message }),
+    focus: async () => {
+      calls.focused.push(url);
+      return 'focused';
+    },
+  }));
+  return {
+    calls,
+    matchAll: async (options) => {
+      calls.matchAll.push(options);
+      return tabs;
+    },
+    openWindow: async (url) => {
+      calls.openWindow.push(url);
+      return 'opened';
+    },
+  };
+}
+
+test('a tap with the app open tells that tab to show Notifications and focuses it', async () => {
+  const clients = fakeClients(['https://mostro.network/app/#/order_book']);
+
+  const result = await openNotifications(clients, WORKER);
+
+  assert.equal(result, 'focused');
+  assert.deepEqual(clients.calls.messages, [
+    { url: 'https://mostro.network/app/#/order_book', message: OPEN_NOTIFICATIONS },
+  ]);
+  assert.deepEqual(clients.calls.focused, ['https://mostro.network/app/#/order_book']);
+  assert.deepEqual(clients.calls.openWindow, []);
+  // Uncontrolled too: the app's tabs are controlled by the isolation shim.
+  assert.deepEqual(clients.calls.matchAll, [{ type: 'window', includeUncontrolled: true }]);
+});
+
+test('a tap with no app tab open opens one on Notifications', async () => {
+  const clients = fakeClients([]);
+
+  const result = await openNotifications(clients, WORKER);
+
+  assert.equal(result, 'opened');
+  assert.deepEqual(clients.calls.openWindow, ['https://mostro.network/app/#/notifications']);
+  assert.deepEqual(clients.calls.messages, []);
+});
+
+test('a tab of the same origin outside the base path is not the app', async () => {
+  const clients = fakeClients(['https://mostro.network/', 'https://mostro.network/docs/']);
+
+  await openNotifications(clients, WORKER);
+
+  assert.deepEqual(clients.calls.focused, []);
+  assert.deepEqual(clients.calls.openWindow, ['https://mostro.network/app/#/notifications']);
+});
 
 test('a tap opens Notifications under the deployed base path', () => {
   assert.equal(notificationTarget(WORKER), 'https://mostro.network/app/#/notifications');

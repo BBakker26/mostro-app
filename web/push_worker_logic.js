@@ -27,6 +27,22 @@ function notificationTarget(workerUrl) {
   return new URL('./#/notifications', workerUrl).href;
 }
 
+// A tap on any notice: tell an open app tab to show Notifications and focus
+// it, or open one there. `clients` is the worker's Clients, injected so the
+// two branches run under node. Uncontrolled tabs count: the app's pages are
+// controlled by the isolation shim, not by this worker. Returns the promise
+// the worker hands to `event.waitUntil`.
+async function openNotifications(clients, workerUrl) {
+  const base = new URL('./', workerUrl).href;
+  const tabs = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const tab = tabs.find((client) => client.url.startsWith(base));
+  if (tab) {
+    tab.postMessage(OPEN_NOTIFICATIONS);
+    return tab.focus();
+  }
+  return clients.openWindow(notificationTarget(workerUrl));
+}
+
 // The notice the worker renders itself, or null. A trade_update carries the
 // server's notification block, which the SDK renders. A chat_wake carries
 // none, and Chrome revokes a subscription whose pushes show nothing.
@@ -44,6 +60,12 @@ function languageOf(languages) {
   return 'en';
 }
 
-const pushWorkerLogic = { CHAT_WAKE_BODIES, OPEN_NOTIFICATIONS, notificationTarget, noticeFor };
+const pushWorkerLogic = {
+  CHAT_WAKE_BODIES,
+  OPEN_NOTIFICATIONS,
+  notificationTarget,
+  noticeFor,
+  openNotifications,
+};
 
 if (typeof module !== 'undefined') module.exports = pushWorkerLogic;

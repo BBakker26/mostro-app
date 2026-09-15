@@ -13,22 +13,12 @@ importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-messaging-comp
 importScripts('push_worker_logic.js');
 
 // A tap: tell an open tab to show Notifications and focus it, or open one
-// there. Added before the SDK's own listener, which stops propagation for the
-// notifications it rendered.
+// there (pushWorkerLogic.openNotifications, tested under node). Added before
+// the SDK's own listener, which stops propagation for the notifications it
+// rendered.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const base = new URL('./', self.location.href).href;
-  event.waitUntil(
-    (async () => {
-      const tabs = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const tab = tabs.find((client) => client.url.startsWith(base));
-      if (tab) {
-        tab.postMessage(pushWorkerLogic.OPEN_NOTIFICATIONS);
-        return tab.focus();
-      }
-      return clients.openWindow(pushWorkerLogic.notificationTarget(self.location.href));
-    })(),
-  );
+  event.waitUntil(pushWorkerLogic.openNotifications(clients, self.location.href));
 });
 
 firebase.initializeApp({

@@ -217,8 +217,10 @@ Three facts shape the plan:
   pages, not other workers — verified the same way.
 - **No OS job.** There is no `workmanager` on the web. `periodicSync` exists in
   Chromium only, for installed PWAs, at the browser's discretion, so the refresh of
-  §7.1 that outlives the process has nothing to run on. A web registration lives
-  48 h past the last time a tab ran the app; the Settings copy on web says so.
+  §7.1 that outlives the process has nothing to run on. The push server
+  registration of a web token expires 48 h after the last `/api/register`, and only a
+  tab running the app sends one, so reopening the app refreshes it (the browser's
+  service worker registration is unaffected); the Settings copy on web says so.
 
 Browser support: Chrome, Edge and Firefox on desktop and Android; Safari 16.4+ on
 macOS and iOS only for an installed (home-screen) PWA, which the deployed bundle is

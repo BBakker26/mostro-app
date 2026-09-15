@@ -199,5 +199,21 @@ bridged by flutter_rust_bridge.
 - **Push cannot carry bond events.** The push server only sees kind 14 p-tagged to a trade
   pubkey and sends a content-free wake-up, so no payload can name `add-bond-invoice` or
   `bond-payout-completed`. Bond notices are in-app, from the kind-14 subscription (§8.5).
+- **A push is a doorbell, never a courier** (`docs/PUSH_NOTIFICATIONS.md`). It carries a fixed
+  title and `data.type ∈ { trade_update, chat_wake }` — no event id, order or sender — so
+  nothing may route or decide on payload fields beyond `type`. What the wake was about comes
+  from `resync()` and the in-app cards.
+- **Push registration is Rust-owned and persisted.** Dart only hands over the device token
+  (`set_push_token`); `rust/src/api/push.rs` decides which trade pubkeys the server holds it
+  for, persisted in `push_registrations`, so a restart, token refresh or opt-out acts on the
+  full set. Don't add a Dart-side pubkey set or register from Dart.
+- **The FCM background handler is display-only.** `push_background_handler.dart` never touches
+  the Rust core, the database or protocol state (a test reads its imports); it sets
+  `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on
+  resume, once, in the foreground core.
+- **Dispute chat must wake, and does not yet.** Its envelope is `p`-tagged to `pub(K_conv)`,
+  which the push server cannot match, so the solver's client must call `/api/notify` for the
+  disputant; mostrix does not. Don't treat it as solved by this client, and don't make peer
+  chat's `wake_peer` ring the solver (§7.3, §14 item 2).
 
 <!-- MANUAL ADDITIONS END -->

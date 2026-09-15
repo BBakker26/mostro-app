@@ -92,7 +92,17 @@ asks it to wake the peer's trade pubkey with `POST /api/notify`.
   sent while one is in flight do not each ring.
 - Fire-and-forget: spawned, never awaited by the send, never retried, never
   a reason for the send to fail. A `400` is logged as a client bug.
-- Peer chat only. The dispute channel does not ring its solver.
+- Peer chat only. The dispute channel does not ring its solver, who is not a
+  push client.
+
+**Dispute chat MUST wake the disputant.** A solver's envelope is `p`-tagged to
+`pub(K_conv)` of (solver key, disputant's trade key), which the listener cannot
+match either, so the wake is the solver client's duty: after each message it
+sends in a dispute, `POST /api/notify` with the disputant's trade pubkey, under
+the rules above. Nothing in this client can do it for the solver, and mostrix
+does not do it yet (`docs/PUSH_NOTIFICATIONS.md` §7.3, §14 item 2): until it
+does, the requirement is unmet and a solver's message reaches a backgrounded
+disputant only on resume.
 - Not from the web build until the server answers CORS
   (mostro-push-server#44).
 - No relay, no wake: an envelope every relay rejected (`send_event` is still

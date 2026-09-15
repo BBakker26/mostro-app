@@ -1,6 +1,6 @@
 # Push Notifications — Client Implementation Spec & Phased Plan
 
-**Status:** Draft — planning document; no epic yet (candidates to close or fold in: [#147](https://github.com/MostroP2P/app/issues/147) background wake-up, [#308](https://github.com/MostroP2P/app/issues/308) app lifecycle, [#133](https://github.com/MostroP2P/app/issues/133) web VAPID key)
+**Status:** Implemented through Phase 4 — Phases 0–3 merged (#463, #464, #466–#468, #470–#473); Phase 4 in review (PR-4a #479, PR-4b #483, PR-4c #484); Phase 5 conditional and not scheduled. Closed: [#308](https://github.com/MostroP2P/app/issues/308) app lifecycle, [#133](https://github.com/MostroP2P/app/issues/133) web VAPID key (client side). Open: [#147](https://github.com/MostroP2P/app/issues/147) (desktop half). Outstanding requirements that depend on other repositories: dispute chat **must** wake (§2.4, §7.3, §14 item 2), and web push needs the server's `web` platform and CORS (§3.5)
 **Goal:** let this client be woken by [`mostro-push-server`](https://github.com/MostroP2P/mostro-push-server) when a daemon message, a payout claim or a peer's chat message reaches one of its trade keys while the app is in the background or not running, with the same privacy properties the server was designed for: nobody outside the device ever sees message content, sender or order
 **Audience:** contributors implementing push support in this client (appv2), human and AI reviewers of the PRs that land it
 **Upstream reference:** [`MostroP2P/mostro-push-server`](https://github.com/MostroP2P/mostro-push-server) — `docs/api.md`, `docs/architecture.md`, `SECURITY.md` (the server-side contract, the single source of truth for what a push carries); [MIP-05](https://github.com/MostroP2P/MIPs) (the privacy model it is inspired by)
@@ -156,12 +156,15 @@ This is the crux, and it differs from v1 because this client speaks protocol v2 
 |---|---|---|---|
 | Daemon → user (every trade action, `pay-bond-invoice`, `add-bond-invoice` and the claim acks, `bond-slashed`, `restore-session` reply) | our **trade pubkey** | yes | listener |
 | Peer chat (chat envelope, `mostro.network/protocol/chat.html`) | `pub(K_conv)` — an HKDF derivation of the two trade keys' ECDH secret | **no** | sender calls `/api/notify` with the **peer's trade pubkey** |
-| Dispute chat (same envelope keyed to the solver's pubkey) | `pub(K_conv)` of (our trade key, solver key) | **no** | the solver's client would have to call `/api/notify` — **mostrix does not** (§14) |
+| Dispute chat (same envelope keyed to the solver's pubkey) | `pub(K_conv)` of (our trade key, solver key) | **no** | **required**: the solver's client calls `/api/notify` with the disputant's trade pubkey — **mostrix does not yet** (§7.3, §14) |
 | Announcements (kind 38387, #319) | none | no | not a push case |
 
 v1 had a third case: dispute admin DMs arrived as kind 1059 `p`-tagged to the trade
-pubkey, so the listener matched them. That transport is gone here (#246), which is why
-dispute chat is now a documented gap rather than a working path.
+pubkey, so the listener matched them. That transport is gone here (#246), so the wake
+has to come from the sender, as it does for peer chat. A solver's message during a
+dispute is the event a disputant can least afford to miss: dispute chat **MUST** have a
+wake. Until the solver's client provides it, this is an unmet requirement, not an
+accepted gap.
 
 ### 2.5 Duplicates, loss and forgetting
 
@@ -453,7 +456,9 @@ next `saveSession`. Sound/vibration are persisted but the isolate hardcodes both
 
 ## 5. Where this client stands today
 
-Verified on `main` at the time of writing.
+Verified on `main` when this plan was written, before Phase 0. Kept as the baseline the
+phases were measured against; it no longer describes the code — the status line and
+§11 do.
 
 | Area | State | Where |
 |---|---|---|
@@ -580,7 +585,7 @@ again) and `push_enabled`.
    refused, or accepted, under the wrong policy, and a refusal must be recorded
    against the node that earned it. Backoff on failure: 1 min → 5 → 30 → 2 h, capped;
    `429` honours `Retry-After`; `403` marks **that node** refused
-   (`push_node_refused:<node>` = now) and reconcile skips its keys. The refusal
+   (`push_node_refusals[node]` = now) and reconcile skips its keys. The refusal
    **clears** on the first of: 24 h since it was recorded (the next reconcile retries
    once, and a repeated `403` re-arms it for another 24 h), the user turning the
    master toggle on, or the user selecting that node as the active one — the two
@@ -653,9 +658,14 @@ Not gated on our own `push_enabled`. Debounced per order: at most one notify per
 30/min per-pubkey limit. The peer's trade pubkey is `TradeInfo.counterparty_pubkey`,
 which is empty before the peer reveal (#334) — no reveal, no notify.
 
-Dispute chat: **not wired**. The solver's envelope is `p`-tagged to `pub(K_conv)`, and
-the solver client does not call `/api/notify`. Recorded in §14 as an upstream ask; the
-user's own evidence sends do not need a wake (the solver is not a push client).
+Dispute chat: **MUST wake the disputant, and does not yet.** The solver's envelope is
+`p`-tagged to `pub(K_conv)`, which the listener cannot match, so the duty is the same
+as a peer's: after each message it sends in a dispute, the solver's client **MUST**
+`POST /api/notify { trade_pubkey: <disputant's trade pubkey> }`, with the rules above
+(one attempt, debounced, result ignored). This client cannot do it on the solver's
+behalf; mostrix does not do it today (§14 item 2). Until it does, a solver's message
+reaches a backgrounded disputant only on resume. The user's own evidence sends need no
+wake: the solver is not a push client.
 
 ### 7.4 Flow 4 — Opt-out and permission
 
@@ -702,7 +712,7 @@ waking the device.
 pub struct PushRegistration {
     pub trade_pubkey: String,     // 64 lowercase hex
     pub registered_at: i64,       // unix seconds of the last 200
-    pub token_hash: String,       // blake3/sha256 of the token it was registered with
+    pub token_hash: String,       // hex SHA-256 of the token it was registered with
     pub mostro_pubkey: String,    // the issuing node it was filed under
     pub unwanted_since: Option<i64>, // first reconcile that found it unwanted; the grace clock
     pub attempts: u32,
@@ -730,15 +740,19 @@ Settings picks its branch in that order (§9.1).
 
 Settings keys (`db/mod.rs::settings_keys`): `push_enabled` (`"true"`/`"false"`,
 default true), `push_token`, `push_platform`, `push_registrations` (JSON map keyed by
-pubkey), `push_node_refused:<node>` (unix seconds of the 403; cleared per §7.1).
+pubkey), `push_node_refusals` (JSON map of node → unix seconds of the 403; cleared per
+§7.1). On native, `push_mirror.json` beside the database feeds the OS-scheduled
+refresh (T1.5).
 
 Pure functions in `mostro/push.rs`, unit-tested without I/O: `wanted_pubkeys(trades,
-claims, disputes, now)`, `plan(wanted, registrations, token_hash, now) → Vec<Action>`
-(`Register` / `Unregister` / `Forget`), `backoff(attempts) → Duration`,
-`notify_allowed(last_notify_at, now)`.
+claims, active_node, key_for) → Wanted`, `plan(wanted, registrations, token_hash,
+refusals, now) → Vec<Action>` (`Register`, `Unregister`, `NoteUnwanted`, `NoteWanted`,
+…), `backoff_secs(attempts)`, `refusal_active(refused_at, now)`,
+`notify_allowed(last_notify_at, now)`, `token_hash(token)`.
 
 HTTP in `api/push.rs` behind a `PushServer` trait (`register`, `unregister`,
-`notify`) so tests inject a fake and the wasm build compiles a stub.
+`notify`) so tests inject a fake. The wasm build uses the same `reqwest` client for
+registration; `notify` is unused there until the server answers CORS (§3.5).
 
 ### 8.2 Bridge surface — `rust/src/api/push.rs`
 
@@ -978,7 +992,7 @@ Only if field feedback says the generic OS notification is not enough. Not sched
 
 | Task | Scope |
 |---|---|
-| T6.1 | `CLAUDE.md` gotchas: the push carries nothing; registration is Rust-owned and persisted; the background handler is display-only; dispute chat has no wake |
+| T6.1 | `CLAUDE.md` gotchas: the push carries nothing; registration is Rust-owned and persisted; the background handler is display-only; dispute chat must wake and does not yet |
 | T6.2 | `specs/004` contracts and data model final pass; this document's status line; `.specify/v1-reference/FCM_IMPLEMENTATION.md` gains a "how v2 differs" pointer |
 | T6.3 | Optional: UnifiedPush as a distributor choice on Android (`token` = endpoint URL, `platform = android`), behind the same registration state — only if the operator turns `UNIFIEDPUSH_ENABLED` on |
 
@@ -988,9 +1002,9 @@ Only if field feedback says the generic OS notification is not enough. Not sched
 
 | Issue | Phase / PRs |
 |---|---|
-| #308 app lifecycle | Phase 0 (PR-0a, 0b) |
+| #308 app lifecycle | Phase 0 (PR-0a, 0b) — closed |
 | #147 background wake-up | Phase 2 (PR-2) for the mobile half; the desktop half stays open |
-| #133 web VAPID key | Phase 4 (PR-4c); the flag flips when the server accepts `web` and answers CORS (§3.5) |
+| #133 web VAPID key | Phase 4 (PR-4c) — closed; the flag flips when the server accepts `web` and answers CORS (§3.5) |
 | new epic (to open) | closed by PR-6 |
 
 ---
@@ -1065,7 +1079,7 @@ Checked item by item against `MostroP2P/mobile` after drafting the above.
 | Never unregisters on trade end | §7.1 | Unregister after a 24 h grace past a hard-terminal status |
 | `/api/health` gate at startup | §10 | None; fail open per request |
 | `notifyPeer` after a chat send | §7.3 | Same idea, moved to Rust next to the publish, debounced |
-| Dispute admin DMs matched by the listener | §2.4 | Impossible on protocol v2; documented gap, upstream ask |
+| Dispute admin DMs matched by the listener | §2.4, §7.3 | Impossible on protocol v2; the wake is required from the solver's client (`/api/notify`), not yet provided upstream |
 | FCM handler starts a second protocol isolate | §6 principle 2, §11 Phase 5 | Display-only; the one Rust core replays on resume; rich background is a conditional later phase |
 | `LifecycleManager` with per-feature resume wiring | §10 | `resync()` + a uniform `hydrate()` (#308) |
 | Local notifications built from decrypted events | §9.3 | The OS renders the server's generic push; in-app cards come from the resync |
@@ -1088,9 +1102,11 @@ matrix.
    the server repo documents only `https://mostro-push-server.fly.dev`. Confirm with the
    operator before PR-1b which one is authoritative and whether the former is an alias.
    Until then the default is the Fly host, overridable by `PUSH_SERVER_URL`.
-2. **Dispute chat wake.** The solver client (mostrix) would need to call `/api/notify`
-   with the disputant's trade pubkey after each admin message. Open an upstream issue;
-   until it lands, dispute messages while backgrounded are seen on resume only.
+2. **Dispute chat wake — required, not yet met.** Dispute chat MUST wake the disputant
+   (§2.4, §7.3). The solver client (mostrix) must call `/api/notify` with the
+   disputant's trade pubkey after each message it sends in a dispute. No upstream
+   issue exists yet (searched MostroP2P/mostrix for `notify` and `push`): open one.
+   Until it lands, dispute messages while backgrounded are seen on resume only.
 3. **Grace period length.** 24 h is a guess at "what still arrives after terminal".
    Verify against the daemon's post-`Success` traffic (`rate-received`, admin outcomes)
    during Phase 1 manual testing and adjust the constant.

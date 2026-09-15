@@ -1147,7 +1147,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get chooseNotificationEventsSubtitle =>
-      'Scegli quali eventi attivano le notifiche push.';
+      'Scegli quali eventi mostrano una notifica nell’app.';
 
   @override
   String get notifTradeUpdatesTitle => 'Aggiornamenti operazioni';
@@ -2490,7 +2490,70 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get notificationsPrivacyFootnote =>
-      'Le notifiche non includono importi né controparti: ti avvisano solo che c’è qualcosa da vedere.';
+      'Le notifiche non includono importi né controparti. Un push passa dai server di Google o di Apple e dice solo che c’è qualcosa da vedere.';
+
+  @override
+  String get pushMasterToggleTitle => 'Notifiche push';
+
+  @override
+  String get pushMasterToggleSubtitle =>
+      'Risveglia l’app quando arriva un aggiornamento di scambio o un messaggio. La notifica in sé non contiene nulla.';
+
+  @override
+  String get pushStatusOff => 'Disattivate: nulla è registrato sul server push';
+
+  @override
+  String pushStatusCleanupPending(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Disattivate — $count registrazioni push ancora da rimuovere',
+      one: 'Disattivate — 1 registrazione push ancora da rimuovere',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pushStatusNoToken =>
+      'In attesa del token push di questo dispositivo';
+
+  @override
+  String get pushStatusIdle => 'Attivate: nessuno scambio aperto da registrare';
+
+  @override
+  String pushStatusRegistered(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Registrato per $count scambi',
+      one: 'Registrato per 1 scambio',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pushStatusLastRegistered(String ago) {
+    return 'ultima registrazione $ago';
+  }
+
+  @override
+  String get pushStatusUnreachable =>
+      'Server push irraggiungibile: nuovo tentativo in corso';
+
+  @override
+  String get pushStatusNodeRefused =>
+      'Questo nodo Mostro non è accettato dal server push';
+
+  @override
+  String get pushStatusRateLimited =>
+      'Limite di richieste push raggiunto: nuovo tentativo a breve';
+
+  @override
+  String get pushUnsupportedPlatform =>
+      'Le notifiche push non sono disponibili su questa piattaforma';
+
+  @override
+  String get pushToggleSaveFailed => 'Impossibile modificare le notifiche push';
 
   @override
   String get pushNewMessageBody => 'Hai un nuovo messaggio';

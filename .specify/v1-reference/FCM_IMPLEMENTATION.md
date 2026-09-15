@@ -2,7 +2,9 @@
 
 > **Descriptive of v1** (`MostroP2P/mobile`). The v2 client does not follow
 > this design: registration is Rust-owned and persisted, the background
-> handler is display-only (no second isolate), the push carries nothing
+> handler is display-only (it still runs in its own isolate, as FCM
+> requires, but never boots a second protocol stack: no Rust core, no
+> database, no decryption), the push carries nothing
 > to route on, and on protocol v2 the chat wake is the sender's duty — for
 > dispute chat that sender is the solver's client. See
 > `docs/PUSH_NOTIFICATIONS.md` — §13 compares the two item by item.

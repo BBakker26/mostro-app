@@ -326,7 +326,7 @@ Consequences the client must design around:
 |---|---|---|
 | Android | FCM (`google-services.json` for `foundation.mostro.app` is committed) | full |
 | iOS | APNs via FCM — `aps-environment`, `GoogleService-Info.plist` and the `FirebaseApp` registration are in the repository (T4.4); the APNs key in the Firebase project is an operator task (`docs/firebase-setup.md`) | full, once the APNs key is uploaded |
-| Web | FCM Web Push (VAPID) via `web/firebase-messaging-sw.js`; Chrome, Edge, Firefox; Safari only as an installed PWA | full for the visible wake and the chat wake, once the server accepts `web` and answers CORS (§3.5, T4.5); no refresh outlives the tab |
+| Web | FCM Web Push (VAPID) via `web/firebase-messaging-sw.js`; Chrome, Edge, Firefox; Safari only as an installed PWA | client side in place behind `PUSH_WEB_ENABLED` and `FCM_VAPID_KEY` (T4.5); full for the visible wake and the chat wake once the server accepts `web` and answers CORS (§3.5); no refresh outlives the tab |
 | Linux / macOS / Windows | — | none; foreground subscriptions only |
 
 ### 3.5 Server changes web needs

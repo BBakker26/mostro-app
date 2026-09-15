@@ -83,7 +83,34 @@ Use a physical iPhone signed with a profile that includes Push Notifications.
 
 ## Web
 
-Pending (docs/PUSH_NOTIFICATIONS.md T4.5, issue #133): the push server does not
-accept web registrations yet. `web/firebase-messaging-sw.js` still carries
-placeholder config and the VAPID key in `push_notification_service.dart` is a
-placeholder; both are replaced by that task.
+FCM Web Push delivers to a service worker, `web/firebase-messaging-sw.js`, whether
+the tab is open, hidden or closed (docs/PUSH_NOTIFICATIONS.md §2.6, T4.5).
+
+| Piece | Where |
+|---|---|
+| Worker | `web/firebase-messaging-sw.js`, its decisions in `web/push_worker_logic.js` |
+| Worker config | the web block of `lib/firebase_options.dart`, copied; `test/web/pages_bundle_test.dart` fails if they drift |
+| Firebase JS SDK version | the one `firebase_core_web` loads on the page; the same test holds them equal |
+| Registration | `web/index.html` and `web_push_web.dart`, relative to `<base href>` under the scope `firebase-cloud-messaging-push-scope`. Never at the origin root, which is a 404 under `/app/` |
+| VAPID key | `--dart-define=FCM_VAPID_KEY=<key>`, from the repository variable `FCM_VAPID_KEY` in `.github/workflows/web-build.yml` |
+| Switch | `--dart-define=PUSH_WEB_ENABLED=true`, not passed anywhere yet |
+
+Two things keep web push off today, and both are deliberate:
+
+1. **The push server does not accept web.** It needs `platform: "web"` and CORS for
+   the app's origin (mostro-push-server#44, §3.5). Until that ships, the build does
+   not pass `PUSH_WEB_ENABLED`, and Settings shows web as a platform without push.
+   The worker still registers on every load; without a token it does nothing.
+2. **The VAPID key.** Firebase console → Project settings → Cloud Messaging → **Web
+   Push certificates** → generate (or import) a key pair, and copy the **public**
+   key into the repository variable `FCM_VAPID_KEY` (Settings → Secrets and
+   variables → Actions → Variables). It is public by design: the browser hands it
+   to its push service. A fork uses its own project's key. A build without it has
+   no web push, whatever the switch says.
+
+After a `flutterfire configure`, copy the new web values into the worker's
+`firebase.initializeApp` block; the test above names what differs.
+
+A closed tab refreshes nothing: a web registration lives 48 h past the last time a
+tab ran the app (§2.6). Safari offers push only to an installed PWA, which the
+deployed bundle is not, so it reads as unsupported.

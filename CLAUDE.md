@@ -65,6 +65,14 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (no-op off web) — rename that flag on one side only and the check silently never fires.
   The CI run also sets `SMOKE_BOND_STORE=1`: it seeds bond rows (`test/web/smoke/seed/`) into
   IndexedDB, reloads, and compares them with what `lib/core/web/store_probe.dart` read back.
+- **The FCM messaging worker is a second service worker**, `web/firebase-messaging-sw.js`,
+  registered from `web/index.html` and `web_push_web.dart` **relative to the base path** under
+  the scope `firebase-cloud-messaging-push-scope` — Firebase's default is the origin root, a 404
+  under `/app/`, and `firebase_messaging` 15 cannot take a worker path, so the token comes from
+  the JS SDK with that registration. Its Firebase config and SDK version are copies that
+  `pages_bundle_test.dart` holds equal to `firebase_options.dart` and `firebase_core_web`; CI
+  sets `SMOKE_PUSH_WORKER=1` to assert it activates without costing isolation. Web push stays
+  off until the build passes `PUSH_WEB_ENABLED` (docs/PUSH_NOTIFICATIONS.md T4.5).
 
 ## Code Style
 

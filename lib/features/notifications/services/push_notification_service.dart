@@ -9,6 +9,8 @@ import 'package:mostro/features/notifications/services/device_token.dart';
 import 'package:mostro/features/notifications/services/local_notifications.dart';
 import 'package:mostro/features/notifications/services/push_background_handler.dart';
 import 'package:mostro/features/notifications/services/push_refresh_job.dart';
+import 'package:mostro/features/notifications/services/web_push.dart';
+import 'package:mostro/features/notifications/services/web_push_config.dart';
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/features/notifications/services/token_handoff.dart';
 import 'package:mostro/src/rust/api/push.dart' as push_api;
@@ -70,10 +72,24 @@ class PushNotificationService {
   /// obtained" — a denied permission also yields no token and must show the
   /// denied banner, not unsupported copy.
   ///
-  /// Web is a capability the browser has, but the push server does not
-  /// accept a web platform yet (§3.5), so it reads as unsupported until
-  /// that lands (T4.5).
-  bool get isSupported => platformFor(kIsWeb, defaultTargetPlatform) != null;
+  /// Web needs a browser with push, a VAPID key and the `PUSH_WEB_ENABLED`
+  /// switch, which stays off until the push server accepts web (§3.5, T4.5);
+  /// until then it reads as unsupported.
+  bool get isSupported => _platform != null;
+
+  /// The platform a token is registered under. One answer for the capability
+  /// and for every hand-over: web tokens need [_webPush] passed through, or
+  /// they are dropped before Rust ever sees them.
+  PushPlatform? get _platform =>
+      platformFor(kIsWeb, defaultTargetPlatform, webPush: _webPush);
+
+  static bool get _webPush =>
+      kIsWeb &&
+      webPushAvailable(
+        enabled: kPushWebEnabled,
+        vapidKey: kFcmVapidKey,
+        browserSupportsPush: browserSupportsPush(),
+      );
 
   Future<void> initialize({ProviderContainer? container}) {
     return _serialize(_initialize);
@@ -156,6 +172,8 @@ class PushNotificationService {
     //    cards say what the wake was about. Warm (the app was in the
     //    background) and cold (the tap launched it) alike.
     FirebaseMessaging.onMessageOpenedApp.listen((_) => _openNotifications());
+    //    On web the messaging worker handles the tap and tells an open tab.
+    if (kIsWeb) onWebNotificationTap(_openNotifications);
     //    The chat-wake notice is the app's own, so FCM sees neither tap.
     final launch = await _fcm.getInitialMessage();
     if (launch != null || await launchedFromLocalNotification()) {
@@ -163,8 +181,9 @@ class PushNotificationService {
     }
 
     // 5. The refresh that outlives the process: the OS re-POSTs the
-    //    registrations Rust mirrored, every 12 h, app running or not.
-    await schedulePushRefresh();
+    //    registrations Rust mirrored, every 12 h, app running or not. The web
+    //    has no OS job to run it on (§2.6).
+    if (!kIsWeb) await schedulePushRefresh();
   }
 
   Future<void> _nudgeIfOffline() async {
@@ -188,19 +207,18 @@ class PushNotificationService {
   }
 
   Future<void> _handOverToken() async {
-    // TODO(#133): the real VAPID key, once the push server accepts web.
-    const vapidKey = 'YOUR_VAPID_KEY';
-    if (kIsWeb && vapidKey == 'YOUR_VAPID_KEY') {
-      debugPrint('[push] VAPID key not configured — skipping web token');
-      return;
-    }
     final String? token;
     try {
-      token = await fetchDeviceToken(
-        waitsForApns: !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS,
-        getApnsToken: _fcm.getAPNSToken,
-        getToken: () => _fcm.getToken(vapidKey: kIsWeb ? vapidKey : null),
-      );
+      // Web binds the token to the messaging worker under the base path
+      // (web_push_web.dart); the plugin would look for it at the origin root.
+      token =
+          kIsWeb
+              ? await webPushToken(kFcmVapidKey)
+              : await fetchDeviceToken(
+                waitsForApns: defaultTargetPlatform == TargetPlatform.iOS,
+                getApnsToken: _fcm.getAPNSToken,
+                getToken: _fcm.getToken,
+              );
     } catch (e) {
       debugPrint('[push] FCM getToken failed: $e');
       return;
@@ -212,7 +230,7 @@ class PushNotificationService {
 
   Future<void> _handOver(String token) async {
     if (_released || _permissionDenied) return;
-    final platform = platformFor(kIsWeb, defaultTargetPlatform);
+    final platform = _platform;
     if (platform == null) return;
     await _handoff.offer(token, platform);
   }
@@ -339,10 +357,15 @@ class PushNotificationService {
 }
 
 /// The push server's platform for this build, or `null` where no push can
-/// be received: desktop has no transport, and web is held back until the
-/// server accepts it (docs/PUSH_NOTIFICATIONS.md §3.4, §3.5).
-PushPlatform? platformFor(bool isWeb, TargetPlatform platform) {
-  if (isWeb) return null;
+/// be received: desktop has no transport, and web only once [webPush] says
+/// the tab can be woken (`webPushAvailable`, docs/PUSH_NOTIFICATIONS.md
+/// §3.4, §3.5).
+PushPlatform? platformFor(
+  bool isWeb,
+  TargetPlatform platform, {
+  bool webPush = false,
+}) {
+  if (isWeb) return webPush ? PushPlatform.web : null;
   return switch (platform) {
     TargetPlatform.android => PushPlatform.android,
     TargetPlatform.iOS => PushPlatform.ios,

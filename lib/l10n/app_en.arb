@@ -1466,7 +1466,7 @@
       }
     }
   },
-  "chooseNotificationEventsSubtitle": "Choose which events trigger push notifications.",
+  "chooseNotificationEventsSubtitle": "Choose which events show a notification in the app.",
   "@chooseNotificationEventsSubtitle": {
     "description": "Subtitle on the notification settings screen"
   },
@@ -3270,9 +3270,76 @@
   "@openSystemSettingsAction": {
     "description": "Action of the denied-permission banner"
   },
-  "notificationsPrivacyFootnote": "Notifications carry no amounts and no counterparties: they only tell you there is something to see.",
+  "notificationsPrivacyFootnote": "Notifications carry no amounts and no counterparties. A push travels through Google's or Apple's servers and says only that there is something to see.",
   "@notificationsPrivacyFootnote": {
-    "description": "Footnote: what a push notification does not carry"
+    "description": "Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted."
+  },
+  "pushMasterToggleTitle": "Push notifications",
+  "@pushMasterToggleTitle": {
+    "description": "Title of the master push toggle on the notification settings screen"
+  },
+  "pushMasterToggleSubtitle": "Wakes the app when a trade or chat message arrives. The notification itself carries nothing.",
+  "@pushMasterToggleSubtitle": {
+    "description": "Description under the master push toggle: a push is a content-free wake-up"
+  },
+  "pushStatusOff": "Off — nothing is registered with the push server",
+  "@pushStatusOff": {
+    "description": "Status line under the master push toggle when push is turned off"
+  },
+  "pushStatusCleanupPending": "{count, plural, =1{Off — removal of 1 push registration is pending} other{Off — removal of {count} push registrations is pending}}",
+  "@pushStatusCleanupPending": {
+    "description": "Push is off locally, but the server has not confirmed removing these registrations",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pushStatusNoToken": "Waiting for this device's push token",
+  "@pushStatusNoToken": {
+    "description": "Status line when push is on but the device has not produced a push token yet"
+  },
+  "pushStatusIdle": "On — no open trades to register",
+  "@pushStatusIdle": {
+    "description": "Status line when push is on, nothing failed, and there is no open trade to register"
+  },
+  "pushStatusRegistered": "{count, plural, =1{Registered for 1 trade} other{Registered for {count} trades}}",
+  "@pushStatusRegistered": {
+    "description": "Status line: how many open trades the push server holds this device's token for",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "pushStatusLastRegistered": "last registered {ago}",
+  "@pushStatusLastRegistered": {
+    "description": "Appended to pushStatusRegistered after ' · '; {ago} is a relative time such as '3 h ago' or 'yesterday'",
+    "placeholders": {
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
+  "pushStatusUnreachable": "Push server unreachable — retrying",
+  "@pushStatusUnreachable": {
+    "description": "Status line when the last registration attempt failed and will be retried"
+  },
+  "pushStatusNodeRefused": "This Mostro node is not accepted by the push server",
+  "@pushStatusNodeRefused": {
+    "description": "Status line when the push server operator refuses trades from the active Mostro node"
+  },
+  "pushStatusRateLimited": "Push request limit reached — retrying shortly",
+  "@pushStatusRateLimited": {
+    "description": "Status line when the push server asked the app to slow down"
+  },
+  "pushUnsupportedPlatform": "Push notifications are not available on this platform",
+  "@pushUnsupportedPlatform": {
+    "description": "Info row replacing the master push toggle on platforms that cannot receive a push (desktop, web for now)"
+  },
+  "pushToggleSaveFailed": "Could not change push notifications",
+  "@pushToggleSaveFailed": {
+    "description": "Snackbar when the master push toggle could not be saved"
   },
   "pushNewMessageBody": "You have a new message",
   "@pushNewMessageBody": {

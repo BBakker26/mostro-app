@@ -2129,7 +2129,7 @@ abstract class AppLocalizations {
   /// Subtitle on the notification settings screen
   ///
   /// In en, this message translates to:
-  /// **'Choose which events trigger push notifications.'**
+  /// **'Choose which events show a notification in the app.'**
   String get chooseNotificationEventsSubtitle;
 
   /// Title of the trade updates notification toggle
@@ -4256,11 +4256,89 @@ abstract class AppLocalizations {
   /// **'Open settings'**
   String get openSystemSettingsAction;
 
-  /// Footnote: what a push notification does not carry
+  /// Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted.
   ///
   /// In en, this message translates to:
-  /// **'Notifications carry no amounts and no counterparties: they only tell you there is something to see.'**
+  /// **'Notifications carry no amounts and no counterparties. A push travels through Google\'s or Apple\'s servers and says only that there is something to see.'**
   String get notificationsPrivacyFootnote;
+
+  /// Title of the master push toggle on the notification settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Push notifications'**
+  String get pushMasterToggleTitle;
+
+  /// Description under the master push toggle: a push is a content-free wake-up
+  ///
+  /// In en, this message translates to:
+  /// **'Wakes the app when a trade or chat message arrives. The notification itself carries nothing.'**
+  String get pushMasterToggleSubtitle;
+
+  /// Status line under the master push toggle when push is turned off
+  ///
+  /// In en, this message translates to:
+  /// **'Off — nothing is registered with the push server'**
+  String get pushStatusOff;
+
+  /// Push is off locally, but the server has not confirmed removing these registrations
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Off — removal of 1 push registration is pending} other{Off — removal of {count} push registrations is pending}}'**
+  String pushStatusCleanupPending(int count);
+
+  /// Status line when push is on but the device has not produced a push token yet
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for this device\'s push token'**
+  String get pushStatusNoToken;
+
+  /// Status line when push is on, nothing failed, and there is no open trade to register
+  ///
+  /// In en, this message translates to:
+  /// **'On — no open trades to register'**
+  String get pushStatusIdle;
+
+  /// Status line: how many open trades the push server holds this device's token for
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Registered for 1 trade} other{Registered for {count} trades}}'**
+  String pushStatusRegistered(int count);
+
+  /// Appended to pushStatusRegistered after ' · '; {ago} is a relative time such as '3 h ago' or 'yesterday'
+  ///
+  /// In en, this message translates to:
+  /// **'last registered {ago}'**
+  String pushStatusLastRegistered(String ago);
+
+  /// Status line when the last registration attempt failed and will be retried
+  ///
+  /// In en, this message translates to:
+  /// **'Push server unreachable — retrying'**
+  String get pushStatusUnreachable;
+
+  /// Status line when the push server operator refuses trades from the active Mostro node
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node is not accepted by the push server'**
+  String get pushStatusNodeRefused;
+
+  /// Status line when the push server asked the app to slow down
+  ///
+  /// In en, this message translates to:
+  /// **'Push request limit reached — retrying shortly'**
+  String get pushStatusRateLimited;
+
+  /// Info row replacing the master push toggle on platforms that cannot receive a push (desktop, web for now)
+  ///
+  /// In en, this message translates to:
+  /// **'Push notifications are not available on this platform'**
+  String get pushUnsupportedPlatform;
+
+  /// Snackbar when the master push toggle could not be saved
+  ///
+  /// In en, this message translates to:
+  /// **'Could not change push notifications'**
+  String get pushToggleSaveFailed;
 
   /// Body of the system notification shown when a peer's chat message wakes the app in the background. Content-free on purpose: it never names the trade, the peer or the message.
   ///

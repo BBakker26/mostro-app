@@ -26,9 +26,11 @@ import workmanager_apple
     // push_refresh_job.dart): the identifier must match the Dart constant
     // and the entry in Info.plist. Registered before the app finishes
     // launching, as BGTaskScheduler requires; Dart schedules it.
+    // `earliestBeginInSeconds` is `NSNumber?` in workmanager_apple: an `Int`
+    // expression does not bridge implicitly.
     WorkmanagerPlugin.registerPeriodicTask(
       withIdentifier: "network.mostro.app.pushRefresh",
-      earliestBeginInSeconds: 12 * 60 * 60
+      earliestBeginInSeconds: NSNumber(value: 12 * 60 * 60)
     )
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

@@ -161,3 +161,54 @@ jobs:
     uses: ./.github/workflows/web-build.yml
     permissions:
       contents: read
+
+  # Nothing else compiles the iOS target. The Swift in ios/Runner/, the
+  # CocoaPods graph (Firebase, workmanager, the cargokit pod that builds the
+  # Rust core for aarch64-apple-ios) and project.pbxproj edits all pass analyze
+  # and test on Linux and only fail on a Mac — as a deployment target below a
+  # pod's minimum does, at `pod install`. A device build without signing
+  # catches them: CI holds no Apple certificate, so entitlements
+  # (aps-environment, the keychain group) are still only checked by a signed
+  # build on a device. The repository is public, so macOS minutes are not
+  # billed. test/ci/ios_build_workflow_test.dart keeps this job in place.
+  #
+  # macos-26, not macos-15: workmanager_apple compiles code that uses the iOS
+  # 26 SDK (BGContinuedProcessingTask), and each macOS image ships a single
+  # Xcode major — macos-15 has no iOS 26 SDK and fails in Swift compilation.
+  # Building on a Mac locally needs Xcode 26 for the same reason.
+  ios:
+    name: iOS (build, no codesign)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # cargokit builds the Rust core through rustup with its default `stable`
+      # toolchain (the repo has no cargokit.yaml) and adds a missing target
+      # itself. Adding it here keeps that download out of the Xcode build phase,
+      # where a failure is much harder to read.
+      - name: Install Rust iOS target
+        run: rustup target add aarch64-apple-ios --toolchain stable
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'ios/Podfile') }}
+
+      # Debug compiles everything that can break here (Swift, pods, the Rust
+      # staticlib, the pbxproj) and skips the Dart AOT step of a release build.
+      - name: Build iOS app
+        run: flutter build ios --debug --no-codesign

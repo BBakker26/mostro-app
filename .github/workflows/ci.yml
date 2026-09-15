@@ -171,9 +171,14 @@ jobs:
   # (aps-environment, the keychain group) are still only checked by a signed
   # build on a device. The repository is public, so macOS minutes are not
   # billed. test/ci/ios_build_workflow_test.dart keeps this job in place.
+  #
+  # macos-26, not macos-15: workmanager_apple compiles code that uses the iOS
+  # 26 SDK (BGContinuedProcessingTask), and each macOS image ships a single
+  # Xcode major — macos-15 has no iOS 26 SDK and fails in Swift compilation.
+  # Building on a Mac locally needs Xcode 26 for the same reason.
   ios:
     name: iOS (build, no codesign)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

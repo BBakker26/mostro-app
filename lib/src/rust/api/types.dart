@@ -1176,10 +1176,21 @@ class OrderBookSnapshot {
   final int revision;
   final List<OrderInfo> orders;
 
-  const OrderBookSnapshot({required this.revision, required this.orders});
+  /// Whether the relay already finished replaying the node's stored pending
+  /// orders into this book — what [`OrderDelta::Loaded`] announces when it
+  /// happens. A consumer created afterwards never hears that event, so it
+  /// reads the fact here: with `loaded`, an empty `orders` is really empty.
+  /// Back to `false` when the book is cleared for another node.
+  final bool loaded;
+
+  const OrderBookSnapshot({
+    required this.revision,
+    required this.orders,
+    required this.loaded,
+  });
 
   @override
-  int get hashCode => revision.hashCode ^ orders.hashCode;
+  int get hashCode => revision.hashCode ^ orders.hashCode ^ loaded.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1187,7 +1198,8 @@ class OrderBookSnapshot {
       other is OrderBookSnapshot &&
           runtimeType == other.runtimeType &&
           revision == other.revision &&
-          orders == other.orders;
+          orders == other.orders &&
+          loaded == other.loaded;
 }
 
 @freezed

@@ -512,6 +512,12 @@ pub enum OrderDelta {
 pub struct OrderBookSnapshot {
     pub revision: u32,
     pub orders: Vec<OrderInfo>,
+    /// Whether the relay already finished replaying the node's stored pending
+    /// orders into this book — what [`OrderDelta::Loaded`] announces when it
+    /// happens. A consumer created afterwards never hears that event, so it
+    /// reads the fact here: with `loaded`, an empty `orders` is really empty.
+    /// Back to `false` when the book is cleared for another node.
+    pub loaded: bool,
 }
 
 /// The cause behind a `TradeUpdate` whose wire action carries none.

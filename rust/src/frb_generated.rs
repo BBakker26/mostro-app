@@ -8437,9 +8437,11 @@ impl SseDecode for crate::api::types::OrderBookSnapshot {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_revision = <u32>::sse_decode(deserializer);
         let mut var_orders = <Vec<crate::api::types::OrderInfo>>::sse_decode(deserializer);
+        let mut var_loaded = <bool>::sse_decode(deserializer);
         return crate::api::types::OrderBookSnapshot {
             revision: var_revision,
             orders: var_orders,
+            loaded: var_loaded,
         };
     }
 }
@@ -10739,6 +10741,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderBookSnapshot {
         [
             self.revision.into_into_dart().into_dart(),
             self.orders.into_into_dart().into_dart(),
+            self.loaded.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12891,6 +12894,7 @@ impl SseEncode for crate::api::types::OrderBookSnapshot {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <u32>::sse_encode(self.revision, serializer);
         <Vec<crate::api::types::OrderInfo>>::sse_encode(self.orders, serializer);
+        <bool>::sse_encode(self.loaded, serializer);
     }
 }
 

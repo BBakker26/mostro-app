@@ -7707,6 +7707,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
       case 2:
         return OrderDelta_Resync();
+      case 3:
+        return OrderDelta_Loaded();
       default:
         throw Exception("unreachable");
     }
@@ -10317,6 +10319,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return OrderDelta_Removed(revision: var_revision, orderId: var_orderId);
       case 2:
         return OrderDelta_Resync();
+      case 3:
+        return OrderDelta_Loaded();
       default:
         throw UnimplementedError('');
     }
@@ -12939,6 +12943,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(orderId, serializer);
       case OrderDelta_Resync():
         sse_encode_i_32(2, serializer);
+      case OrderDelta_Loaded():
+        sse_encode_i_32(3, serializer);
     }
   }
 

@@ -8468,6 +8468,9 @@ impl SseDecode for crate::api::types::OrderDelta {
             2 => {
                 return crate::api::types::OrderDelta::Resync;
             }
+            3 => {
+                return crate::api::types::OrderDelta::Loaded;
+            }
             _ => {
                 unimplemented!("");
             }
@@ -10768,6 +10771,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderDelta {
             ]
             .into_dart(),
             crate::api::types::OrderDelta::Resync => [2.into_dart()].into_dart(),
+            crate::api::types::OrderDelta::Loaded => [3.into_dart()].into_dart(),
             _ => {
                 unimplemented!("");
             }
@@ -12906,6 +12910,9 @@ impl SseEncode for crate::api::types::OrderDelta {
             }
             crate::api::types::OrderDelta::Resync => {
                 <i32>::sse_encode(2, serializer);
+            }
+            crate::api::types::OrderDelta::Loaded => {
+                <i32>::sse_encode(3, serializer);
             }
             _ => {
                 unimplemented!("");

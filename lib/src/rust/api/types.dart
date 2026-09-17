@@ -1210,6 +1210,13 @@ sealed class OrderDelta with _$OrderDelta {
   /// cleared (a node switch), or this subscriber fell behind and deltas
   /// were dropped.
   const factory OrderDelta.resync() = OrderDelta_Resync;
+
+  /// The relay finished replaying the node's stored pending orders: the
+  /// book as the consumer has it is complete, so an empty one is really
+  /// empty. Without this a quiet node never produces a delta, and a screen
+  /// waiting for one to leave its loading state waits forever. Changes
+  /// nothing in the book; may arrive more than once (one per relay).
+  const factory OrderDelta.loaded() = OrderDelta_Loaded;
 }
 
 class OrderInfo {

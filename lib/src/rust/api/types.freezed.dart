@@ -1098,18 +1098,21 @@ mixin _$OrderDelta {
     required TResult Function(int revision, OrderInfo order) upserted,
     required TResult Function(int revision, String orderId) removed,
     required TResult Function() resync,
+    required TResult Function() loaded,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
     TResult? Function(int revision, OrderInfo order)? upserted,
     TResult? Function(int revision, String orderId)? removed,
     TResult? Function()? resync,
+    TResult? Function()? loaded,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
     TResult Function(int revision, OrderInfo order)? upserted,
     TResult Function(int revision, String orderId)? removed,
     TResult Function()? resync,
+    TResult Function()? loaded,
     required TResult orElse(),
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
@@ -1117,18 +1120,21 @@ mixin _$OrderDelta {
     required TResult Function(OrderDelta_Upserted value) upserted,
     required TResult Function(OrderDelta_Removed value) removed,
     required TResult Function(OrderDelta_Resync value) resync,
+    required TResult Function(OrderDelta_Loaded value) loaded,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? mapOrNull<TResult extends Object?>({
     TResult? Function(OrderDelta_Upserted value)? upserted,
     TResult? Function(OrderDelta_Removed value)? removed,
     TResult? Function(OrderDelta_Resync value)? resync,
+    TResult? Function(OrderDelta_Loaded value)? loaded,
   }) => throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeMap<TResult extends Object?>({
     TResult Function(OrderDelta_Upserted value)? upserted,
     TResult Function(OrderDelta_Removed value)? removed,
     TResult Function(OrderDelta_Resync value)? resync,
+    TResult Function(OrderDelta_Loaded value)? loaded,
     required TResult orElse(),
   }) => throw _privateConstructorUsedError;
 }
@@ -1242,6 +1248,7 @@ class _$OrderDelta_UpsertedImpl extends OrderDelta_Upserted {
     required TResult Function(int revision, OrderInfo order) upserted,
     required TResult Function(int revision, String orderId) removed,
     required TResult Function() resync,
+    required TResult Function() loaded,
   }) {
     return upserted(revision, order);
   }
@@ -1252,6 +1259,7 @@ class _$OrderDelta_UpsertedImpl extends OrderDelta_Upserted {
     TResult? Function(int revision, OrderInfo order)? upserted,
     TResult? Function(int revision, String orderId)? removed,
     TResult? Function()? resync,
+    TResult? Function()? loaded,
   }) {
     return upserted?.call(revision, order);
   }
@@ -1262,6 +1270,7 @@ class _$OrderDelta_UpsertedImpl extends OrderDelta_Upserted {
     TResult Function(int revision, OrderInfo order)? upserted,
     TResult Function(int revision, String orderId)? removed,
     TResult Function()? resync,
+    TResult Function()? loaded,
     required TResult orElse(),
   }) {
     if (upserted != null) {
@@ -1276,6 +1285,7 @@ class _$OrderDelta_UpsertedImpl extends OrderDelta_Upserted {
     required TResult Function(OrderDelta_Upserted value) upserted,
     required TResult Function(OrderDelta_Removed value) removed,
     required TResult Function(OrderDelta_Resync value) resync,
+    required TResult Function(OrderDelta_Loaded value) loaded,
   }) {
     return upserted(this);
   }
@@ -1286,6 +1296,7 @@ class _$OrderDelta_UpsertedImpl extends OrderDelta_Upserted {
     TResult? Function(OrderDelta_Upserted value)? upserted,
     TResult? Function(OrderDelta_Removed value)? removed,
     TResult? Function(OrderDelta_Resync value)? resync,
+    TResult? Function(OrderDelta_Loaded value)? loaded,
   }) {
     return upserted?.call(this);
   }
@@ -1296,6 +1307,7 @@ class _$OrderDelta_UpsertedImpl extends OrderDelta_Upserted {
     TResult Function(OrderDelta_Upserted value)? upserted,
     TResult Function(OrderDelta_Removed value)? removed,
     TResult Function(OrderDelta_Resync value)? resync,
+    TResult Function(OrderDelta_Loaded value)? loaded,
     required TResult orElse(),
   }) {
     if (upserted != null) {
@@ -1411,6 +1423,7 @@ class _$OrderDelta_RemovedImpl extends OrderDelta_Removed {
     required TResult Function(int revision, OrderInfo order) upserted,
     required TResult Function(int revision, String orderId) removed,
     required TResult Function() resync,
+    required TResult Function() loaded,
   }) {
     return removed(revision, orderId);
   }
@@ -1421,6 +1434,7 @@ class _$OrderDelta_RemovedImpl extends OrderDelta_Removed {
     TResult? Function(int revision, OrderInfo order)? upserted,
     TResult? Function(int revision, String orderId)? removed,
     TResult? Function()? resync,
+    TResult? Function()? loaded,
   }) {
     return removed?.call(revision, orderId);
   }
@@ -1431,6 +1445,7 @@ class _$OrderDelta_RemovedImpl extends OrderDelta_Removed {
     TResult Function(int revision, OrderInfo order)? upserted,
     TResult Function(int revision, String orderId)? removed,
     TResult Function()? resync,
+    TResult Function()? loaded,
     required TResult orElse(),
   }) {
     if (removed != null) {
@@ -1445,6 +1460,7 @@ class _$OrderDelta_RemovedImpl extends OrderDelta_Removed {
     required TResult Function(OrderDelta_Upserted value) upserted,
     required TResult Function(OrderDelta_Removed value) removed,
     required TResult Function(OrderDelta_Resync value) resync,
+    required TResult Function(OrderDelta_Loaded value) loaded,
   }) {
     return removed(this);
   }
@@ -1455,6 +1471,7 @@ class _$OrderDelta_RemovedImpl extends OrderDelta_Removed {
     TResult? Function(OrderDelta_Upserted value)? upserted,
     TResult? Function(OrderDelta_Removed value)? removed,
     TResult? Function(OrderDelta_Resync value)? resync,
+    TResult? Function(OrderDelta_Loaded value)? loaded,
   }) {
     return removed?.call(this);
   }
@@ -1465,6 +1482,7 @@ class _$OrderDelta_RemovedImpl extends OrderDelta_Removed {
     TResult Function(OrderDelta_Upserted value)? upserted,
     TResult Function(OrderDelta_Removed value)? removed,
     TResult Function(OrderDelta_Resync value)? resync,
+    TResult Function(OrderDelta_Loaded value)? loaded,
     required TResult orElse(),
   }) {
     if (removed != null) {
@@ -1537,6 +1555,7 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
     required TResult Function(int revision, OrderInfo order) upserted,
     required TResult Function(int revision, String orderId) removed,
     required TResult Function() resync,
+    required TResult Function() loaded,
   }) {
     return resync();
   }
@@ -1547,6 +1566,7 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
     TResult? Function(int revision, OrderInfo order)? upserted,
     TResult? Function(int revision, String orderId)? removed,
     TResult? Function()? resync,
+    TResult? Function()? loaded,
   }) {
     return resync?.call();
   }
@@ -1557,6 +1577,7 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
     TResult Function(int revision, OrderInfo order)? upserted,
     TResult Function(int revision, String orderId)? removed,
     TResult Function()? resync,
+    TResult Function()? loaded,
     required TResult orElse(),
   }) {
     if (resync != null) {
@@ -1571,6 +1592,7 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
     required TResult Function(OrderDelta_Upserted value) upserted,
     required TResult Function(OrderDelta_Removed value) removed,
     required TResult Function(OrderDelta_Resync value) resync,
+    required TResult Function(OrderDelta_Loaded value) loaded,
   }) {
     return resync(this);
   }
@@ -1581,6 +1603,7 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
     TResult? Function(OrderDelta_Upserted value)? upserted,
     TResult? Function(OrderDelta_Removed value)? removed,
     TResult? Function(OrderDelta_Resync value)? resync,
+    TResult? Function(OrderDelta_Loaded value)? loaded,
   }) {
     return resync?.call(this);
   }
@@ -1591,6 +1614,7 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
     TResult Function(OrderDelta_Upserted value)? upserted,
     TResult Function(OrderDelta_Removed value)? removed,
     TResult Function(OrderDelta_Resync value)? resync,
+    TResult Function(OrderDelta_Loaded value)? loaded,
     required TResult orElse(),
   }) {
     if (resync != null) {
@@ -1603,6 +1627,126 @@ class _$OrderDelta_ResyncImpl extends OrderDelta_Resync {
 abstract class OrderDelta_Resync extends OrderDelta {
   const factory OrderDelta_Resync() = _$OrderDelta_ResyncImpl;
   const OrderDelta_Resync._() : super._();
+}
+
+/// @nodoc
+abstract class _$$OrderDelta_LoadedImplCopyWith<$Res> {
+  factory _$$OrderDelta_LoadedImplCopyWith(
+    _$OrderDelta_LoadedImpl value,
+    $Res Function(_$OrderDelta_LoadedImpl) then,
+  ) = __$$OrderDelta_LoadedImplCopyWithImpl<$Res>;
+}
+
+/// @nodoc
+class __$$OrderDelta_LoadedImplCopyWithImpl<$Res>
+    extends _$OrderDeltaCopyWithImpl<$Res, _$OrderDelta_LoadedImpl>
+    implements _$$OrderDelta_LoadedImplCopyWith<$Res> {
+  __$$OrderDelta_LoadedImplCopyWithImpl(
+    _$OrderDelta_LoadedImpl _value,
+    $Res Function(_$OrderDelta_LoadedImpl) _then,
+  ) : super(_value, _then);
+
+  /// Create a copy of OrderDelta
+  /// with the given fields replaced by the non-null parameter values.
+}
+
+/// @nodoc
+
+class _$OrderDelta_LoadedImpl extends OrderDelta_Loaded {
+  const _$OrderDelta_LoadedImpl() : super._();
+
+  @override
+  String toString() {
+    return 'OrderDelta.loaded()';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType && other is _$OrderDelta_LoadedImpl);
+  }
+
+  @override
+  int get hashCode => runtimeType.hashCode;
+
+  @override
+  @optionalTypeArgs
+  TResult when<TResult extends Object?>({
+    required TResult Function(int revision, OrderInfo order) upserted,
+    required TResult Function(int revision, String orderId) removed,
+    required TResult Function() resync,
+    required TResult Function() loaded,
+  }) {
+    return loaded();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? whenOrNull<TResult extends Object?>({
+    TResult? Function(int revision, OrderInfo order)? upserted,
+    TResult? Function(int revision, String orderId)? removed,
+    TResult? Function()? resync,
+    TResult? Function()? loaded,
+  }) {
+    return loaded?.call();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeWhen<TResult extends Object?>({
+    TResult Function(int revision, OrderInfo order)? upserted,
+    TResult Function(int revision, String orderId)? removed,
+    TResult Function()? resync,
+    TResult Function()? loaded,
+    required TResult orElse(),
+  }) {
+    if (loaded != null) {
+      return loaded();
+    }
+    return orElse();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult map<TResult extends Object?>({
+    required TResult Function(OrderDelta_Upserted value) upserted,
+    required TResult Function(OrderDelta_Removed value) removed,
+    required TResult Function(OrderDelta_Resync value) resync,
+    required TResult Function(OrderDelta_Loaded value) loaded,
+  }) {
+    return loaded(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? mapOrNull<TResult extends Object?>({
+    TResult? Function(OrderDelta_Upserted value)? upserted,
+    TResult? Function(OrderDelta_Removed value)? removed,
+    TResult? Function(OrderDelta_Resync value)? resync,
+    TResult? Function(OrderDelta_Loaded value)? loaded,
+  }) {
+    return loaded?.call(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeMap<TResult extends Object?>({
+    TResult Function(OrderDelta_Upserted value)? upserted,
+    TResult Function(OrderDelta_Removed value)? removed,
+    TResult Function(OrderDelta_Resync value)? resync,
+    TResult Function(OrderDelta_Loaded value)? loaded,
+    required TResult orElse(),
+  }) {
+    if (loaded != null) {
+      return loaded(this);
+    }
+    return orElse();
+  }
+}
+
+abstract class OrderDelta_Loaded extends OrderDelta {
+  const factory OrderDelta_Loaded() = _$OrderDelta_LoadedImpl;
+  const OrderDelta_Loaded._() : super._();
 }
 
 /// @nodoc

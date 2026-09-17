@@ -254,6 +254,8 @@ pub(crate) enum OrderBookDelta {
     /// told order by order, so the subscriber starts over from a snapshot —
     /// which carries the revision, so this needs none.
     Reset,
+    /// The pending feed's stored events ended; see `OrderDelta::Loaded`.
+    Loaded,
 }
 
 #[cfg(test)]
@@ -262,7 +264,7 @@ impl OrderBookDelta {
     fn revision(&self) -> u64 {
         match self {
             Self::Upserted { revision, .. } | Self::Removed { revision, .. } => *revision,
-            Self::Reset => unreachable!("a reset carries no revision"),
+            Self::Reset | Self::Loaded => unreachable!("carries no revision"),
         }
     }
 }
@@ -465,6 +467,7 @@ impl OrderBook {
             return false;
         }
         self.publish().await;
+        let _ = self.delta_tx.send(OrderBookDelta::Loaded);
         true
     }
 
@@ -7603,6 +7606,7 @@ impl OrderDeltaStream {
                 }),
             ),
             Ok(OrderBookDelta::Reset) => Some(OrderDelta::Resync),
+            Ok(OrderBookDelta::Loaded) => Some(OrderDelta::Loaded),
             // Unlike a dropped snapshot, a dropped delta is a hole in the
             // consumer's book. It cannot be patched, only started over.
             Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -8673,7 +8677,9 @@ mod tests {
                 OrderBookDelta::Removed { order_id, .. } => {
                     mirror.remove(&order_id);
                 }
-                OrderBookDelta::Reset => unreachable!("no reset in this run"),
+                OrderBookDelta::Reset | OrderBookDelta::Loaded => {
+                    unreachable!("neither happens in this run")
+                }
             }
         }
 
@@ -8725,6 +8731,7 @@ mod tests {
                     self.orders.remove(&order_id);
                 }
                 OrderDelta::Resync => return false,
+                OrderDelta::Loaded => {}
                 _stale => {}
             }
             true
@@ -8800,6 +8807,39 @@ mod tests {
 
         // Assert
         assert!(matches!(next_delta(&mut stream).await, OrderDelta::Resync));
+    }
+
+    /// An empty book produces no per-order delta, so a consumer waiting for
+    /// its first one to leave the loading state would wait forever — on a
+    /// cold start against a quiet node, and whenever the last order leaves.
+    /// The relay's EOSE on the pending feed is the confirmation it needs.
+    #[tokio::test]
+    async fn the_end_of_stored_orders_reaches_a_delta_consumer() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+
+        // Act
+        let published = book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Assert
+        assert!(published);
+        assert!(matches!(next_delta(&mut stream).await, OrderDelta::Loaded));
+    }
+
+    /// Only the pending feed: the recent-changes and Kind 14 feeds end their
+    /// stored events too, once per relay each.
+    #[tokio::test]
+    async fn the_end_of_another_feed_tells_a_delta_consumer_nothing() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.publish_on_stored_events_end(&recent_orders_subscription_id()).await;
+
+        // Assert
+        assert!(drain(&mut deltas).is_empty());
     }
 
     /// A lagged subscriber cannot know what it missed. It is told to start

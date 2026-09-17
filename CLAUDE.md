@@ -167,6 +167,20 @@ bridged by flutter_rust_bridge.
 - Conventional commits (`feat/fix/docs/refactor/chore(scope)`), branches `type/kebab-desc`,
   everything via **PR to `main`** (gh CLI) + CodeRabbit review.
 
+## Releases (`docs/RELEASING.md`)
+- **A pushed tag `vX.Y.Z` is the release.** `.github/workflows/release.yml` builds two signed
+  APKs (`armeabi-v7a`, `arm64-v8a`), publishes the GitHub release and opens the `CHANGELOG.md`
+  PR. It refuses a tag that is not on `main` or whose version `pubspec.yaml` **and**
+  `rust/Cargo.toml` do not already carry — the About screen shows `CARGO_PKG_VERSION`. Bump
+  both with `./scripts/bump-version.sh X.Y.Z`, never one by hand.
+- **Release notes and `CHANGELOG.md` are generated** by `tool/release_notes.dart`, one entry
+  per merged PR grouped by the conventional-commit type of its **title**. Don't hand-edit
+  `CHANGELOG.md`; fix the PR title.
+- **Never publish an APK signed with the debug key**, which is what a release build falls back
+  to without `android/key.properties`: Android cannot update across a certificate change.
+- `ndk.abiFilters` and `--split-per-abi` are mutually exclusive in AGP — keep the guard in
+  `android/app/build.gradle.kts` (`test/ci/release_workflow_test.dart`).
+
 ## Domain gotchas (durable)
 - **Reputation/ratings come from Kind 38383 event tags, not a DB.** In-memory
   `RATING_STORE`/`DISPUTE_STORE` are correct by design — don't invent "persist to DB" tasks.

@@ -116,8 +116,15 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      # firebase_core downloads the Firebase C++ SDK, whose CMakeLists.txt asks
+      # for a CMake older than 3.5. CMake 4 (on the runner) refuses that outright
+      # ("Compatibility with CMake < 3.5 has been removed") unless told the floor
+      # to assume; it reads this variable from the environment. Drop it once
+      # firebase_core ships an SDK with a current cmake_minimum_required.
       - name: Build
         shell: bash
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
           flutter build windows --release \
             --build-name "$VERSION" --build-number "$BUILD_NUMBER" \

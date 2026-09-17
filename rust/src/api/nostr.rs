@@ -121,23 +121,13 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
         loop {
             match rx.recv().await {
                 Ok(ConnectionState::Online) => {
-                    log::info!("[nostr] relay pool ONLINE — fetching node capabilities, flushing queue, subscribing orders");
-                    // Fetch capabilities first so queued messages are wrapped with the
-                    // correct difficulty before being flushed.
-                    fetch_and_set_node_capabilities().await;
-                    let _ = flush_message_queue().await;
-                    // Start (or re-start) Kind 38383 order book subscription.
-                    crate::api::orders::subscribe_orders().await;
-                    // Rebuild chat listeners for persisted active trades —
-                    // sessions are in-memory, so after a restart nothing else
-                    // would resubscribe. Idempotent: orders with a live chat
-                    // task are skipped by the single-owner guard.
-                    crate::api::messages::resubscribe_active_chats().await;
-                    // Same rearm for dispute chats: solver assignments are
-                    // committed before listener startup, which can fail while
-                    // keys or connectivity are missing — coming online is the
-                    // retry point (PR #254 review).
-                    crate::api::disputes::resubscribe_active_dispute_chats().await;
+                    // Not run inline. The sequence takes seconds (a 10 s
+                    // capability fetch among them), and transitions arriving
+                    // meanwhile used to queue here and each re-run all of it
+                    // back to back — a flapping pool multiplied its own
+                    // storm. Coalesced, a burst costs one run, plus at most
+                    // one more for whatever arrived while it was in flight.
+                    ONLINE_SYNC.request(ONLINE_SETTLE, on_pool_online);
                 }
                 Ok(state) => {
                     log::info!("[nostr] connection state changed: {state:?}");
@@ -151,6 +141,41 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     });
 
     Ok(())
+}
+
+/// The coalescing window of the Online sequence. Short on purpose: the first
+/// `Online` of a cold start is what starts the order-book subscription, so
+/// this is paid before the book can load. What the coalescing buys is not the
+/// wait but the bound — transitions arriving while a run is in flight cost
+/// one more run, however many they are.
+///
+/// An `Offline` inside the window or during a run does not cancel it; the run
+/// then meets the same timeouts the inline sequence used to. Cancelling on a
+/// flap is a possible refinement, not something the old code did either.
+const ONLINE_SETTLE: crate::rt::time::Duration = crate::rt::time::Duration::from_millis(100);
+
+static ONLINE_SYNC: crate::nostr::coalesce::Coalesced = crate::nostr::coalesce::Coalesced::new();
+
+/// Everything that has to happen once the pool can reach a relay again.
+async fn on_pool_online() {
+    log::info!(
+        "[nostr] relay pool ONLINE — fetching node capabilities, flushing queue, subscribing orders"
+    );
+    // Fetch capabilities first so queued messages are wrapped with the
+    // correct difficulty before being flushed.
+    fetch_and_set_node_capabilities().await;
+    let _ = flush_message_queue().await;
+    // Start (or re-start) Kind 38383 order book subscription.
+    crate::api::orders::subscribe_orders().await;
+    // Rebuild chat listeners for persisted active trades — sessions are
+    // in-memory, so after a restart nothing else would resubscribe.
+    // Idempotent: orders with a live chat task are skipped by the
+    // single-owner guard.
+    crate::api::messages::resubscribe_active_chats().await;
+    // Same rearm for dispute chats: solver assignments are committed before
+    // listener startup, which can fail while keys or connectivity are
+    // missing — coming online is the retry point (PR #254 review).
+    crate::api::disputes::resubscribe_active_dispute_chats().await;
 }
 
 /// Add a new relay and connect to it.

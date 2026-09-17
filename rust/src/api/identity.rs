@@ -661,6 +661,22 @@ pub(crate) async fn get_active_trade_keys(index: u32) -> Result<Keys> {
     key_ops::derive_trade_key(&state.mnemonic_words, index)
 }
 
+/// Every active trade key from index 1 to `up_to`, in index order — the
+/// whole set at the price of one seed derivation, where calling
+/// [`get_active_trade_keys`] per index pays for one each
+/// (see `crypto::keys::derive_trade_keys`).
+pub(crate) async fn get_active_trade_keys_up_to(up_to: u32) -> Result<Vec<Keys>> {
+    let guard = identity_lock().read().await;
+    let state = guard.as_ref().ok_or_else(|| anyhow!("NoIdentity"))?;
+    if up_to == 0 {
+        return Ok(Vec::new());
+    }
+    if state.mnemonic_words.is_empty() {
+        bail!("InvalidIndex: nsec import — no mnemonic for trade key derivation");
+    }
+    key_ops::derive_trade_keys(&state.mnemonic_words, up_to)
+}
+
 /// Choose the identity keys that will sign the NIP-59 seal for messages
 /// addressed to the Mostro node.
 ///

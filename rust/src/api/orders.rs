@@ -6763,11 +6763,13 @@ fn global_dm_keys() -> &'static tokio::sync::RwLock<HashMap<String, (nostr_sdk::
     GLOBAL_DM_KEYS.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()))
 }
 
-/// Add a freshly derived trade key to the global decryption map and refresh
-/// the bulk Kind-14 relay filter to include it, so daemon messages for this
-/// key (including an admin-took-dispute long after creation) are received
-/// for the whole life of the process, not just while the temporary per-trade
-/// receiver runs. Idempotent: a key already covered causes no relay churn.
+/// Add a freshly derived trade key to the global decryption map and schedule
+/// a refresh of the bulk Kind-14 relay filter to include it, so daemon
+/// messages for this key (including an admin-took-dispute long after
+/// creation) are received for the whole life of the process, not just while
+/// the temporary per-trade receiver runs. Idempotent: a key already covered
+/// causes no relay churn. Coverage is never pruned — see
+/// `specs/004-mostro-p2p-client/contracts/orders.md`.
 pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::prelude::Keys, trade_index: u32) {
     let hex = keys.public_key().to_hex();
     {
@@ -6777,8 +6779,24 @@ pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::prelude::Keys, t
         }
         map.insert(hex, (keys.clone(), trade_index));
     }
-    resubscribe_global_dm_filter().await;
+    // The map above is what decrypts, and it is current as of this line. The
+    // relay filter follows in the background, once per burst of new keys:
+    // re-issuing it is a CLOSE plus a history-replaying REQ on every relay,
+    // and this runs inside create/take, which used to wait for all of it.
+    // Nothing here depends on the refresh having landed — the reply to the
+    // request about to be sent arrives on the per-trade subscription, which
+    // its caller does await.
+    DM_FILTER_REFRESH.request(DM_FILTER_REFRESH_WINDOW, resubscribe_global_dm_filter);
 }
+
+/// Wide enough to take in keys derived back to back (a create plus its range
+/// remainder, a restore), far below the 30 minutes the per-trade subscription
+/// covers a new key for anyway.
+const DM_FILTER_REFRESH_WINDOW: crate::rt::time::Duration =
+    crate::rt::time::Duration::from_millis(500);
+
+static DM_FILTER_REFRESH: crate::nostr::coalesce::Coalesced =
+    crate::nostr::coalesce::Coalesced::new();
 
 /// Re-issue the bulk Kind-14 subscription with the current coverage set.
 /// Same stable id, so the relay replaces the filter in place. No-op before
@@ -6817,14 +6835,15 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::prelude::Keys, u32
         Ok(Some(info)) => info.trade_key_index,
         _ => return map,
     };
-    for idx in 1..=max_index {
-        match crate::api::identity::get_active_trade_keys(idx).await {
-            Ok(keys) => {
-                let hex = keys.public_key().to_hex();
-                map.insert(hex, (keys, idx));
+    // One batch, not a call per index: each of those re-derived the BIP-39
+    // seed, so startup paid a PBKDF2 for every trade the user ever made.
+    match crate::api::identity::get_active_trade_keys_up_to(max_index).await {
+        Ok(all) => {
+            for (keys, idx) in all.into_iter().zip(1u32..) {
+                map.insert(keys.public_key().to_hex(), (keys, idx));
             }
-            Err(e) => log::warn!("[orders] failed to derive trade key {idx}: {e}"),
         }
+        Err(e) => log::warn!("[orders] failed to derive trade keys 1..={max_index}: {e}"),
     }
     map
 }

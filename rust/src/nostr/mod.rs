@@ -1,4 +1,5 @@
 pub mod blossom;
+pub mod coalesce;
 pub mod transport;
 pub mod live_subs;
 pub mod order_events;

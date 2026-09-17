@@ -480,6 +480,34 @@ pub struct TradeUpdate {
     pub occurred_at: i64,
 }
 
+/// One change to the order book, as `on_order_deltas` delivers it.
+///
+/// **How to consume it:** subscribe first, then read
+/// `get_order_book_snapshot()`, then apply only deltas whose `revision` is
+/// greater than the snapshot's (and than the last one applied). A delta at or
+/// below it is already inside the snapshot; applying it could resurrect an
+/// order that was removed since. On [`OrderDelta::Resync`], read a fresh
+/// snapshot and carry on with the same rule.
+#[derive(Debug, Clone)]
+pub enum OrderDelta {
+    /// `order` was added or changed.
+    Upserted { revision: u32, order: OrderInfo },
+    /// The order with this id left the book.
+    Removed { revision: u32, order_id: String },
+    /// What happened cannot be told order by order: the book was replaced or
+    /// cleared (a node switch), or this subscriber fell behind and deltas
+    /// were dropped.
+    Resync,
+}
+
+/// The whole book — every status, as the snapshot stream carries it — and the
+/// revision it was read at. See [`OrderDelta`].
+#[derive(Debug, Clone)]
+pub struct OrderBookSnapshot {
+    pub revision: u32,
+    pub orders: Vec<OrderInfo>,
+}
+
 /// The cause behind a `TradeUpdate` whose wire action carries none.
 ///
 /// A daemon `canceled` during the taker's bond window means one of three

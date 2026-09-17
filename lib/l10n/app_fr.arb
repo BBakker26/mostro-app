@@ -442,6 +442,7 @@
   "sellingSatsAmount": "Vente de {sats} sats",
   "viewOrderLink": "Voir l'ordre",
   "timeLeftLabel": "{time} restant",
+  "invoiceNoLongerExpected": "Cet ordre n'attend plus de facture. Mise à jour de son statut…",
   "waitingForTradeAmount": "En attente du montant de la transaction — veuillez réessayer sous peu.",
   "fetchingTradeAmount": "Récupération du montant de la transaction…",
   "enterInvoiceManually": "Saisir la facture manuellement",

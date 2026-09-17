@@ -28,9 +28,25 @@ import 'package:mostro/shared/widgets/nwc_invoice_widget.dart';
 import 'package:mostro/shared/widgets/peer_reputation_card.dart';
 import 'package:mostro/shared/widgets/platform_aware_qr_scanner.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
+import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart'
     show OrderStatus, TradeInfo, TradeUpdate;
+
+/// Whether a trade in [status] no longer wants the buyer's invoice because it
+/// moved on: the daemon took one, and the trade screen is where it continues.
+///
+/// `settledHoldInvoice` is not over: after a failed payout the daemon asks
+/// for a new invoice while the order still reads settled. Cancellations end
+/// the step too, but leave for home with their own notice
+/// (`_listenForCancellation`).
+bool invoiceStepIsOver(OrderStatus status) => switch (status) {
+  OrderStatus.active ||
+  OrderStatus.fiatSent ||
+  OrderStatus.dispute ||
+  OrderStatus.success => true,
+  _ => false,
+};
 
 /// 13a · Receive your sats — Route `/add_invoice/:orderId`.
 ///
@@ -44,6 +60,7 @@ class AddLightningInvoiceScreen extends ConsumerStatefulWidget {
     this.amountSats,
     this.generateInvoice,
     this.submitInvoice,
+    this.recoverState,
   });
 
   final String orderId;
@@ -61,6 +78,11 @@ class AddLightningInvoiceScreen extends ConsumerStatefulWidget {
   @visibleForTesting
   final Future<void> Function(String orderId, String invoice, BigInt sats)?
   submitInvoice;
+
+  /// Test seam for the state recovery after a status rejection; production
+  /// runs the core's `resync()`, which replays the daemon's messages.
+  @visibleForTesting
+  final Future<void> Function()? recoverState;
 
   @override
   ConsumerState<AddLightningInvoiceScreen> createState() =>
@@ -397,7 +419,9 @@ class _AddLightningInvoiceScreenState
       final submit = widget.submitInvoice ?? _bridgeSubmit;
       await submit(widget.orderId, input, sats);
 
-      if (!mounted) return;
+      // The status listener may have left already on the same reply.
+      if (!mounted || _navigated) return;
+      _navigated = true;
       context.go(AppRoute.tradeDetailPath(widget.orderId));
     } catch (e) {
       if (!mounted) return;
@@ -409,17 +433,31 @@ class _AddLightningInvoiceScreenState
         r'^.*?AnyhowException\((.+)\)$',
       ).firstMatch(raw);
       final msg = anyhowMatch != null ? anyhowMatch.group(1)! : raw;
-      final display = localizedDaemonError(
-        AppLocalizations.of(context),
-        msg,
-        fallback: msg,
-      );
+      // The daemon no longer waits for an invoice while this screen does:
+      // a message was missed (typically the acknowledgement of an earlier
+      // submission that outran its reply window). Ask for it again; the
+      // status it carries is what takes the buyer off this screen.
+      final statusRejection = isStatusRejection(msg);
+      if (statusRejection) unawaited(_recoverState());
+      final l10n = AppLocalizations.of(context);
+      final display =
+          statusRejection
+              ? l10n.invoiceNoLongerExpected
+              : localizedDaemonError(l10n, msg, fallback: msg);
       setState(() => _lastError = display);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(display)));
     } finally {
       if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _recoverState() async {
+    try {
+      await (widget.recoverState ?? nostr_api.resync)();
+    } catch (e) {
+      debugPrint('[AddLightningInvoiceScreen] state recovery failed: $e');
     }
   }
 
@@ -532,6 +570,25 @@ class _AddLightningInvoiceScreenState
     });
   }
 
+  /// Leave for the trade once the order moves past the invoice step. The
+  /// submission's own reply is not enough to rely on: it is awaited for 10 s,
+  /// and an acknowledgement that arrives later — or is only recovered by a
+  /// replay — would otherwise leave the form asking for an invoice the daemon
+  /// rejects with `NotAllowedByStatus`.
+  void _listenForProgress() {
+    ref.listen<AsyncValue<OrderStatus>>(tradeStatusProvider(widget.orderId), (
+      prev,
+      next,
+    ) {
+      final status = next.valueOrNull;
+      if (status == null || _navigated || !mounted) return;
+      if (!invoiceStepIsOver(status)) return;
+      _navigated = true;
+      refreshTrades(ref);
+      context.go(AppRoute.tradeDetailPath(widget.orderId));
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // The verdict depends on the node's metadata: rebuild — and so re-judge
@@ -550,6 +607,7 @@ class _AddLightningInvoiceScreenState
     );
 
     _listenForCancellation(l10n);
+    _listenForProgress();
 
     // Resolve sats: provider first (live polling), fall back to constructor param.
     final sats = _resolvedSats(ref);

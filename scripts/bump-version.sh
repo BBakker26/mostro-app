@@ -27,12 +27,16 @@ fi
 build_number=$((major * 10000 + minor * 100 + patch))
 
 # perl, not `sed -i`: the in-place flag and the `0,/re/` address differ between GNU and BSD
-# (macOS) sed, and maintainers release from both.
-perl -pi -e "s/^version: .*/version: ${version}+${build_number}/" pubspec.yaml
+# (macOS) sed, and maintainers release from both. Each substitution must match, or the
+# file's shape changed and a version would stay stale while this script reports success.
+perl -pi -e "\$n += s/^version: .*/version: ${version}+${build_number}/; END { exit(\$n ? 0 : 1) }" pubspec.yaml \
+  || { echo "no 'version:' line in pubspec.yaml" >&2; exit 65; }
 # Only the [package] version: the first `version =` line of the manifest.
-perl -pi -e "\$done ||= s/^version = \".*\"/version = \"${version}\"/" rust/Cargo.toml
+perl -pi -e "\$done ||= s/^version = \".*\"/version = \"${version}\"/; END { exit(\$done ? 0 : 1) }" rust/Cargo.toml \
+  || { echo "no [package] version in rust/Cargo.toml" >&2; exit 65; }
 # The crate's own entry in the lockfile, so `cargo build --locked` (CI) still passes.
-perl -0pi -e "s/(name = \"rust\"\nversion = \")[^\"]*/\${1}${version}/" rust/Cargo.lock
+perl -0pi -e "\$n = s/(name = \"rust\"\nversion = \")[^\"]*/\${1}${version}/; END { exit(\$n ? 0 : 1) }" rust/Cargo.lock \
+  || { echo "no rust crate entry in rust/Cargo.lock" >&2; exit 65; }
 
 echo "Version set to ${version} (build ${build_number}):"
 git --no-pager diff --stat -- pubspec.yaml rust/Cargo.toml rust/Cargo.lock

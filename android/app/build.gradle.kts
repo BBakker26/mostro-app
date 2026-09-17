@@ -22,6 +22,15 @@ val keystoreProperties = Properties().apply {
     }
 }
 val hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    // A present but incomplete file must not fall through to the debug key, nor hand
+    // Gradle a null: name what is missing and stop.
+    val missing = listOf("storeFile", "storePassword", "keyPassword", "keyAlias")
+        .filter { keystoreProperties.getProperty(it).isNullOrBlank() }
+    check(missing.isEmpty()) {
+        "android/key.properties is missing: ${missing.joinToString()} (docs/RELEASING.md)"
+    }
+}
 
 android {
     namespace = "foundation.mostro.app"

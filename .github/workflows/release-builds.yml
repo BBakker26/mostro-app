@@ -126,7 +126,7 @@ jobs:
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          flutter build windows --release \
+          flutter build windows --release -v \
             --build-name "$VERSION" --build-number "$BUILD_NUMBER" \
             --dart-define=GIT_COMMIT="$(git rev-parse HEAD)"
 

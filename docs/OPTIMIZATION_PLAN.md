@@ -430,6 +430,26 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
 - **Fix:** first frame after `RustLib.init()` + prefs; relay init, identity and DB rehydrate
   move behind a post-first-frame loading state.
 - **Verify:** cold-start trace: first frame well under the 2 s budget on a mid-range device.
+- **Premise measured and found wrong (2026-09-17); fixed differently.** Timing each step of
+  `bootstrapAndRun` on a Linux debug build showed `nostr_api.initialize` never waits for the
+  network: its ~510 ms were a fixed `sleep(500 ms)` in `RelayPool::new`, there "so the
+  handshakes can start" before the initial state broadcast — which it could not influence,
+  because `relays[].status` is written by the status monitor alone and that had not run yet.
+  The real cost sat next to it: the monitor slept a full 2 s interval before its **first**
+  look, so with relays connected in under a second the first `Online` — which starts the
+  order-book subscription, the outbox flush and the capability fetch — arrived at 2.52 s.
+  What shipped instead of a loading state:
+  - the dead sleep removed (`RelayPool::new`: 506 ms → 4 ms);
+  - a 100 ms monitor cadence until the pool first connects, bounded to 10 s
+    (`status_poll_interval`): first `Online` at **1.02 s** instead of 2.52 s;
+  - the identity loaded with one secure-storage `readAll` instead of four sequential reads
+    (each a platform round trip; on Linux each parses the whole keyring);
+  - Firebase, `RustLib.init` and SharedPreferences started together instead of in turn.
+
+  Time to `runApp`, same machine, debug: **2.29 s → 0.53–0.81 s** over three runs.
+  A loading state behind `runApp` remains possible, but what is left before the first frame
+  is local work (DB open, identity) that most providers need anyway — measure again on a
+  mid-range phone before paying for that restructure.
 
 ### PR 3.8 — `perf(bridge): windowed order queries` — **CONDITIONAL, measure first**
 - **Why this entry exists:** "infinite scroll" — fetch a page, show a skeleton, fetch the next

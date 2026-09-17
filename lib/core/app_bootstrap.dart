@@ -58,23 +58,20 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   WidgetsFlutterBinding.ensureInitialized();
   registerFontLicenses();
 
-  // Initialize Firebase (no-op if firebase_options.dart is the placeholder).
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } on UnsupportedError catch (e) {
-    debugPrint(
-      '[main] Firebase not configured: $e — push notifications disabled.',
-    );
-  }
-
-  await RustLib.init();
-
-  // Pre-read SharedPreferences so providers start with synchronous initial
+  // Three independent platform round trips, started together rather than
+  // one after the other: all of this runs before the first frame. The record
+  // `wait` listens to every future from the start, so a failure in one is
+  // never an unhandled error while another is still being awaited.
+  //
+  // SharedPreferences is pre-read so providers start with synchronous initial
   // values — eliminates the AsyncValue.loading() race that caused the router
   // to show the home screen before redirecting to /walkthrough on first launch.
-  final prefs = await SharedPreferences.getInstance();
+  final (_, _, prefs) =
+      await (
+        _initFirebase(),
+        RustLib.init(),
+        SharedPreferences.getInstance(),
+      ).wait;
   final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
   final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
   final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
@@ -245,6 +242,19 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   runApp(
     UncontrolledProviderScope(container: container, child: const MostroApp()),
   );
+}
+
+/// Initialize Firebase (no-op if firebase_options.dart is the placeholder).
+Future<void> _initFirebase() async {
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } on UnsupportedError catch (e) {
+    debugPrint(
+      '[main] Firebase not configured: $e — push notifications disabled.',
+    );
+  }
 }
 
 /// Persists every consumed trade-key index reported by Rust.

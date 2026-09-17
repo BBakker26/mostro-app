@@ -374,7 +374,9 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   documented on `OrderDelta`. Two things the entry did not foresee: `Resync` also covers a
   replaced or cleared book (node switch), and **`Loaded`** carries the pending feed's EOSE — an
   empty book produces no delta, so without it a consumer never leaves its loading state
-  against a quiet node. Revisions cross as `u32` (a plain Dart `int` everywhere). The
+  against a quiet node. `OrderBookSnapshot.loaded` carries the same fact for a consumer created
+  after that EOSE (Home re-created over an empty book), a gap the snapshot pipeline had too.
+  Revisions cross as `u32` (a plain Dart `int` everywhere). The
   equivalence test lives in Rust (a `Mirror` doing what Dart does): `flutter test` has no Rust
   library to run it against. The snapshot stream is still there, to be removed a release
   after 3.3.

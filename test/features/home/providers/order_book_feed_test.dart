@@ -9,10 +9,14 @@ import '../../../support/fake_trades.dart';
 /// A scripted bridge: the test decides what the snapshot holds and when each
 /// delta arrives.
 class _FakeSource implements OrderDeltaSource {
-  _FakeSource({this.revision = 0, List<OrderInfo> orders = const []})
-    : orders = List.of(orders);
+  _FakeSource({
+    this.revision = 0,
+    this.loaded = false,
+    List<OrderInfo> orders = const [],
+  }) : orders = List.of(orders);
 
   int revision;
+  bool loaded;
   List<OrderInfo> orders;
   int snapshotReads = 0;
   bool subscribedBeforeFirstSnapshot = false;
@@ -33,7 +37,11 @@ class _FakeSource implements OrderDeltaSource {
   Future<OrderBookSnapshot> snapshot() async {
     if (snapshotReads == 0) subscribedBeforeFirstSnapshot = _subscribed;
     snapshotReads++;
-    return OrderBookSnapshot(revision: revision, orders: List.of(orders));
+    return OrderBookSnapshot(
+      revision: revision,
+      orders: List.of(orders),
+      loaded: loaded,
+    );
   }
 }
 
@@ -106,6 +114,33 @@ void main() {
 
     // Assert
     expect(emissions, [isEmpty]);
+  });
+
+  testWidgets('shows an empty book at once when the relay already confirmed '
+      'it', (tester) async {
+    // Arrange: Home re-created after a visit to another tab. The feed's EOSE
+    // came long ago and will not come again.
+    source = _FakeSource(revision: 3, loaded: true);
+
+    // Act
+    await start(tester);
+
+    // Assert: no `loaded` delta was needed.
+    expect(emissions, [isEmpty]);
+  });
+
+  testWidgets('a resync to an unconfirmed empty book shows nothing new '
+      'until it is confirmed', (tester) async {
+    // Arrange: nothing on screen yet, and a node switch clears the book.
+    source = _FakeSource();
+    await start(tester);
+
+    // Act
+    source.send(const OrderDelta.resync());
+    await flush(tester);
+
+    // Assert
+    expect(emissions, isEmpty);
   });
 
   testWidgets('applies upserts and removals', (tester) async {

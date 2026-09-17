@@ -66,8 +66,7 @@ class OrderBookFeed<T> {
   Future<void> _run() async {
     try {
       final next = await _source.subscribe();
-      await _restart();
-      if (_byId.isNotEmpty) _emit();
+      if (await _restart()) _emit();
 
       while (!_disposed) {
         final delta = await next();
@@ -84,8 +83,8 @@ class OrderBookFeed<T> {
             if (_byId.remove(orderId) != null) _scheduleFlush();
           case OrderDelta_Resync():
             final wasShowing = _shown;
-            await _restart();
-            if (wasShowing || _byId.isNotEmpty) _scheduleFlush();
+            final worthShowing = await _restart();
+            if (wasShowing || worthShowing) _scheduleFlush();
           case OrderDelta_Loaded():
             // The relay confirmed the book: an empty one is really empty.
             if (!_shown) _scheduleFlush();
@@ -100,8 +99,12 @@ class OrderBookFeed<T> {
     }
   }
 
-  /// Replace the copy with a fresh snapshot.
-  Future<void> _restart() async {
+  /// Replace the copy with a fresh snapshot, and say whether it is worth
+  /// showing on its own: it has orders, or the relay already confirmed the
+  /// book — then an empty one is really empty. That second case is a feed
+  /// created after the EOSE (Home re-created after a visit to another tab):
+  /// the `loaded` delta is long gone and will not come again.
+  Future<bool> _restart() async {
     final snapshot = await _source.snapshot();
     debugPrint(
       '[orderBook] snapshot: ${snapshot.orders.length} orders '
@@ -111,6 +114,7 @@ class OrderBookFeed<T> {
       ..clear()
       ..addEntries(snapshot.orders.map((o) => MapEntry(o.id, _map(o))));
     _revision = snapshot.revision;
+    return _byId.isNotEmpty || snapshot.loaded;
   }
 
   void _scheduleFlush() {

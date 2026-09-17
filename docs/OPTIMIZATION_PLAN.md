@@ -358,6 +358,11 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   complete.
 - **Verify:** Rust unit tests for upsert/remove, and for a lag→resync that interleaves a
   mutation with the snapshot read.
+- **Done (#495).** `BookState { HashMap, revision }`; `OrderBookDelta` = `Upserted` /
+  `Removed` / `Reset`. A delta is sent while the write lock is held (revision order, one per
+  change, including the deferred and coalesced upserts — their batching only ever concerned
+  snapshots). An order re-announced unchanged costs no revision and no delta. Snapshots are
+  now ordered by id: a map has no order, and display order was always Dart's.
 
 ### PR 3.2 — `feat(bridge): delta stream over FRB`
 - **Fix:** new `on_order_deltas()` stream in `rust/src/api/orders.rs` emitting the delta enum;
@@ -365,6 +370,14 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   old snapshot stream one release for fallback, then remove.
 - **Verify:** `--check` codegen clean; Dart integration test: initial snapshot + applied
   deltas ≡ Rust book state.
+- **Done (#496).** `on_order_deltas()` + `get_order_book_snapshot()`; the consuming rule is
+  documented on `OrderDelta`. Two things the entry did not foresee: `Resync` also covers a
+  replaced or cleared book (node switch), and **`Loaded`** carries the pending feed's EOSE — an
+  empty book produces no delta, so without it a consumer never leaves its loading state
+  against a quiet node. Revisions cross as `u32` (a plain Dart `int` everywhere). The
+  equivalence test lives in Rust (a `Mirror` doing what Dart does): `flutter test` has no Rust
+  library to run it against. The snapshot stream is still there, to be removed a release
+  after 3.3.
 
 ### PR 3.3 — `feat(ui): incremental order state in Dart`
 - **Evidence:** full re-map per emission (`home_order_providers.dart:144-163`); full
@@ -377,6 +390,18 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   filter changes); precompute the payment-method token set once per `OrderItem`. Decide one
   sort order and delete the dead Rust filter path (or wire it up — decide in review).
 - **Verify:** provider unit tests; 3k-order fixture: one incoming event causes O(1) work.
+- **Done in part (#497).** `OrderBookFeed` keeps the Dart copy current from deltas: one
+  mapping per changed order (untouched orders keep their identity, so `orderByIdProvider`'s
+  `select` sees nothing move), and the list is handed over at most once per 50 ms — deltas
+  are per order, so emitting on each would rebuild the O(N²) cold start on the Dart side.
+  Payment-method tokens are computed once per order, and the selected set once per pass
+  instead of once per order.
+  **Not done, on purpose:** `filteredOrdersProvider` still filters and sorts the whole list
+  per emission. With the mapping and the per-order allocations gone that is a pointer walk
+  plus a sort, at most 20 times a second; an incrementally maintained sorted list is real
+  complexity (three sort orders, filters, ties) to buy back microseconds. Measure it in
+  PR 5.2 before building it. The dead Rust `OrderFilters` path is also untouched — whether
+  to delete it or wire it up is the PR 3.8 decision, and nothing here forces it.
 
 ### PR 3.4 — `feat(ui): replace per-trade polling with the push stream`
 - **Evidence:** bottom nav (every screen) keeps N infinite 2 s `getOrder()` polls alive

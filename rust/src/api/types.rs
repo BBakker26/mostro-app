@@ -520,6 +520,16 @@ pub struct OrderBookSnapshot {
     pub loaded: bool,
 }
 
+/// "Read this trade again" — the doorbell of `api::trade_touch`. Unlike a
+/// [`TradeUpdate`] it says nothing about what changed and drives no
+/// notification; it only tells a screen its copy may be stale.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TradeTouch {
+    /// The order whose book entry or trade row was written. `None` means the
+    /// subscriber fell behind and touches were dropped: re-read every trade.
+    pub order_id: Option<String>,
+}
+
 /// The cause behind a `TradeUpdate` whose wire action carries none.
 ///
 /// A daemon `canceled` during the taker's bond window means one of three

@@ -20,6 +20,7 @@ import 'api/orders.dart';
 import 'api/push.dart';
 import 'api/reputation.dart';
 import 'api/settings.dart';
+import 'api/trade_touch.dart';
 import 'api/types.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -109,6 +110,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_TradeKeyIndexStreamPtr =>
       wire._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStreamPtr;
+
+  CrossPlatformFinalizerArg
+  get rust_arc_decrement_strong_count_TradeTouchStreamPtr =>
+      wire._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStreamPtr;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_TradeUpdatesStreamPtr =>
@@ -240,6 +245,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  TradeTouchStream
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    dynamic raw,
+  );
+
+  @protected
   TradeUpdatesStream
   dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeUpdatesStream(
     dynamic raw,
@@ -362,6 +373,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   TradeKeyIndexStream
   dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream(
+    dynamic raw,
+  );
+
+  @protected
+  TradeTouchStream
+  dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
     dynamic raw,
   );
 
@@ -500,6 +517,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   TradeKeyIndexStream
   dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream(
+    dynamic raw,
+  );
+
+  @protected
+  TradeTouchStream
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
     dynamic raw,
   );
 
@@ -651,6 +674,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TradeRole dco_decode_box_autoadd_trade_role(dynamic raw);
+
+  @protected
+  TradeTouch dco_decode_box_autoadd_trade_touch(dynamic raw);
 
   @protected
   TradeUpdate dco_decode_box_autoadd_trade_update(dynamic raw);
@@ -877,6 +903,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TradeRole? dco_decode_opt_box_autoadd_trade_role(dynamic raw);
 
   @protected
+  TradeTouch? dco_decode_opt_box_autoadd_trade_touch(dynamic raw);
+
+  @protected
   TradeUpdate? dco_decode_opt_box_autoadd_trade_update(dynamic raw);
 
   @protected
@@ -970,6 +999,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TradeStep dco_decode_trade_step(dynamic raw);
+
+  @protected
+  TradeTouch dco_decode_trade_touch(dynamic raw);
 
   @protected
   TradeUpdate dco_decode_trade_update(dynamic raw);
@@ -1116,6 +1148,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  TradeTouchStream
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   TradeUpdatesStream
   sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeUpdatesStream(
     SseDeserializer deserializer,
@@ -1238,6 +1276,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   TradeKeyIndexStream
   sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TradeTouchStream
+  sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
     SseDeserializer deserializer,
   );
 
@@ -1376,6 +1420,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   TradeKeyIndexStream
   sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TradeTouchStream
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
     SseDeserializer deserializer,
   );
 
@@ -1553,6 +1603,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TradeRole sse_decode_box_autoadd_trade_role(SseDeserializer deserializer);
+
+  @protected
+  TradeTouch sse_decode_box_autoadd_trade_touch(SseDeserializer deserializer);
 
   @protected
   TradeUpdate sse_decode_box_autoadd_trade_update(SseDeserializer deserializer);
@@ -1835,6 +1888,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  TradeTouch? sse_decode_opt_box_autoadd_trade_touch(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   TradeUpdate? sse_decode_opt_box_autoadd_trade_update(
     SseDeserializer deserializer,
   );
@@ -1938,6 +1996,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TradeStep sse_decode_trade_step(SseDeserializer deserializer);
+
+  @protected
+  TradeTouch sse_decode_trade_touch(SseDeserializer deserializer);
 
   @protected
   TradeUpdate sse_decode_trade_update(SseDeserializer deserializer);
@@ -2109,6 +2170,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    TradeTouchStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
   sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeUpdatesStream(
     TradeUpdatesStream self,
     SseSerializer serializer,
@@ -2251,6 +2319,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream(
     TradeKeyIndexStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    TradeTouchStream self,
     SseSerializer serializer,
   );
 
@@ -2412,6 +2487,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream(
     TradeKeyIndexStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    TradeTouchStream self,
     SseSerializer serializer,
   );
 
@@ -2652,6 +2734,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_trade_role(
     TradeRole self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_trade_touch(
+    TradeTouch self,
     SseSerializer serializer,
   );
 
@@ -3031,6 +3119,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_trade_touch(
+    TradeTouch? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_trade_update(
     TradeUpdate? self,
     SseSerializer serializer,
@@ -3143,6 +3237,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_trade_step(TradeStep self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_trade_touch(TradeTouch self, SseSerializer serializer);
 
   @protected
   void sse_encode_trade_update(TradeUpdate self, SseSerializer serializer);
@@ -3833,6 +3930,40 @@ class RustLibWire implements BaseWire {
       );
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStream =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeKeyIndexStreamPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStreamPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+        'frbgen_mostro_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream',
+      );
+  late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream =
+      _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStreamPtr
+          .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
+
+  void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+    ffi.Pointer<ffi.Void> ptr,
+  ) {
+    return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream(
+      ptr,
+    );
+  }
+
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStreamPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
+        'frbgen_mostro_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream',
+      );
+  late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStream =
+      _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerTradeTouchStreamPtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void

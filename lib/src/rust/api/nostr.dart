@@ -69,7 +69,9 @@ Future<int> flushMessageQueue() =>
 ///    id (the relay replaces it in place and replays the node's history; the
 ///    per-order status cursors keep that replay in order), the order-book
 ///    loop, the peer chats and the dispute chats are re-armed — each of them
-///    a no-op when its task is alive.
+///    a no-op when its task is alive. A pass that runs before the relays are
+///    back lands its REQs nowhere; `nostr::live_subs` keeps the intent and
+///    re-issues it on each relay as it connects.
 /// 3. **Outbox.** Whatever was queued while offline is published.
 ///
 /// Single-flight: concurrent calls coalesce onto the pass in progress and

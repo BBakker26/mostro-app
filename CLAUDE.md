@@ -178,6 +178,12 @@ bridged by flutter_rust_bridge.
   Removing a `MostroDiscovered` relay blacklists it, re-adding it lifts the blacklist. On **web**
   the same rows live in the IndexedDB `relays` store (#233, closed). Relay persistence stays
   best effort on both targets: a failed write is logged and ignored.
+- **A REQ issued while a relay is down never exists on it — reconnect or not** (nostr-sdk 0.45
+  drops a failed REQ from that relay's registry). So every long-lived subscription is opened,
+  replaced and closed through `nostr::live_subs` (`open` / `replace` / `close`), which records
+  the intent and re-issues it per relay as it connects; a bare `client.subscribe(..).with_id(..)`
+  or `client.unsubscribe(..)` fails a guard test. A resume that replaced `mostro-dm` offline
+  used to leave the session deaf to daemon messages. Rules and log signatures: `docs/RELAYS.md`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view

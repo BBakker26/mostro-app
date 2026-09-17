@@ -5787,16 +5787,19 @@ async fn subscribe_single_order(order_id: &str) {
         let mut rx = client.notifications();
         let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, &order_id);
         let sub_id = single_order_subscription_id(&order_id);
-        if replaced {
-            // The earlier take's REQ is still open under this same id, and
-            // nostr-sdk refuses a subscribe whose id exists (it keeps the old
-            // filter and reports that per relay, not as an error). Drop it so
-            // this subscribe is accepted and owned by this task; the relay
-            // replays the order's latest event on the new REQ, so nothing is
-            // missed in between.
-            let _ = client.unsubscribe(&sub_id).await;
-        }
-        if let Err(e) = client.subscribe(filter).with_id(sub_id.clone()).await {
+        // A retake: the earlier take's REQ is still open under this same id,
+        // and nostr-sdk refuses a subscribe whose id exists (it keeps the old
+        // filter and reports that per relay, not as an error). `replace` drops
+        // it and issues this one in a single critical section, so the
+        // superseded task cannot slot its own subscribe in between; the relay
+        // replays the order's latest event on the new REQ, so nothing is
+        // missed.
+        let subscribed = if replaced {
+            replace_subscription(&client, sub_id.clone(), filter).await
+        } else {
+            subscribe_accepted(&client, sub_id.clone(), filter).await
+        };
+        if let Err(e) = subscribed {
             release_single_order_task(&order_id, generation);
             log::warn!("[orders] subscribe_single_order subscribe failed: {e}");
             return;
@@ -5851,11 +5854,9 @@ async fn subscribe_single_order(order_id: &str) {
         // this task still owns it: a superseded task leaves the REQ to the
         // retake's task, which re-opened it under the same id.
         if release_single_order_task(&order_id, generation) {
-            if let Err(e) = client.unsubscribe(&sub_id).await {
-                log::warn!(
-                    "[orders] subscribe_single_order unsubscribe failed for order={order_id}: {e}"
-                );
-            }
+            crate::nostr::live_subs::live_subs()
+                .close(&client, &sub_id)
+                .await;
         } else {
             crate::api::logging::blog_debug(
                 "orders",
@@ -6526,58 +6527,36 @@ fn relay_list_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
 /// Subscribe `filter` under `id`, failing when no relay accepted the REQ.
 ///
 /// The SDK reports per-relay failures inside an `Ok` output, which is how a
-/// rejected subscribe used to pass for a live one. Empty success is not a
-/// transient state, either: a REQ that failed on a relay is *removed* from
-/// that relay's subscription registry (nostr-sdk 0.45,
-/// `subscribe_long_lived`), so reconnect resubscription cannot revive it —
-/// the subscription exists nowhere and never will. No relay accepting it is
-/// an error here; a partial failure is logged.
+/// rejected subscribe used to pass for a live one. For a caller that needs
+/// coverage now, no relay accepting it is an error; a partial failure is
+/// logged and repaired when that relay connects (`nostr::live_subs`).
 async fn subscribe_accepted(
     client: &nostr_sdk::prelude::Client,
     id: nostr_sdk::prelude::SubscriptionId,
     filter: nostr_sdk::prelude::Filter,
 ) -> Result<()> {
-    let output = client
-        .subscribe(filter)
-        .with_id(id.clone())
+    crate::nostr::live_subs::live_subs()
+        .open(client, id, filter)
         .await
-        .map_err(|e| anyhow::anyhow!("subscribe {id} failed: {e}"))?;
-    if output.success.is_empty() {
-        return Err(anyhow::anyhow!(
-            "subscribe {id} rejected by every relay: {:?}",
-            output.failed
-        ));
-    }
-    for (url, err) in &output.failed {
-        crate::api::logging::blog_warn(
-            "relay",
-            format!(
-                "sub {id} failed relay={} err={}",
-                crate::api::logging::display_relay(&url.to_string()),
-                crate::api::logging::sanitize_relay_text(err),
-            ),
-        );
-    }
-    Ok(())
 }
 
 /// Point the long-lived subscription `id` at `filter`, replacing whatever it
 /// carried before.
 ///
-/// nostr-sdk 0.45 refuses a subscribe whose id already exists and keeps the
-/// old filters, so the id is closed first (a no-op when it was never open).
 /// The brief gap between CLOSE and REQ loses nothing: a node switch refetches
 /// the book right after, and the Kind-14 feed has no `since`, so its REQ
-/// replays history.
+/// replays history. With the pool offline the REQ lands nowhere and that is
+/// not an error: the intent is recorded and each relay gets it as it connects
+/// — a resume used to delete `mostro-dm` for the rest of the session here.
 async fn replace_subscription(
     client: &nostr_sdk::prelude::Client,
     id: nostr_sdk::prelude::SubscriptionId,
     filter: nostr_sdk::prelude::Filter,
 ) -> Result<()> {
-    if let Err(e) = client.unsubscribe(&id).await {
-        log::warn!("[orders] closing {id} before re-subscribing failed: {e}");
-    }
-    subscribe_accepted(client, id, filter).await
+    crate::nostr::live_subs::live_subs()
+        .replace(client, id, filter)
+        .await
+        .map(|_| ())
 }
 
 /// (Re)subscribe the order-book (Kind 38383) and Mostro-reply (Kind 14)
@@ -8130,25 +8109,42 @@ mod tests {
     }
 
     /// The SDK reports a subscribe that failed on every relay as an `Ok`
-    /// output. Accepting that meant a feed with no REQ anywhere was logged
-    /// as created; a relay that was never connected must make it an error.
+    /// output, and drops the failed REQ from each relay's registry, so a
+    /// reconnect never brings it back. That used to be an error here, which
+    /// left nothing to retry: a resume that ran before the relays were back
+    /// deleted `mostro-dm` for the rest of the session. It is now deferred —
+    /// recorded, and issued on the relay the moment it connects.
     #[tokio::test]
-    async fn a_subscription_no_relay_accepts_is_an_error() {
+    async fn node_filters_issued_offline_come_alive_when_the_relay_connects() {
         use nostr_sdk::local_relay::MockRelay;
         use nostr_sdk::prelude::{Client, Keys};
 
+        // Arrange
         let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
         let client = Client::new();
-        client
-            .add_relay(relay.url().await)
-            .await
-            .expect("add relay");
+        client.add_relay(&url).await.expect("add relay");
 
+        // Act
         let result = subscribe_node_filters(&client, Keys::generate().public_key()).await;
+        let while_offline = client.subscription(&orders_subscription_id()).await;
+        client
+            .try_connect_relay(&url, std::time::Duration::from_secs(3))
+            .await
+            .expect("connect");
+        crate::nostr::live_subs::live_subs()
+            .repair_relay(&client, url.as_str())
+            .await;
 
+        // Assert
+        assert!(result.is_ok(), "offline is deferred, not failed: {result:?}");
+        assert!(while_offline.is_empty(), "no relay could have taken the REQ");
         assert!(
-            result.is_err(),
-            "a subscription no relay accepted must not pass for a live one"
+            !client
+                .subscription(&orders_subscription_id())
+                .await
+                .is_empty(),
+            "the deferred subscription must exist once the relay is up"
         );
     }
 

@@ -508,6 +508,8 @@ impl OrderBook {
             book.snapshot()
         };
         let _ = self.tx.send(snapshot);
+        // Only trades have their entry's status set by hand.
+        crate::api::trade_touch::touch_trade(order_id);
     }
 
     /// Get all cached orders, optionally filtered.
@@ -606,9 +608,15 @@ impl OrderBook {
             }
             return;
         }
+        let touched = ours.then(|| order.id.clone());
         match publish {
             Publish::Coalesced => self.upsert_order_coalesced(order).await,
             Publish::WhenBatchEnds => self.upsert_order_deferred(order).await,
+        }
+        // Ours only: the firehose is everybody else's orders, and a trade
+        // screen never follows those.
+        if let Some(order_id) = touched {
+            crate::api::trade_touch::touch_trade(&order_id);
         }
     }
 
@@ -2285,6 +2293,7 @@ async fn apply_local_cancel(order_id: &str) {
             ),
         );
     }
+    crate::api::trade_touch::touch_trade(order_id);
 }
 
 /// End a trade that never went active: its row, its session and — for a take
@@ -2893,6 +2902,8 @@ async fn dispatch_mostro_message(
                             order_book().upsert_order(info).await;
                         }
                         let _ = db.update_trade_order_id(&local_id, &did).await;
+                        crate::api::trade_touch::touch_trade(&local_id);
+                        crate::api::trade_touch::touch_trade(&did);
                         // Replace the stale local_id → trade_index mapping
                         // with daemon_id → trade_index in both DB and memory.
                         let _ = db.delete_trade_key(&local_id).await;
@@ -4746,6 +4757,7 @@ async fn persist_bond(order_id: &str, bond: &crate::api::types::BondInfo) {
             ),
         );
     }
+    crate::api::trade_touch::touch_trade(order_id);
 }
 
 /// The first trade-flow message after `pay-bond-invoice` is the only signal
@@ -5371,6 +5383,7 @@ async fn wipe_trade_row(
     wiped_index: u32,
 ) -> Result<()> {
     db.delete_trade_by_order_id(order_id).await?;
+    crate::api::trade_touch::touch_trade(order_id);
     if let Err(e) = db
         .set_setting(
             &crate::db::settings_keys::trade_wiped(order_id),
@@ -5407,6 +5420,7 @@ async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeIn
         );
     }
     let saved = db.save_trade(trade).await;
+    crate::api::trade_touch::touch_trade(&trade.order.id);
     crate::api::push::request_reconcile();
     saved
 }
@@ -5464,6 +5478,9 @@ async fn sync_trade_fields_if_changed(
             ),
         );
     }
+    // The fields this writes (status, hold invoice, amount) are what the
+    // invoice screens wait for, and not every caller follows with an update.
+    crate::api::trade_touch::touch_trade(order_id);
     true
 }
 
@@ -5562,6 +5579,7 @@ async fn maybe_capture_peer_reveal(
         if let Err(e) = db.update_trade_counterparty(order_id, &peer_hex).await {
             log::warn!("[orders] peer-reveal: failed to persist counterparty: {e}");
         }
+        crate::api::trade_touch::touch_trade(order_id);
     }
     apply_peer_reveal(order_id, &peer_hex, &trade_keys, trade_index, role).await;
 }
@@ -5787,7 +5805,11 @@ async fn apply_single_order_update(mut order: OrderInfo) {
             order.status = local;
         }
     }
+    let order_id = order.id.clone();
     order_book().upsert_order(order).await;
+    // No TradeUpdate here — a public bucket is not a lifecycle step — yet the
+    // entry and maybe the row just changed under an open trade screen.
+    crate::api::trade_touch::touch_trade(&order_id);
 }
 
 /// What the single-order task made of one notification.
@@ -7472,6 +7494,7 @@ pub(crate) fn emit_trade_update_at(
         reason,
         occurred_at,
     });
+    crate::api::trade_touch::touch_trade(order_id);
     // Every status a trade can take changes what the push server should
     // hold for its key (a wipe, a terminal outcome, a new bond window).
     crate::api::push::request_reconcile();
@@ -8660,6 +8683,42 @@ mod tests {
             book.get_order("mine-done").await.is_some(),
             "our own history must remain addressable by id"
         );
+    }
+
+    /// The book feed can be the first to show one of our orders finished — a
+    /// pull-to-refresh, or the daemon's private message running late — and
+    /// the trade screen reads the book.
+    #[tokio::test]
+    async fn the_book_feed_applying_an_order_of_ours_rings_the_doorbell() {
+        // Arrange
+        let book = OrderBook::new();
+        let order_id = format!("touch-feed-{}", uuid::Uuid::new_v4());
+        let mut mine = dummy_order_info(&order_id);
+        mine.status = crate::api::types::OrderStatus::Success;
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        book.apply_ingested_order(mine, true, Publish::WhenBatchEnds).await;
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    /// The firehose is everybody else's orders: ringing for those would put a
+    /// bridge message behind every relay event.
+    #[tokio::test]
+    async fn the_book_feed_applying_a_strangers_order_stays_silent() {
+        // Arrange
+        let book = OrderBook::new();
+        let order_id = format!("touch-stranger-{}", uuid::Uuid::new_v4());
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        book.apply_ingested_order(dummy_order_info(&order_id), false, Publish::WhenBatchEnds)
+            .await;
+
+        // Assert
+        assert!(!rang_for(&mut touches, &order_id).await);
     }
 
     /// Build a signed Kind 38383 event for `order_id` at `status`, the shape
@@ -10457,6 +10516,138 @@ mod tests {
             Some(OrderStatus::Pending),
             "the republish the book feed applied must survive the wipe"
         );
+    }
+
+    // ── Trade doorbell wiring (docs/OPTIMIZATION_PLAN.md PR 3.4) ──
+
+    /// Waits for `order_id`'s touch; `false` when none comes. The channel is
+    /// process-wide, so touches of other tests' orders are skipped.
+    async fn rang_for(
+        stream: &mut crate::api::trade_touch::TradeTouchStream,
+        order_id: &str,
+    ) -> bool {
+        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            loop {
+                match stream.next().await {
+                    Some(t) if t.order_id.as_deref() == Some(order_id) => return true,
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// A Kind 38383 update of our own order changes what the trade screen
+    /// reads and emits no TradeUpdate: only the 2 s poll used to notice.
+    #[tokio::test]
+    async fn a_public_update_of_our_order_rings_the_doorbell() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_public_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let taken = wire_order(&order_id, OrderStatus::WaitingBuyerInvoice);
+        order_book().upsert_order(taken.clone()).await;
+        db.save_trade(&cancel_test_row(taken)).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    /// The pay-invoice screen polled `list_trades` twice a second for this.
+    #[tokio::test]
+    async fn a_hold_invoice_reaching_the_row_rings_the_doorbell() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_invoice_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::WaitingPayment));
+        db.save_trade(&row).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        let changed = sync_trade_fields_if_changed(
+            db,
+            &order_id,
+            Some(&row),
+            None,
+            Some("lnbc1holdinvoice".to_string()),
+            None,
+        )
+        .await;
+
+        // Assert
+        assert!(changed);
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    #[tokio::test]
+    async fn a_write_that_changes_nothing_stays_silent() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_noop_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::Active));
+        db.save_trade(&row).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        let changed = sync_trade_fields_if_changed(
+            db,
+            &order_id,
+            Some(&row),
+            Some(OrderStatus::Active),
+            None,
+            None,
+        )
+        .await;
+
+        // Assert
+        assert!(!changed);
+        assert!(!rang_for(&mut touches, &order_id).await);
+    }
+
+    #[tokio::test]
+    async fn a_lifecycle_update_rings_the_doorbell() {
+        // Arrange
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        emit_trade_update(&order_id, OrderStatus::FiatSent);
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    #[tokio::test]
+    async fn a_wiped_trade_rings_the_doorbell() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_wipe_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::WaitingBuyerInvoice));
+        db.save_trade(&row).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        wipe_trade_row(db, &order_id, 1, 1).await.expect("wipe");
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
     }
 
     /// A confirmed take is its order's only row. A row an earlier take of the

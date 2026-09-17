@@ -1,6 +1,6 @@
 # appv2 Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-06-26
+Auto-generated from all feature plans. Last updated: 2026-09-17
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
@@ -170,13 +170,14 @@ bridged by flutter_rust_bridge.
 ## Domain gotchas (durable)
 - **Reputation/ratings come from Kind 38383 event tags, not a DB.** In-memory
   `RATING_STORE`/`DISPUTE_STORE` are correct by design — don't invent "persist to DB" tasks.
-  Chat history persists to the `messages` table since #246 (web still memory-only, #233).
+  Chat history persists to the `messages` table since #246 — on web to the IndexedDB `messages`
+  store (#233, closed).
 - **On native, relays persist in the `relays` table and grow from the node's kind 10002 list.**
   `initialize(None)` restores the persisted set (or seeds the defaults on a fresh install); the
   active node's NIP-65 list is subscribed live and applied **additively** (never disconnects).
   Removing a `MostroDiscovered` relay blacklists it, re-adding it lifts the blacklist. On **web**
-  the IndexedDB relay store is still a stub (#233), so none of that survives a reload: discovery
-  works in-session only and every persistence failure is logged and ignored.
+  the same rows live in the IndexedDB `relays` store (#233, closed). Relay persistence stays
+  best effort on both targets: a failed write is logged and ignored.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view
@@ -214,6 +215,16 @@ bridged by flutter_rust_bridge.
   the Rust core, the database or protocol state (a test reads its imports); it sets
   `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on
   resume, once, in the foreground core.
+- **Trade screens are pushed, not polled — so every trade write must ring.** Rust's
+  `api::trade_touch::touch_trade(order_id)` is the doorbell behind `tradeStatusProvider` and the
+  invoice providers (`trade_state_provider.dart`): it says "read this order again", carries no
+  status and drives no notice — that is `TradeUpdate`'s job, and the two are separate on purpose
+  (a Kind 38383 update changes what a screen shows without being a lifecycle step). The
+  providers re-read on a touch and otherwise only every 30 s, so a new code path that writes a
+  trade row or sets a book entry's status **without** going through `sync_trade_fields_if_changed`,
+  `wipe_trade_row`, the save helper, `update_order_status` or `emit_trade_update*` must call
+  `touch_trade` itself, or the screen lags by up to the safety interval. Never take a status
+  from a pushed payload: a history replay re-emits old transitions (#474) — read it back.
 - **Dispute chat must wake, and does not yet.** Same envelope and same mechanism as peer chat:
   it is `p`-tagged to `pub(K_conv)`, which the push server cannot match, so the **sender** calls
   `/api/notify`. For a solver's message the sender is mostrix, which does not yet

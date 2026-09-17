@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
@@ -75,7 +77,19 @@ final cancelOrderActionProvider = Provider<Future<void> Function(String)>(
   (ref) => (orderId) => orders_api.cancelOrder(orderId: orderId),
 );
 
-/// Live order status for a single trade, polled from the order book every 2 s.
+/// How long [tradeStatusProvider] waits before re-reading a status nothing
+/// announced. The safety net, not the mechanism: a daemon-driven change wakes
+/// the provider through [tradeUpdatesProvider] at once.
+const _statusPollInterval = Duration(seconds: 2);
+
+/// Live order status for a single trade: re-read the moment Rust reports a
+/// change for this order, and every [_statusPollInterval] besides.
+///
+/// A pushed [TradeUpdate] is a doorbell, not the value: a history replay
+/// re-emits old transitions (#474) and the lookup corrects for the bond
+/// window, so the status is always read back rather than taken from the
+/// payload. The read is a local bridge call, so the change still lands within
+/// the frame instead of up to a poll interval later.
 ///
 /// Starts with an immediate fetch (no initial delay) so the first emission
 /// reflects the real relay status. When the order is no longer in the in-memory
@@ -84,13 +98,35 @@ final cancelOrderActionProvider = Provider<Future<void> Function(String)>(
 final tradeStatusProvider = StreamProvider.family
     .autoDispose<OrderStatus, String>((ref, orderId) async* {
       final lookup = ref.watch(tradeStatusLookupProvider);
-      while (true) {
+      var wake = Completer<void>();
+      Timer? poll;
+      var disposed = false;
+      void ring() {
+        if (!wake.isCompleted) wake.complete();
+      }
+
+      ref.listen<AsyncValue<TradeUpdate>>(tradeUpdatesProvider, (_, next) {
+        if (next.valueOrNull?.orderId == orderId) ring();
+      });
+      ref.onDispose(() {
+        disposed = true;
+        poll?.cancel();
+        ring();
+      });
+
+      while (!disposed) {
+        // Armed before the read: an update landing while the lookup is in
+        // flight re-reads right after it instead of being lost.
+        wake = Completer<void>();
         final status = await lookup(orderId);
+        if (disposed) return;
         if (status != null) {
           yield status;
           if (_isTerminal(status)) return;
         }
-        await Future.delayed(const Duration(seconds: 2));
+        poll = Timer(_statusPollInterval, ring);
+        await wake.future;
+        poll.cancel();
       }
     });
 

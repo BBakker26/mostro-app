@@ -5904,56 +5904,83 @@ fn release_single_order_task(order_id: &str, generation: u64) -> bool {
 
 /// Parse and publish a serialised Nostr event JSON via the relay pool.
 ///
+/// Resolves on the **first** relay that accepts the event, not the last: the
+/// daemon has it from that moment, and the SDK's own `send_event` would hold
+/// the caller until every relay answered or hit its 10 s `OK` timeout — one
+/// sluggish relay froze the fiat-sent / release button for that long. The
+/// other relays still get the event; see [`first_accepted`].
+///
 /// Returns an error if the pool is not initialised, the JSON is malformed,
-/// or the relay client reports a publish error.
+/// or no relay accepted the event.
+///
+/// [`first_accepted`]: crate::nostr::publish::first_accepted
 pub(crate) async fn publish_event_json(event_json: &str) -> Result<()> {
+    use nostr_sdk::prelude::RelayCapabilities;
+
     let pool =
         crate::api::nostr::get_pool().map_err(|_| anyhow::anyhow!("RelayPoolNotInitialized"))?;
     let event: nostr_sdk::prelude::Event =
         serde_json::from_str(event_json).map_err(|e| anyhow::anyhow!("invalid event JSON: {e}"))?;
     let kind = event.kind.as_u16();
     let eid = event.id.to_hex();
-    let output = pool
-        .client()
-        .send_event(&event)
+    let client = pool.client();
+
+    // What `Client::send_event` does before fanning out. Verified first, so an
+    // inconsistent event fails here rather than in the store or on a relay;
+    // then saved: with the event in the SDK's store, a relay echoing it back
+    // on one of our subscriptions is not notified as new.
+    event
+        .verify()
+        .map_err(|e| anyhow::anyhow!("invalid event: {e}"))?;
+    if let Err(e) = client.database().save_event(&event).await {
+        log::warn!("[publish] ev={eid} not saved to the local store: {e}");
+    }
+
+    let sends = client
+        .relays()
+        .with_capabilities(RelayCapabilities::WRITE)
         .await
-        .map_err(|e| anyhow::anyhow!("publish failed: {e}"))?;
+        .into_iter()
+        .map(|(url, relay)| {
+            let event = event.clone();
+            let send = async move {
+                relay
+                    .send_event(&event)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            };
+            (url.to_string(), send)
+        })
+        .collect();
+
     // Per-relay outcome: with one relay habitually down, knowing WHERE each
-    // event actually landed is what makes delivery issues diagnosable.
-    for relay in output.success.keys() {
-        crate::api::logging::blog_info(
-            "publish",
-            format!(
-                "ev={} kind={kind} relay={} OK",
-                crate::api::logging::short_id(&eid),
-                crate::api::logging::display_relay(&relay.to_string()),
+    // event actually landed is what makes delivery issues diagnosable. Logged
+    // as each relay answers, so a late one still shows up after the return.
+    let report = move |relay: &str, outcome: &crate::nostr::publish::SendOutcome| {
+        let ev = crate::api::logging::short_id(&eid);
+        let relay = crate::api::logging::display_relay(relay);
+        match outcome {
+            Ok(()) => crate::api::logging::blog_info(
+                "publish",
+                format!("ev={ev} kind={kind} relay={relay} OK"),
             ),
-        );
-    }
-    for (relay, err) in &output.failed {
-        crate::api::logging::blog_warn(
-            "publish",
-            format!(
-                "ev={} kind={kind} relay={} FAIL: {}",
-                crate::api::logging::short_id(&eid),
-                crate::api::logging::display_relay(&relay.to_string()),
-                crate::api::logging::sanitize_relay_text(err),
+            Err(err) => crate::api::logging::blog_warn(
+                "publish",
+                format!(
+                    "ev={ev} kind={kind} relay={relay} FAIL: {}",
+                    crate::api::logging::sanitize_relay_text(err),
+                ),
             ),
-        );
-    }
-    // The SDK returns Ok even when every relay rejected the event (re-verified
-    // on the 0.45 bump: the pool collects per-relay outcomes and ends in a
-    // bare `Ok(output)`, with no empty-success guard. `success` still means
-    // accepted — an `OK false` becomes a relay error and lands in `failed`.
-    // nostr-relay-pool was folded into nostr-sdk itself in 0.45.)
-    // Without this, fire-and-forget actions (fiat-sent, release, cancel)
-    // would report success having reached zero relays, and correlated ones
-    // would wait 10s for a reply that can never arrive. Partial success
-    // stays Ok. Stable marker — Dart maps it to a localized message.
-    if output.success.is_empty() {
-        anyhow::bail!("NoRelayAccepted");
-    }
-    Ok(())
+        }
+    };
+
+    // An `OK false` is a relay error here, so "accepted" means accepted.
+    // Without the `NoRelayAccepted` verdict, fire-and-forget actions
+    // (fiat-sent, release, cancel) would report success having reached zero
+    // relays, and correlated ones would wait 10s for a reply that can never
+    // arrive. Stable marker — Dart maps it to a localized message.
+    crate::nostr::publish::first_accepted(sends, report).await
 }
 
 // ── Kind 38383 subscription ───────────────────────────────────────────────────

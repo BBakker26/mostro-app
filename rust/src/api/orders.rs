@@ -5787,18 +5787,19 @@ async fn subscribe_single_order(order_id: &str) {
         let mut rx = client.notifications();
         let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, &order_id);
         let sub_id = single_order_subscription_id(&order_id);
-        if replaced {
-            // The earlier take's REQ is still open under this same id, and
-            // nostr-sdk refuses a subscribe whose id exists (it keeps the old
-            // filter and reports that per relay, not as an error). Drop it so
-            // this subscribe is accepted and owned by this task; the relay
-            // replays the order's latest event on the new REQ, so nothing is
-            // missed in between.
-            crate::nostr::live_subs::live_subs()
-                .close(&client, &sub_id)
-                .await;
-        }
-        if let Err(e) = subscribe_accepted(&client, sub_id.clone(), filter).await {
+        // A retake: the earlier take's REQ is still open under this same id,
+        // and nostr-sdk refuses a subscribe whose id exists (it keeps the old
+        // filter and reports that per relay, not as an error). `replace` drops
+        // it and issues this one in a single critical section, so the
+        // superseded task cannot slot its own subscribe in between; the relay
+        // replays the order's latest event on the new REQ, so nothing is
+        // missed.
+        let subscribed = if replaced {
+            replace_subscription(&client, sub_id.clone(), filter).await
+        } else {
+            subscribe_accepted(&client, sub_id.clone(), filter).await
+        };
+        if let Err(e) = subscribed {
             release_single_order_task(&order_id, generation);
             log::warn!("[orders] subscribe_single_order subscribe failed: {e}");
             return;

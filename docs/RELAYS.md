@@ -35,10 +35,11 @@ daemon's `add-invoice`, because the feed that would have replayed it existed on 
 2. **Every unsubscribe of one goes through `live_subs().close`.** The registry remembers what
    should exist; an id closed behind its back is resurrected on the next reconnect, and relays
    cap concurrent REQs — past the cap they answer `CLOSED`, which can take the order book down.
-3. **Never treat "issued" as "live".** The repair task (`spawn_repair`) re-issues what a relay
-   lacks when the status monitor reports it `Connected`; `resync()` runs the same repair for the
-   relays that are already up. Code that needs a reply must not assume the REQ is on any
-   particular relay — wait on the message, with a timeout.
+3. **Never treat "issued" as "live".** The repair task (`spawn_repair`) attempts to re-issue
+   what a relay lacks when the status monitor reports it `Connected` (it can fail or time out,
+   and says so in the log); `resync()` runs the same repair for the relays that are already up.
+   Code that needs a reply must not assume the REQ is on any particular relay — wait on the
+   message, with a timeout.
 4. **A live-only filter (`limit(0)`) is not a delivery guarantee.** Whatever is published while
    the socket is down is never delivered on it, reconnect or not. Every such subscription needs
    a replaying counterpart: for daemon messages that is `mostro-dm`, which carries no `since`
@@ -67,8 +68,8 @@ In the app log (`/logs`, or `adb logcat -s mostro flutter`):
 
 | Line | Meaning |
 |---|---|
-| `sub <id> failed relay=… err=relay not connected` | The REQ did not reach that relay. Expected offline; must be followed by `sub <id> repaired relay=…` once it connects. |
-| `sub <id> deferred: no relay connected` | A `replace` ran fully offline. Same expectation. |
+| `sub <id> failed relay=… err=relay not connected` | The REQ did not reach that relay. Expected offline. `Connected` triggers a repair *attempt*, not a guarantee: look for its outcome, `sub <id> repaired relay=…` or `sub <id> repair failed relay=… err=…`. A failed one is retried on that relay's next `Connected` and on the next `resync()`. |
+| `sub <id> deferred: no relay connected` | A `replace` ran fully offline. Same expectation, per relay. |
 | `eose sub=mostro-dm relay=…` after a reconnect | The feed exists on that relay. **Its absence after `Connected` is this bug.** |
 | `Kind 14 received (global\|per-trade) … age=Ns` | `age` ≈ 0 is live delivery; minutes or more is a replay. |
 | `drop ev=… reason=duplicate` | Normal: the global and per-trade loops saw the same event. |

@@ -113,26 +113,44 @@ impl LiveSubs {
 
     /// Re-issue on `url` every recorded subscription that relay does not
     /// hold (or holds with a superseded filter). Returns how many it issued.
+    ///
+    /// The candidates are snapshotted and the lock is taken again **per
+    /// subscription**, so a stalled socket holds up an `open` — a take about
+    /// to publish — for one bounded REQ at most, not for the whole sweep.
+    /// Each one is re-validated under that lock against what is recorded and
+    /// what the relay holds *now*: an `open`, `replace` or `close` that ran in
+    /// between wins, and a stale snapshot never overwrites it.
     pub(crate) async fn repair_relay(&self, client: &Client, url: &str) -> usize {
-        let desired = self.desired.lock().await;
-        if desired.is_empty() {
-            return 0;
-        }
         let Ok(Some(relay)) = client.relay(url).await else {
             return 0;
         };
-        if relay.status() != RelayStatus::Connected {
-            return 0;
-        }
-        let present = relay.subscriptions().await;
-        let mut issued = 0;
-        for (id, filter) in missing_on(&desired, &present) {
-            if present.contains_key(&id) {
-                // Superseded filter: same "id exists" refusal as in `replace`.
-                let _ = relay.unsubscribe(&id).await;
+        let candidates: Vec<SubscriptionId> = {
+            let desired = self.desired.lock().await;
+            if desired.is_empty() || relay.status() != RelayStatus::Connected {
+                return 0;
             }
-            // Bounded: this runs under the registry lock, and one stalled
-            // socket must not hold up every other subscription change.
+            missing_on(&desired, &relay.subscriptions().await)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect()
+        };
+        let mut issued = 0;
+        for id in candidates {
+            let desired = self.desired.lock().await;
+            let Some(filter) = desired.get(&id).cloned() else {
+                continue; // closed since the snapshot
+            };
+            if relay.status() != RelayStatus::Connected {
+                break;
+            }
+            match relay.subscription(&id).await {
+                Some(held) if held.as_slice() == std::slice::from_ref(&filter) => continue,
+                // Superseded filter: same "id exists" refusal as in `replace`.
+                Some(_) => {
+                    let _ = relay.unsubscribe(&id).await;
+                }
+                None => {}
+            }
             let attempt = crate::rt::time::timeout(
                 REPAIR_TIMEOUT,
                 std::future::IntoFuture::into_future(relay.subscribe(filter).with_id(id.clone())),
@@ -140,6 +158,7 @@ impl LiveSubs {
             .await
             .map_err(|_| "timed out".to_string())
             .and_then(|sent| sent.map_err(|e| e.to_string()));
+            drop(desired);
             match attempt {
                 Ok(_) => {
                     issued += 1;
@@ -371,6 +390,47 @@ mod tests {
             subs.repair_relay(&client, url.as_str()).await,
             0,
             "idempotent"
+        );
+    }
+
+    /// A retake supersedes the earlier take's d-tag task under the same id.
+    /// Whichever order the two reach the registry in, the newer filter must
+    /// own the REQ: `replace` is one critical section, so the older task's
+    /// late `open` finds the id taken and fails instead of slotting in
+    /// between the newer task's CLOSE and REQ.
+    #[tokio::test]
+    async fn a_late_open_cannot_take_over_a_replaced_subscription() {
+        // Arrange
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(&url, Duration::from_secs(3))
+            .await
+            .expect("connect");
+        let subs = LiveSubs::default();
+        let id = SubscriptionId::new("d-tag-test");
+        let (older, newer) = (dm_filter(), dm_filter());
+
+        // Act: both race; the older task's open lands last.
+        let (replaced, opened) =
+            tokio::join!(subs.replace(&client, id.clone(), newer.clone()), async {
+                tokio::task::yield_now().await;
+                subs.open(&client, id.clone(), older).await
+            });
+
+        // Assert
+        assert_eq!(replaced.expect("replace"), Issued::Live);
+        assert!(opened.is_err(), "the superseded open must not be accepted");
+        assert_eq!(
+            client.subscription(&id).await.into_values().next(),
+            Some(vec![newer.clone()])
+        );
+        assert_eq!(
+            subs.repair_relay(&client, url.as_str()).await,
+            0,
+            "and the registry agrees with the relay"
         );
     }
 

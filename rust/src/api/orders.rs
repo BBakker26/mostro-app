@@ -275,6 +275,9 @@ impl OrderBookDelta {
 struct BookState {
     orders: HashMap<String, OrderInfo>,
     revision: u64,
+    /// The pending feed's stored events ended for the node this book holds;
+    /// see `OrderBookSnapshot::loaded`.
+    loaded: bool,
 }
 
 impl BookState {
@@ -385,10 +388,12 @@ impl OrderBook {
     /// Used on a node switch so orders belonging to the previously-active node
     /// disappear from the UI immediately, before the new node's orders arrive.
     pub async fn clear(&self) {
-        self.orders
-            .write()
-            .await
-            .replace_all(Vec::new(), &self.delta_tx);
+        {
+            let mut book = self.orders.write().await;
+            book.replace_all(Vec::new(), &self.delta_tx);
+            // Emptied for another node, whose relay has confirmed nothing.
+            book.loaded = false;
+        }
         let _ = self.tx.send(Vec::new());
     }
 
@@ -467,7 +472,14 @@ impl OrderBook {
             return false;
         }
         self.publish().await;
-        let _ = self.delta_tx.send(OrderBookDelta::Loaded);
+        {
+            // Flag and event under the write lock, like every delta: a
+            // consumer that subscribed and then read `loaded == false` is
+            // guaranteed to hear the event.
+            let mut book = self.orders.write().await;
+            book.loaded = true;
+            let _ = self.delta_tx.send(OrderBookDelta::Loaded);
+        }
         true
     }
 
@@ -480,6 +492,7 @@ impl OrderBook {
     /// The book and the revision it was read at, under one lock — the
     /// starting point of a delta subscriber, and its way back after a lag.
     /// See [`OrderBookDelta`] for the rule that goes with it.
+    #[cfg(test)] // production reads it through `bridge_snapshot`
     pub(crate) async fn snapshot_with_revision(&self) -> (u64, Vec<OrderInfo>) {
         let book = self.orders.read().await;
         (book.revision, book.snapshot())
@@ -487,8 +500,12 @@ impl OrderBook {
 
     /// [`Self::snapshot_with_revision`] in the bridge's terms.
     pub(crate) async fn bridge_snapshot(&self) -> crate::api::types::OrderBookSnapshot {
-        let (revision, orders) = self.snapshot_with_revision().await;
+        let (revision, orders, loaded) = {
+            let book = self.orders.read().await;
+            (book.revision, book.snapshot(), book.loaded)
+        };
         crate::api::types::OrderBookSnapshot {
+            loaded,
             // Past u32 the stream only ever says Resync (see
             // `bridge_revision`), so what is reported here no longer matters.
             revision: bridge_revision(revision).unwrap_or(u32::MAX),
@@ -8825,6 +8842,38 @@ mod tests {
         // Assert
         assert!(published);
         assert!(matches!(next_delta(&mut stream).await, OrderDelta::Loaded));
+    }
+
+    /// `Loaded` is an event, and a consumer created later never hears it: the
+    /// feed's EOSE comes once per subscription, not once per screen. A Home
+    /// screen re-created over a genuinely empty book would wait forever, so
+    /// the snapshot remembers the confirmation.
+    #[tokio::test]
+    async fn a_snapshot_says_whether_the_stored_book_was_already_replayed() {
+        // Arrange
+        let book = OrderBook::new();
+        assert!(!book.bridge_snapshot().await.loaded, "nothing confirmed yet");
+
+        // Act
+        book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Assert
+        assert!(book.bridge_snapshot().await.loaded);
+    }
+
+    /// A node switch empties the book before the new node answered: that
+    /// emptiness is not confirmed by anyone.
+    #[tokio::test]
+    async fn clearing_the_book_forgets_the_confirmation() {
+        // Arrange
+        let book = OrderBook::new();
+        book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Act
+        book.clear().await;
+
+        // Assert
+        assert!(!book.bridge_snapshot().await.loaded);
     }
 
     /// Only the pending feed: the recent-changes and Kind 14 feeds end their

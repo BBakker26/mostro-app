@@ -7683,11 +7683,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   OrderBookSnapshot dco_decode_order_book_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return OrderBookSnapshot(
       revision: dco_decode_u_32(arr[0]),
       orders: dco_decode_list_order_info(arr[1]),
+      loaded: dco_decode_bool(arr[2]),
     );
   }
 
@@ -10300,7 +10301,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_revision = sse_decode_u_32(deserializer);
     var var_orders = sse_decode_list_order_info(deserializer);
-    return OrderBookSnapshot(revision: var_revision, orders: var_orders);
+    var var_loaded = sse_decode_bool(deserializer);
+    return OrderBookSnapshot(
+      revision: var_revision,
+      orders: var_orders,
+      loaded: var_loaded,
+    );
   }
 
   @protected
@@ -12927,6 +12933,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self.revision, serializer);
     sse_encode_list_order_info(self.orders, serializer);
+    sse_encode_bool(self.loaded, serializer);
   }
 
   @protected

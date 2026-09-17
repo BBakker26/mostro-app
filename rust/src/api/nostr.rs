@@ -108,6 +108,10 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
         seed_default_relays().await;
     }
 
+    // A REQ issued while a relay is down never exists on it, reconnect or
+    // not (nostr-sdk 0.45): re-issue what each relay misses as it connects.
+    crate::nostr::live_subs::spawn_repair(POOL.get().unwrap());
+
     // Spawn a background task that flushes the outbox whenever the relay pool
     // transitions to Online.  The task exits when the broadcast channel closes.
     let pool_ref = POOL.get().unwrap().clone();
@@ -378,7 +382,9 @@ const RESYNC_CONNECT_WAIT: std::time::Duration = std::time::Duration::from_secs(
 ///    id (the relay replaces it in place and replays the node's history; the
 ///    per-order status cursors keep that replay in order), the order-book
 ///    loop, the peer chats and the dispute chats are re-armed — each of them
-///    a no-op when its task is alive.
+///    a no-op when its task is alive. A pass that runs before the relays are
+///    back lands its REQs nowhere; `nostr::live_subs` keeps the intent and
+///    re-issues it on each relay as it connects.
 /// 3. **Outbox.** Whatever was queued while offline is published.
 ///
 /// Single-flight: concurrent calls coalesce onto the pass in progress and
@@ -453,6 +459,15 @@ async fn run_resync() -> ResyncOutcome {
     crate::api::orders::subscribe_orders().await;
     crate::api::messages::resubscribe_active_chats().await;
     crate::api::disputes::resubscribe_active_dispute_chats().await;
+    // Whatever a relay that is up right now still lacks. The ones still
+    // reconnecting get theirs from the repair task as they connect, so a pass
+    // that ran offline no longer leaves the session deaf.
+    let repaired = crate::nostr::live_subs::live_subs()
+        .repair_all(&client)
+        .await;
+    if repaired > 0 {
+        log::info!("[nostr] resync: repaired {repaired} subscription(s)");
+    }
 
     let flushed = match flush_message_queue().await {
         Ok(n) => n,

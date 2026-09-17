@@ -480,6 +480,46 @@ pub struct TradeUpdate {
     pub occurred_at: i64,
 }
 
+/// One change to the order book, as `on_order_deltas` delivers it.
+///
+/// **How to consume it:** subscribe first, then read
+/// `get_order_book_snapshot()`, then apply only deltas whose `revision` is
+/// greater than the snapshot's (and than the last one applied). A delta at or
+/// below it is already inside the snapshot; applying it could resurrect an
+/// order that was removed since. On [`OrderDelta::Resync`], read a fresh
+/// snapshot and carry on with the same rule.
+#[derive(Debug, Clone)]
+pub enum OrderDelta {
+    /// `order` was added or changed.
+    Upserted { revision: u32, order: OrderInfo },
+    /// The order with this id left the book.
+    Removed { revision: u32, order_id: String },
+    /// What happened cannot be told order by order: the book was replaced or
+    /// cleared (a node switch), or this subscriber fell behind and deltas
+    /// were dropped.
+    Resync,
+    /// The relay finished replaying the node's stored pending orders: the
+    /// book as the consumer has it is complete, so an empty one is really
+    /// empty. Without this a quiet node never produces a delta, and a screen
+    /// waiting for one to leave its loading state waits forever. Changes
+    /// nothing in the book; may arrive more than once (one per relay).
+    Loaded,
+}
+
+/// The whole book — every status, as the snapshot stream carries it — and the
+/// revision it was read at. See [`OrderDelta`].
+#[derive(Debug, Clone)]
+pub struct OrderBookSnapshot {
+    pub revision: u32,
+    pub orders: Vec<OrderInfo>,
+    /// Whether the relay already finished replaying the node's stored pending
+    /// orders into this book — what [`OrderDelta::Loaded`] announces when it
+    /// happens. A consumer created afterwards never hears that event, so it
+    /// reads the fact here: with `loaded`, an empty `orders` is really empty.
+    /// Back to `false` when the book is cleared for another node.
+    pub loaded: bool,
+}
+
 /// "Read this trade again" — the doorbell of `api::trade_touch`. Unlike a
 /// [`TradeUpdate`] it says nothing about what changed and drives no
 /// notification; it only tells a screen its copy may be stale.

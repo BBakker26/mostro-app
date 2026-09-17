@@ -234,7 +234,7 @@ const PUBLISH_COALESCE_MS: u64 = 200;
 
 /// One change to the book, as broadcast to delta subscribers.
 ///
-/// Every variant carries the book revision it produced. Revisions grow by one
+/// Every per-order variant carries the book revision it produced. Revisions grow by one
 /// per change, and a delta is sent while the book's write lock is still held,
 /// so subscribers receive them in revision order. That is what makes a resync
 /// safe: a subscriber that fell behind reads
@@ -242,29 +242,29 @@ const PUBLISH_COALESCE_MS: u64 = 200;
 /// **newer** than the snapshot's revision — one at or below it is already in
 /// the snapshot, and replaying it could undo a later change.
 ///
-/// Internal for now (docs/OPTIMIZATION_PLAN.md PR 3.1): the bridge still
-/// carries snapshots. `frb(ignore)` because flutter_rust_bridge scans this
+/// The internal form; [`OrderDeltaStream`] turns it into the bridge's
+/// [`OrderDelta`]. `frb(ignore)` because flutter_rust_bridge scans this
 /// module and would emit bindings for it.
-// Nothing outside the tests reads a delta until the bridge stream of PR 3.2,
-// which is stacked on this one and drops the allowance.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 #[flutter_rust_bridge::frb(ignore)]
 pub(crate) enum OrderBookDelta {
     Upserted { revision: u64, order: OrderInfo },
     Removed { revision: u64, order_id: String },
     /// The book was replaced or emptied wholesale. What vanished cannot be
-    /// told order by order, so the subscriber starts over from a snapshot.
-    Reset { revision: u64 },
+    /// told order by order, so the subscriber starts over from a snapshot —
+    /// which carries the revision, so this needs none.
+    Reset,
+    /// The pending feed's stored events ended; see `OrderDelta::Loaded`.
+    Loaded,
 }
 
+#[cfg(test)]
 impl OrderBookDelta {
-    #[allow(dead_code)] // see the enum
-    pub(crate) fn revision(&self) -> u64 {
+    /// The revision a per-order delta produced.
+    fn revision(&self) -> u64 {
         match self {
-            Self::Upserted { revision, .. }
-            | Self::Removed { revision, .. }
-            | Self::Reset { revision } => *revision,
+            Self::Upserted { revision, .. } | Self::Removed { revision, .. } => *revision,
+            Self::Reset | Self::Loaded => unreachable!("carries no revision"),
         }
     }
 }
@@ -275,6 +275,9 @@ impl OrderBookDelta {
 struct BookState {
     orders: HashMap<String, OrderInfo>,
     revision: u64,
+    /// The pending feed's stored events ended for the node this book holds;
+    /// see `OrderBookSnapshot::loaded`.
+    loaded: bool,
 }
 
 impl BookState {
@@ -308,9 +311,7 @@ impl BookState {
     fn replace_all(&mut self, orders: Vec<OrderInfo>, deltas: &broadcast::Sender<OrderBookDelta>) {
         self.orders = orders.into_iter().map(|o| (o.id.clone(), o)).collect();
         self.revision += 1;
-        let _ = deltas.send(OrderBookDelta::Reset {
-            revision: self.revision,
-        });
+        let _ = deltas.send(OrderBookDelta::Reset);
     }
 
     /// The whole book, ordered by id: a map has no order of its own, and a
@@ -387,10 +388,12 @@ impl OrderBook {
     /// Used on a node switch so orders belonging to the previously-active node
     /// disappear from the UI immediately, before the new node's orders arrive.
     pub async fn clear(&self) {
-        self.orders
-            .write()
-            .await
-            .replace_all(Vec::new(), &self.delta_tx);
+        {
+            let mut book = self.orders.write().await;
+            book.replace_all(Vec::new(), &self.delta_tx);
+            // Emptied for another node, whose relay has confirmed nothing.
+            book.loaded = false;
+        }
         let _ = self.tx.send(Vec::new());
     }
 
@@ -469,6 +472,14 @@ impl OrderBook {
             return false;
         }
         self.publish().await;
+        {
+            // Flag and event under the write lock, like every delta: a
+            // consumer that subscribed and then read `loaded == false` is
+            // guaranteed to hear the event.
+            let mut book = self.orders.write().await;
+            book.loaded = true;
+            let _ = self.delta_tx.send(OrderBookDelta::Loaded);
+        }
         true
     }
 
@@ -481,15 +492,29 @@ impl OrderBook {
     /// The book and the revision it was read at, under one lock — the
     /// starting point of a delta subscriber, and its way back after a lag.
     /// See [`OrderBookDelta`] for the rule that goes with it.
-    #[allow(dead_code)] // first caller: the bridge stream of PR 3.2
+    #[cfg(test)] // production reads it through `bridge_snapshot`
     pub(crate) async fn snapshot_with_revision(&self) -> (u64, Vec<OrderInfo>) {
         let book = self.orders.read().await;
         (book.revision, book.snapshot())
     }
 
+    /// [`Self::snapshot_with_revision`] in the bridge's terms.
+    pub(crate) async fn bridge_snapshot(&self) -> crate::api::types::OrderBookSnapshot {
+        let (revision, orders, loaded) = {
+            let book = self.orders.read().await;
+            (book.revision, book.snapshot(), book.loaded)
+        };
+        crate::api::types::OrderBookSnapshot {
+            loaded,
+            // Past u32 the stream only ever says Resync (see
+            // `bridge_revision`), so what is reported here no longer matters.
+            revision: bridge_revision(revision).unwrap_or(u32::MAX),
+            orders,
+        }
+    }
+
     /// Subscribe to per-order changes. Subscribe **before** reading the
     /// snapshot, so no change can fall between the two.
-    #[allow(dead_code)] // first caller: the bridge stream of PR 3.2
     pub(crate) fn subscribe_deltas(&self) -> broadcast::Receiver<OrderBookDelta> {
         self.delta_tx.subscribe()
     }
@@ -7571,6 +7596,66 @@ impl OrdersStream {
     }
 }
 
+/// A book revision as the bridge carries it. `u32` because that is a plain
+/// `int` in Dart on every target, where `u64` is a `BigInt`. `None` past its
+/// range — four billion changes in one process — where the stream degrades
+/// to `Resync` on every change: slower, never wrong.
+fn bridge_revision(revision: u64) -> Option<u32> {
+    u32::try_from(revision).ok().filter(|r| *r < u32::MAX)
+}
+
+/// The whole order book and the revision it was read at — the starting point
+/// of a delta consumer, and its way back after a [`OrderDelta::Resync`].
+///
+/// [`OrderDelta::Resync`]: crate::api::types::OrderDelta::Resync
+pub async fn get_order_book_snapshot() -> Result<crate::api::types::OrderBookSnapshot> {
+    Ok(order_book().bridge_snapshot().await)
+}
+
+/// Stream of per-order changes to the book. Call this **before**
+/// [`get_order_book_snapshot`], so no change can fall between the two; see
+/// [`OrderDelta`](crate::api::types::OrderDelta) for the rule to apply them.
+pub async fn on_order_deltas() -> Result<OrderDeltaStream> {
+    Ok(OrderDeltaStream::over(order_book()))
+}
+
+/// Wrapper for flutter_rust_bridge Dart Stream generation.
+pub struct OrderDeltaStream {
+    rx: broadcast::Receiver<OrderBookDelta>,
+}
+
+impl OrderDeltaStream {
+    pub(crate) fn over(book: &OrderBook) -> Self {
+        Self {
+            rx: book.subscribe_deltas(),
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<crate::api::types::OrderDelta> {
+        use crate::api::types::OrderDelta;
+        match self.rx.recv().await {
+            Ok(OrderBookDelta::Upserted { revision, order }) => Some(
+                bridge_revision(revision)
+                    .map_or(OrderDelta::Resync, |revision| OrderDelta::Upserted { revision, order }),
+            ),
+            Ok(OrderBookDelta::Removed { revision, order_id }) => Some(
+                bridge_revision(revision).map_or(OrderDelta::Resync, |revision| {
+                    OrderDelta::Removed { revision, order_id }
+                }),
+            ),
+            Ok(OrderBookDelta::Reset) => Some(OrderDelta::Resync),
+            Ok(OrderBookDelta::Loaded) => Some(OrderDelta::Loaded),
+            // Unlike a dropped snapshot, a dropped delta is a hole in the
+            // consumer's book. It cannot be patched, only started over.
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                log::warn!("[orders] order-delta stream lagged, {n} deltas dropped — resync");
+                Some(OrderDelta::Resync)
+            }
+            Err(broadcast::error::RecvError::Closed) => None,
+        }
+    }
+}
+
 /// Called internally to process a raw Nostr event into the order cache.
 /// Typically invoked from the relay pool's event processing loop.
 // Currently unused: the subscription loop inlines `parse_order_event` +
@@ -8590,7 +8675,7 @@ mod tests {
         assert!(
             matches!(
                 seen.as_slice(),
-                [OrderBookDelta::Reset { .. }, OrderBookDelta::Reset { .. }]
+                [OrderBookDelta::Reset, OrderBookDelta::Reset]
             ),
             "got {seen:?}"
         );
@@ -8647,7 +8732,9 @@ mod tests {
                 OrderBookDelta::Removed { order_id, .. } => {
                     mirror.remove(&order_id);
                 }
-                OrderBookDelta::Reset { .. } => unreachable!("no reset in this run"),
+                OrderBookDelta::Reset | OrderBookDelta::Loaded => {
+                    unreachable!("neither happens in this run")
+                }
             }
         }
 
@@ -8661,6 +8748,209 @@ mod tests {
         expected.sort_by(|x, y| x.0.cmp(&y.0));
         assert_eq!(mirrored, expected);
         assert_eq!(mirrored.len(), 2, "both orders are in the book at the end");
+    }
+
+    // ── Delta stream over the bridge (docs/OPTIMIZATION_PLAN.md PR 3.2) ──
+
+    use crate::api::types::OrderDelta;
+
+    /// What Dart does with the stream, in Rust: start from a snapshot, apply
+    /// what is newer, start over on a resync.
+    struct Mirror {
+        revision: u32,
+        orders: HashMap<String, OrderInfo>,
+    }
+
+    impl Mirror {
+        async fn from(book: &OrderBook) -> Self {
+            let snapshot = book.bridge_snapshot().await;
+            Self {
+                revision: snapshot.revision,
+                orders: snapshot
+                    .orders
+                    .into_iter()
+                    .map(|o| (o.id.clone(), o))
+                    .collect(),
+            }
+        }
+
+        /// Returns `false` when the delta asked for a resync.
+        fn apply(&mut self, delta: OrderDelta) -> bool {
+            match delta {
+                OrderDelta::Upserted { revision, order } if revision > self.revision => {
+                    self.revision = revision;
+                    self.orders.insert(order.id.clone(), order);
+                }
+                OrderDelta::Removed { revision, order_id } if revision > self.revision => {
+                    self.revision = revision;
+                    self.orders.remove(&order_id);
+                }
+                OrderDelta::Resync => return false,
+                OrderDelta::Loaded => {}
+                _stale => {}
+            }
+            true
+        }
+
+        fn ids(&self) -> Vec<String> {
+            let mut ids: Vec<String> = self.orders.keys().cloned().collect();
+            ids.sort();
+            ids
+        }
+    }
+
+    async fn book_ids(book: &OrderBook) -> Vec<String> {
+        book.bridge_snapshot().await.orders.into_iter().map(|o| o.id).collect()
+    }
+
+    async fn next_delta(stream: &mut OrderDeltaStream) -> OrderDelta {
+        tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("a delta within 2 s")
+            .expect("the stream is open")
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_plus_the_deltas_after_it_equals_the_book() {
+        // Arrange: subscribe first, then read — the order Dart must follow.
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("before")).await;
+        let mut stream = OrderDeltaStream::over(&book);
+        let mut mirror = Mirror::from(&book).await;
+
+        // Act
+        book.upsert_order(dummy_order_info("added")).await;
+        book.update_order_status("before", OrderStatus::Active).await;
+        book.remove_order("added").await;
+        for _ in 0..3 {
+            assert!(mirror.apply(next_delta(&mut stream).await));
+        }
+
+        // Assert
+        assert_eq!(mirror.ids(), book_ids(&book).await);
+        assert_eq!(mirror.orders["before"].status, OrderStatus::Active);
+    }
+
+    /// Subscribing before the snapshot means the first deltas heard can
+    /// already be inside it. Applying one would re-insert a removed order.
+    #[tokio::test]
+    async fn deltas_already_inside_the_snapshot_are_skipped() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+        book.upsert_order(dummy_order_info("short-lived")).await;
+        book.remove_order("short-lived").await;
+        let mut mirror = Mirror::from(&book).await;
+
+        // Act: both deltas predate the snapshot.
+        for _ in 0..2 {
+            assert!(mirror.apply(next_delta(&mut stream).await));
+        }
+
+        // Assert
+        assert!(mirror.orders.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_replaced_book_reaches_dart_as_a_resync() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+
+        // Act
+        book.clear().await;
+
+        // Assert
+        assert!(matches!(next_delta(&mut stream).await, OrderDelta::Resync));
+    }
+
+    /// An empty book produces no per-order delta, so a consumer waiting for
+    /// its first one to leave the loading state would wait forever — on a
+    /// cold start against a quiet node, and whenever the last order leaves.
+    /// The relay's EOSE on the pending feed is the confirmation it needs.
+    #[tokio::test]
+    async fn the_end_of_stored_orders_reaches_a_delta_consumer() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+
+        // Act
+        let published = book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Assert
+        assert!(published);
+        assert!(matches!(next_delta(&mut stream).await, OrderDelta::Loaded));
+    }
+
+    /// `Loaded` is an event, and a consumer created later never hears it: the
+    /// feed's EOSE comes once per subscription, not once per screen. A Home
+    /// screen re-created over a genuinely empty book would wait forever, so
+    /// the snapshot remembers the confirmation.
+    #[tokio::test]
+    async fn a_snapshot_says_whether_the_stored_book_was_already_replayed() {
+        // Arrange
+        let book = OrderBook::new();
+        assert!(!book.bridge_snapshot().await.loaded, "nothing confirmed yet");
+
+        // Act
+        book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Assert
+        assert!(book.bridge_snapshot().await.loaded);
+    }
+
+    /// A node switch empties the book before the new node answered: that
+    /// emptiness is not confirmed by anyone.
+    #[tokio::test]
+    async fn clearing_the_book_forgets_the_confirmation() {
+        // Arrange
+        let book = OrderBook::new();
+        book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Act
+        book.clear().await;
+
+        // Assert
+        assert!(!book.bridge_snapshot().await.loaded);
+    }
+
+    /// Only the pending feed: the recent-changes and Kind 14 feeds end their
+    /// stored events too, once per relay each.
+    #[tokio::test]
+    async fn the_end_of_another_feed_tells_a_delta_consumer_nothing() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.publish_on_stored_events_end(&recent_orders_subscription_id()).await;
+
+        // Assert
+        assert!(drain(&mut deltas).is_empty());
+    }
+
+    /// A lagged subscriber cannot know what it missed. It is told to start
+    /// over — once — and a fresh snapshot plus what follows converges again.
+    #[tokio::test]
+    async fn a_subscriber_that_fell_behind_resyncs_and_converges() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+        let mut mirror = Mirror::from(&book).await;
+
+        // Act: more changes than the channel holds, none of them read.
+        for n in 0..=ORDER_DELTA_CAPACITY {
+            book.upsert_order_deferred(dummy_order_info(&format!("flood-{n}"))).await;
+        }
+        assert!(!mirror.apply(next_delta(&mut stream).await), "expected a resync");
+        mirror = Mirror::from(&book).await;
+        book.remove_order("flood-0").await;
+        while mirror.orders.contains_key("flood-0") {
+            mirror.apply(next_delta(&mut stream).await);
+        }
+
+        // Assert
+        assert_eq!(mirror.ids(), book_ids(&book).await);
     }
 
     /// The snapshot stream is what Dart still reads: it must keep carrying

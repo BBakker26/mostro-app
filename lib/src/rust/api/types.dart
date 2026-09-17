@@ -10,7 +10,7 @@ part 'types.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `default_expiration_hours`, `default_expiration_seconds`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AppState`, `MostroNodeInfo`, `QueuedMessageStatus`, `TradeHistoryEntry`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// The `bond_claims` key for a node / order pair.
 Future<String> bondClaimKey({
@@ -1168,6 +1168,67 @@ class NymIdentity {
           pseudonym == other.pseudonym &&
           iconIndex == other.iconIndex &&
           colorHue == other.colorHue;
+}
+
+/// The whole book — every status, as the snapshot stream carries it — and the
+/// revision it was read at. See [`OrderDelta`].
+class OrderBookSnapshot {
+  final int revision;
+  final List<OrderInfo> orders;
+
+  /// Whether the relay already finished replaying the node's stored pending
+  /// orders into this book — what [`OrderDelta::Loaded`] announces when it
+  /// happens. A consumer created afterwards never hears that event, so it
+  /// reads the fact here: with `loaded`, an empty `orders` is really empty.
+  /// Back to `false` when the book is cleared for another node.
+  final bool loaded;
+
+  const OrderBookSnapshot({
+    required this.revision,
+    required this.orders,
+    required this.loaded,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ orders.hashCode ^ loaded.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OrderBookSnapshot &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          orders == other.orders &&
+          loaded == other.loaded;
+}
+
+@freezed
+sealed class OrderDelta with _$OrderDelta {
+  const OrderDelta._();
+
+  /// `order` was added or changed.
+  const factory OrderDelta.upserted({
+    required int revision,
+    required OrderInfo order,
+  }) = OrderDelta_Upserted;
+
+  /// The order with this id left the book.
+  const factory OrderDelta.removed({
+    required int revision,
+    required String orderId,
+  }) = OrderDelta_Removed;
+
+  /// What happened cannot be told order by order: the book was replaced or
+  /// cleared (a node switch), or this subscriber fell behind and deltas
+  /// were dropped.
+  const factory OrderDelta.resync() = OrderDelta_Resync;
+
+  /// The relay finished replaying the node's stored pending orders: the
+  /// book as the consumer has it is complete, so an empty one is really
+  /// empty. Without this a quiet node never produces a delta, and a screen
+  /// waiting for one to leave its loading state waits forever. Changes
+  /// nothing in the book; may arrive more than once (one per relay).
+  const factory OrderDelta.loaded() = OrderDelta_Loaded;
 }
 
 class OrderInfo {

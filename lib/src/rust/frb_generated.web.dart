@@ -82,6 +82,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook;
 
   CrossPlatformFinalizerArg
+  get rust_arc_decrement_strong_count_OrderDeltaStreamPtr =>
+      wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream;
+
+  CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_OrdersStreamPtr =>
       wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrdersStream;
 
@@ -191,6 +195,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   OrderBook
   dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook(
+    dynamic raw,
+  );
+
+  @protected
+  OrderDeltaStream
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
     dynamic raw,
   );
 
@@ -317,6 +327,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   MessageStream
   dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMessageStream(
+    dynamic raw,
+  );
+
+  @protected
+  OrderDeltaStream
+  dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
     dynamic raw,
   );
 
@@ -455,6 +471,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   OrderBook
   dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook(
+    dynamic raw,
+  );
+
+  @protected
+  OrderDeltaStream
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
     dynamic raw,
   );
 
@@ -627,6 +649,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NwcWalletInfo dco_decode_box_autoadd_nwc_wallet_info(dynamic raw);
+
+  @protected
+  OrderDelta dco_decode_box_autoadd_order_delta(dynamic raw);
 
   @protected
   OrderFilters dco_decode_box_autoadd_order_filters(dynamic raw);
@@ -853,6 +878,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   NwcWalletInfo? dco_decode_opt_box_autoadd_nwc_wallet_info(dynamic raw);
 
   @protected
+  OrderDelta? dco_decode_opt_box_autoadd_order_delta(dynamic raw);
+
+  @protected
   OrderFilters? dco_decode_opt_box_autoadd_order_filters(dynamic raw);
 
   @protected
@@ -901,6 +929,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<OrderInfo>? dco_decode_opt_list_order_info(dynamic raw);
+
+  @protected
+  OrderBookSnapshot dco_decode_order_book_snapshot(dynamic raw);
+
+  @protected
+  OrderDelta dco_decode_order_delta(dynamic raw);
 
   @protected
   OrderFilters dco_decode_order_filters(dynamic raw);
@@ -1068,6 +1102,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  OrderDeltaStream
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   OrdersStream
   sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrdersStream(
     SseDeserializer deserializer,
@@ -1190,6 +1230,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   MessageStream
   sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMessageStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  OrderDeltaStream
+  sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
     SseDeserializer deserializer,
   );
 
@@ -1328,6 +1374,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   OrderBook
   sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  OrderDeltaStream
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
     SseDeserializer deserializer,
   );
 
@@ -1520,6 +1572,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   NwcWalletInfo sse_decode_box_autoadd_nwc_wallet_info(
     SseDeserializer deserializer,
   );
+
+  @protected
+  OrderDelta sse_decode_box_autoadd_order_delta(SseDeserializer deserializer);
 
   @protected
   OrderFilters sse_decode_box_autoadd_order_filters(
@@ -1790,6 +1845,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  OrderDelta? sse_decode_opt_box_autoadd_order_delta(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   OrderFilters? sse_decode_opt_box_autoadd_order_filters(
     SseDeserializer deserializer,
   );
@@ -1860,6 +1920,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<OrderInfo>? sse_decode_opt_list_order_info(SseDeserializer deserializer);
+
+  @protected
+  OrderBookSnapshot sse_decode_order_book_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  OrderDelta sse_decode_order_delta(SseDeserializer deserializer);
 
   @protected
   OrderFilters sse_decode_order_filters(SseDeserializer deserializer);
@@ -2048,6 +2116,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    OrderDeltaStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
   sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrdersStream(
     OrdersStream self,
     SseSerializer serializer,
@@ -2190,6 +2265,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerMessageStream(
     MessageStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    OrderDeltaStream self,
     SseSerializer serializer,
   );
 
@@ -2351,6 +2433,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook(
     OrderBook self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    OrderDeltaStream self,
     SseSerializer serializer,
   );
 
@@ -2593,6 +2682,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_nwc_wallet_info(
     NwcWalletInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_order_delta(
+    OrderDelta self,
     SseSerializer serializer,
   );
 
@@ -2972,6 +3067,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_order_delta(
+    OrderDelta? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_order_filters(
     OrderFilters? self,
     SseSerializer serializer,
@@ -3057,6 +3158,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     List<OrderInfo>? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_order_book_snapshot(
+    OrderBookSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_order_delta(OrderDelta self, SseSerializer serializer);
 
   @protected
   void sse_encode_order_filters(OrderFilters self, SseSerializer serializer);
@@ -3342,6 +3452,22 @@ class RustLibWire implements BaseWire {
     int ptr,
   ) => wasmModule
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook(
+        ptr,
+      );
+
+  void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    int ptr,
+  ) => wasmModule
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+        ptr,
+      );
+
+  void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    int ptr,
+  ) => wasmModule
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
         ptr,
       );
 
@@ -3635,6 +3761,16 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
 
   external void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderBook(
+    int ptr,
+  );
+
+  external void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
+    int ptr,
+  );
+
+  external void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerOrderDeltaStream(
     int ptr,
   );
 

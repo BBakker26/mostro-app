@@ -390,7 +390,7 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   filter changes); precompute the payment-method token set once per `OrderItem`. Decide one
   sort order and delete the dead Rust filter path (or wire it up — decide in review).
 - **Verify:** provider unit tests; 3k-order fixture: one incoming event causes O(1) work.
-- **Done in part (#497).** `OrderBookFeed` keeps the Dart copy current from deltas: one
+- **Done in part (#498).** `OrderBookFeed` keeps the Dart copy current from deltas: one
   mapping per changed order (untouched orders keep their identity, so `orderByIdProvider`'s
   `select` sees nothing move), and the list is handed over at most once per 50 ms — deltas
   are per order, so emitting on each would rebuild the O(N²) cold start on the Dart side.

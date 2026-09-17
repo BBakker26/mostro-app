@@ -319,6 +319,69 @@ void main() {
       expect(body, contains('SHA256SUMS.txt'));
     });
 
+    test('lists the desktop and iOS downloads next to the APKs', () {
+      // Act
+      final body = notesFor([merge(1)], [pr(1, 'feat: a')]).renderReleaseBody();
+
+      // Assert
+      for (final file in [
+        'mostro-v2.0.1-linux-x64.tar.gz',
+        'mostro-v2.0.1-windows-x64.zip',
+        'mostro-v2.0.1-macos-universal.zip',
+        'mostro-v2.0.1-ios-unsigned.ipa',
+      ]) {
+        expect(body, contains('/releases/download/v2.0.1/$file'));
+      }
+    });
+
+    test('says how to open builds the OS does not trust', () {
+      // Act
+      final body = notesFor([merge(1)], [pr(1, 'feat: a')]).renderReleaseBody();
+
+      // Assert — none of the desktop or iOS builds is signed by a vendor
+      // certificate, and each OS blocks that in its own way.
+      expect(body, contains('xattr -dr com.apple.quarantine'));
+      expect(body, contains('SmartScreen'));
+      expect(body, contains('sideload'));
+    });
+
+    test('a platform whose build failed is not offered for download', () {
+      // Arrange — publish goes ahead with whatever was built.
+      final notes = notesFor([merge(1)], [pr(1, 'feat: a')]);
+
+      // Act
+      final body = notes.renderReleaseBody(
+        assets: {
+          'mostro-v2.0.1-arm64-v8a.apk',
+          'mostro-v2.0.1-armeabi-v7a.apk',
+          'mostro-v2.0.1-linux-x64.tar.gz',
+        },
+      );
+
+      // Assert
+      expect(body, contains('mostro-v2.0.1-linux-x64.tar.gz'));
+      expect(body, isNot(contains('mostro-v2.0.1-windows-x64.zip')));
+      expect(body, isNot(contains('mostro-v2.0.1-macos-universal.zip')));
+      expect(body, isNot(contains('SmartScreen')));
+      expect(body, contains('Windows, macOS and iOS'));
+    });
+
+    test('names every asset the workflows upload', () {
+      // Act
+      final names = releaseAssetNames('v2.0.1');
+
+      // Assert
+      expect(names.keys, [
+        'android-v8',
+        'android-v7',
+        'linux',
+        'windows',
+        'macos',
+        'ios',
+      ]);
+      expect(names['linux'], 'mostro-v2.0.1-linux-x64.tar.gz');
+    });
+
     test('links the comparison with the previous tag', () {
       // Act
       final body = notesFor([merge(1)], [pr(1, 'feat: a')]).renderReleaseBody();

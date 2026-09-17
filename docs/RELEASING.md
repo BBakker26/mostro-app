@@ -1,8 +1,9 @@
 # Releasing
 
 A release is cut by **pushing a tag** `vMAJOR.MINOR.PATCH`. `.github/workflows/release.yml`
-does the rest: it builds and signs the Android APKs, writes the release notes, publishes the
-GitHub release and opens a PR that records it in `CHANGELOG.md`.
+does the rest: it builds and signs the Android APKs, builds the Linux, Windows, macOS and iOS
+artifacts, writes the release notes, publishes the GitHub release and opens a PR that records
+it in `CHANGELOG.md`.
 
 Versions start at **2.0.0** (v1 was the pure-Flutter `MostroP2P/mobile`) and follow
 [Semantic Versioning](https://semver.org/): patch for fixes, minor for features.
@@ -81,10 +82,38 @@ To sign a build locally, create `android/key.properties` (`storeFile`, `storePas
 | --- | --- |
 | `mostro-vX.Y.Z-arm64-v8a.apk` | 64-bit ARMv8-A — modern phones |
 | `mostro-vX.Y.Z-armeabi-v7a.apk` | 32-bit ARMv7-A — old / entry-level phones on a 32-bit Android |
+| `mostro-vX.Y.Z-linux-x64.tar.gz` | the Flutter bundle (`mostro`, `lib/`, `data/`), built on Ubuntu 22.04 → glibc 2.35+ |
+| `mostro-vX.Y.Z-windows-x64.zip` | `mostro.exe` and its DLLs — no Authenticode signature (SmartScreen warns) |
+| `mostro-vX.Y.Z-macos-universal.zip` | `mostro.app`, arm64 + x86-64, ad-hoc signed, **not notarized** (Gatekeeper blocks a double click) |
+| `mostro-vX.Y.Z-ios-unsigned.ipa` | **unsigned**, for sideloading tools that re-sign it; push does not work in a re-signed build |
 | `SHA256SUMS.txt` | checksums of the above |
 
-`x86_64` is not shipped (an emulator ABI). Desktop (Linux, Windows, macOS) and iOS artifacts
-are not built yet — they are the next phase of this workflow.
+An Android `x86_64` APK is not shipped (an emulator ABI). The file names are a contract between
+the workflows and `tool/release/downloads.dart`, which writes the *Downloads* section and the
+per-OS instructions; `test/ci/release_workflow_test.dart` holds the two sides equal.
+
+### Desktop and iOS builds
+
+They live in the reusable **`.github/workflows/release-builds.yml`**, called by `release.yml`
+and by **`release-dry-run.yml`**. Only the Linux one can be compiled on a contributor's Linux
+machine, so the dry run compiles all four — publishing nothing — on any PR that touches the
+release workflows, `linux/`, `windows/`, `macos/`, `rust_builder/` or a lockfile. It is
+path-filtered, so **never make it a required check**. Edit a build in `release-builds.yml`,
+never in a caller, or the dry run stops testing what ships.
+
+**The APKs are the release.** `publish` waits for these builds but only requires `android`: when
+one fails, the release goes out with what was built and its notes name the missing platform
+instead of linking to a 404. The run ends red; **"Re-run failed jobs"** builds the missing
+asset, publishes again and adds it to the same release.
+
+What they are not, and what closing each gap takes:
+
+- **macOS** — no Developer ID, no notarization. Needs an Apple Developer account, the
+  certificate as secrets, and a `notarytool` step after the build.
+- **Windows** — no code-signing certificate.
+- **iOS** — no TestFlight. Needs the same Apple account, a distribution certificate and
+  provisioning profile as secrets, and `flutter build ipa` instead of `--no-codesign`.
+- **Linux** — a plain bundle: no `.deb`, AppImage or Flatpak.
 
 ### Release notes and CHANGELOG.md
 

@@ -66,33 +66,35 @@ void main() {
   });
 
   group('iOS deployment target', () {
-    test('is one value across the Podfile and the Xcode project, at least 14.0',
-        () {
-      // Arrange
-      final podfile = File('ios/Podfile').readAsStringSync();
-      final pbxproj =
-          File('ios/Runner.xcodeproj/project.pbxproj').readAsStringSync();
+    test(
+      'is one value across the Podfile and the Xcode project, at least 14.0',
+      () {
+        // Arrange
+        final podfile = File('ios/Podfile').readAsStringSync();
+        final pbxproj =
+            File('ios/Runner.xcodeproj/project.pbxproj').readAsStringSync();
 
-      // Act
-      final values = <String>{
-        ...RegExp(r"platform :ios, '([0-9.]+)'")
-            .allMatches(podfile)
-            .map((m) => m.group(1)!),
-        ...RegExp(r"\['IPHONEOS_DEPLOYMENT_TARGET'\] = '([0-9.]+)'")
-            .allMatches(podfile)
-            .map((m) => m.group(1)!),
-        ...RegExp(r'IPHONEOS_DEPLOYMENT_TARGET = ([0-9.]+);')
-            .allMatches(pbxproj)
-            .map((m) => m.group(1)!),
-      };
+        // Act
+        final values = <String>{
+          ...RegExp(
+            r"platform :ios, '([0-9.]+)'",
+          ).allMatches(podfile).map((m) => m.group(1)!),
+          ...RegExp(
+            r"\['IPHONEOS_DEPLOYMENT_TARGET'\] = '([0-9.]+)'",
+          ).allMatches(podfile).map((m) => m.group(1)!),
+          ...RegExp(
+            r'IPHONEOS_DEPLOYMENT_TARGET = ([0-9.]+);',
+          ).allMatches(pbxproj).map((m) => m.group(1)!),
+        };
 
-      // Assert — `pod install` refuses a platform below any pod's minimum,
-      // which only shows on a Mac. workmanager_apple (the push refresh job)
-      // requires 14.0, the highest of the current pods; raise this floor
-      // with the pod that needs it.
-      expect(values, hasLength(1), reason: 'deployment targets: $values');
-      final major = int.parse(values.single.split('.').first);
-      expect(major, greaterThanOrEqualTo(14), reason: values.single);
-    });
+        // Assert — `pod install` refuses a platform below any pod's minimum,
+        // which only shows on a Mac. workmanager_apple (the push refresh job)
+        // requires 14.0, the highest of the current pods; raise this floor
+        // with the pod that needs it.
+        expect(values, hasLength(1), reason: 'deployment targets: $values');
+        final major = int.parse(values.single.split('.').first);
+        expect(major, greaterThanOrEqualTo(14), reason: values.single);
+      },
+    );
   });
 }

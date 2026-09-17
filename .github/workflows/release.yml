@@ -1,8 +1,8 @@
 name: Release
 
 # Pushing a tag `vX.Y.Z` publishes a GitHub release: signed Android APKs (one
-# per ABI), generated release notes, and a PR that records the release in
-# CHANGELOG.md. Maintainer procedure, required secrets and how to recover from
+# per ABI), Linux / Windows / macOS / iOS builds (release-builds.yml), generated
+# release notes, and a PR that records the release in CHANGELOG.md. Maintainer procedure, required secrets and how to recover from
 # a failed run: docs/RELEASING.md. test/ci/release_workflow_test.dart guards
 # the properties below that are easy to weaken by accident.
 on:
@@ -97,9 +97,12 @@ jobs:
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           echo "Previous release: ${previous:-none (first release)}"
 
-          git log --first-parent --format='%H%x09%s' ${previous:+"$previous.."}"$TAG" > commits.tsv
+          # Kept with the notes: publish renders the body again from them, once
+          # it knows which builds made it.
+          mkdir -p release-notes
+          git log --first-parent --format='%H%x09%s' ${previous:+"$previous.."}"$TAG" > release-notes/commits.tsv
           gh pr list --repo "$GITHUB_REPOSITORY" --state merged --limit 10000 \
-            --json number,title,author,mergeCommit,mergedAt > prs.json
+            --json number,title,author,mergeCommit,mergedAt > release-notes/prs.json
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
@@ -115,15 +118,15 @@ jobs:
           PREVIOUS_TAG: ${{ steps.history.outputs.previous }}
         run: |
           set -euo pipefail
-          mkdir -p release-notes
+          printf '%s' "$PREVIOUS_TAG" > release-notes/previous-tag
           git show origin/main:CHANGELOG.md > release-notes/CHANGELOG.md 2>/dev/null \
             || rm -f release-notes/CHANGELOG.md
           dart tool/release_notes.dart \
             --tag "$TAG" \
             --previous-tag "$PREVIOUS_TAG" \
             --repository "$GITHUB_REPOSITORY" \
-            --commits commits.tsv \
-            --pull-requests prs.json \
+            --commits release-notes/commits.tsv \
+            --pull-requests release-notes/prs.json \
             --body-out release-notes/RELEASE_BODY.md \
             --changelog release-notes/CHANGELOG.md
           cat release-notes/RELEASE_BODY.md >> "$GITHUB_STEP_SUMMARY"
@@ -243,17 +246,39 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: android
+          name: asset-android
           path: dist/*.apk
           if-no-files-found: error
 
+  # Desktop and iOS. None of these sees a secret, so they run beside the android
+  # job, outside its environment.
+  builds:
+    name: Builds
+    needs: prepare
+    uses: ./.github/workflows/release-builds.yml
+    permissions:
+      contents: read
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      version: ${{ needs.prepare.outputs.version }}
+      build_number: ${{ needs.prepare.outputs.build_number }}
+
+  # The APKs are the release; a desktop or iOS build that failed must not hold
+  # them back. So this runs whenever android succeeded, attaches what was
+  # built, and the notes name what is missing. The run still ends red, and
+  # re-running its failed jobs adds the missing assets to the same release.
   publish:
     name: Publish GitHub release
-    needs: [prepare, android]
+    needs: [prepare, android, builds]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           name: release-notes
@@ -261,8 +286,34 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: android
+          pattern: asset-*
+          merge-multiple: true
           path: dist
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Same generator and inputs as prepare; only the Downloads section can
+      # differ, by the files that are in dist/. The changelog copy is scratch.
+      - name: Write the release description for the assets that were built
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ls -lh dist
+          dart tool/release_notes.dart \
+            --tag "$TAG" \
+            --previous-tag "$(cat release-notes/previous-tag)" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commits release-notes/commits.tsv \
+            --pull-requests release-notes/prs.json \
+            --assets-dir dist \
+            --body-out RELEASE_BODY.md \
+            --changelog "$RUNNER_TEMP/changelog-scratch.md"
 
       - name: Checksums
         working-directory: dist
@@ -277,11 +328,11 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release edit "$TAG" --title "Mostro $TAG" --notes-file release-notes/RELEASE_BODY.md
+            gh release edit "$TAG" --title "Mostro $TAG" --notes-file RELEASE_BODY.md
             gh release upload "$TAG" dist/* --clobber
           else
             gh release create "$TAG" dist/* --verify-tag \
-              --title "Mostro $TAG" --notes-file release-notes/RELEASE_BODY.md
+              --title "Mostro $TAG" --notes-file RELEASE_BODY.md
           fi
 
   # main is protected, so the changelog arrives as a pull request. A PR opened
@@ -289,6 +340,9 @@ jobs:
   changelog:
     name: Open changelog PR
     needs: [prepare, publish]
+    # Explicit, because the default `success()` is false once any job upstream
+    # of publish failed — and publish tolerates a failed desktop build.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

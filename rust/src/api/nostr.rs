@@ -276,7 +276,7 @@ fn note_relay_list_generation(
     true
 }
 
-// ── Relay persistence (best effort: web has no relay store yet, #233) ───────
+// ── Relay persistence (best effort: a failed write is logged and ignored) ───
 
 async fn load_persisted_relays() -> Vec<RelayInfo> {
     let Some(db) = crate::db::app_db::db() else {
@@ -978,7 +978,7 @@ mod tests {
 /// user removed must stay out across a restart, and adding it back by hand
 /// must lift the blacklist for good.
 ///
-/// Native only: the IndexedDB backend does not persist relays yet (#233).
+/// Native only: the test drives the SQLite backend directly.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod relay_blacklist_restart_tests {
     use super::{removal_effect, RelayInfo};

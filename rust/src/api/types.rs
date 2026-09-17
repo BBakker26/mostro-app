@@ -259,7 +259,7 @@ pub enum RelaySource {
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OrderInfo {
     pub id: String,
     pub kind: OrderKind,

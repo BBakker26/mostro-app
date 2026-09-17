@@ -232,10 +232,103 @@ pub struct OrderFilters {
 /// through this: daemon-message handlers and user actions publish directly.
 const PUBLISH_COALESCE_MS: u64 = 200;
 
-/// Shared order cache + broadcast channel for UI updates.
+/// One change to the book, as broadcast to delta subscribers.
+///
+/// Every variant carries the book revision it produced. Revisions grow by one
+/// per change, and a delta is sent while the book's write lock is still held,
+/// so subscribers receive them in revision order. That is what makes a resync
+/// safe: a subscriber that fell behind reads
+/// [`OrderBook::snapshot_with_revision`] and from then on applies only deltas
+/// **newer** than the snapshot's revision — one at or below it is already in
+/// the snapshot, and replaying it could undo a later change.
+///
+/// Internal for now (docs/OPTIMIZATION_PLAN.md PR 3.1): the bridge still
+/// carries snapshots. `frb(ignore)` because flutter_rust_bridge scans this
+/// module and would emit bindings for it.
+// Nothing outside the tests reads a delta until the bridge stream of PR 3.2,
+// which is stacked on this one and drops the allowance.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+#[flutter_rust_bridge::frb(ignore)]
+pub(crate) enum OrderBookDelta {
+    Upserted { revision: u64, order: OrderInfo },
+    Removed { revision: u64, order_id: String },
+    /// The book was replaced or emptied wholesale. What vanished cannot be
+    /// told order by order, so the subscriber starts over from a snapshot.
+    Reset { revision: u64 },
+}
+
+impl OrderBookDelta {
+    #[allow(dead_code)] // see the enum
+    pub(crate) fn revision(&self) -> u64 {
+        match self {
+            Self::Upserted { revision, .. }
+            | Self::Removed { revision, .. }
+            | Self::Reset { revision } => *revision,
+        }
+    }
+}
+
+/// The book proper: orders by id, and how many times they changed.
+#[derive(Default)]
+#[flutter_rust_bridge::frb(ignore)]
+struct BookState {
+    orders: HashMap<String, OrderInfo>,
+    revision: u64,
+}
+
+impl BookState {
+    /// Insert or replace `order`. An order re-announced unchanged — the
+    /// common case on the wire — is not a change: no revision, no delta.
+    fn upsert(&mut self, order: OrderInfo, deltas: &broadcast::Sender<OrderBookDelta>) {
+        if self.orders.get(&order.id) == Some(&order) {
+            return;
+        }
+        self.revision += 1;
+        self.orders.insert(order.id.clone(), order.clone());
+        let _ = deltas.send(OrderBookDelta::Upserted {
+            revision: self.revision,
+            order,
+        });
+    }
+
+    /// Whether anything was there to remove.
+    fn remove(&mut self, order_id: &str, deltas: &broadcast::Sender<OrderBookDelta>) -> bool {
+        if self.orders.remove(order_id).is_none() {
+            return false;
+        }
+        self.revision += 1;
+        let _ = deltas.send(OrderBookDelta::Removed {
+            revision: self.revision,
+            order_id: order_id.to_string(),
+        });
+        true
+    }
+
+    fn replace_all(&mut self, orders: Vec<OrderInfo>, deltas: &broadcast::Sender<OrderBookDelta>) {
+        self.orders = orders.into_iter().map(|o| (o.id.clone(), o)).collect();
+        self.revision += 1;
+        let _ = deltas.send(OrderBookDelta::Reset {
+            revision: self.revision,
+        });
+    }
+
+    /// The whole book, ordered by id: a map has no order of its own, and a
+    /// snapshot that reshuffles between emissions makes every consumer and
+    /// every test compare more than changed. Display order is the UI's.
+    fn snapshot(&self) -> Vec<OrderInfo> {
+        let mut orders: Vec<OrderInfo> = self.orders.values().cloned().collect();
+        orders.sort_by(|a, b| a.id.cmp(&b.id));
+        orders
+    }
+}
+
+/// Shared order cache + broadcast channels for UI updates.
 pub struct OrderBook {
-    orders: Arc<RwLock<Vec<OrderInfo>>>,
+    orders: Arc<RwLock<BookState>>,
     tx: broadcast::Sender<Vec<OrderInfo>>,
+    /// One message per change; see [`OrderBookDelta`].
+    delta_tx: broadcast::Sender<OrderBookDelta>,
     /// Set while a coalescing window is armed. Shared with the window's task,
     /// which clears it.
     publish_scheduled: Arc<AtomicBool>,
@@ -255,6 +348,11 @@ pub struct OrderBook {
 /// this channel ever carries deltas.
 const ORDER_STREAM_CAPACITY: usize = 64;
 
+/// Deltas retained for a subscriber that has fallen behind. One per changed
+/// order, so a cold-start ingest of a few thousand orders fits; past it the
+/// subscriber lags and resyncs from a snapshot, which is always correct.
+const ORDER_DELTA_CAPACITY: usize = 4096;
+
 impl Default for OrderBook {
     fn default() -> Self {
         Self::new()
@@ -264,9 +362,11 @@ impl Default for OrderBook {
 impl OrderBook {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(ORDER_STREAM_CAPACITY);
+        let (delta_tx, _) = broadcast::channel(ORDER_DELTA_CAPACITY);
         Self {
-            orders: Arc::new(RwLock::new(Vec::new())),
+            orders: Arc::new(RwLock::new(BookState::default())),
             tx,
+            delta_tx,
             publish_scheduled: Arc::new(AtomicBool::new(false)),
             wire_orders: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -274,8 +374,12 @@ impl OrderBook {
 
     /// Replace the cached order list and notify listeners.
     pub async fn set_orders(&self, orders: Vec<OrderInfo>) {
-        *self.orders.write().await = orders.clone();
-        let _ = self.tx.send(orders);
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            book.replace_all(orders, &self.delta_tx);
+            book.snapshot()
+        };
+        let _ = self.tx.send(snapshot);
     }
 
     /// Empty the cached order list and notify listeners with an empty book.
@@ -283,16 +387,20 @@ impl OrderBook {
     /// Used on a node switch so orders belonging to the previously-active node
     /// disappear from the UI immediately, before the new node's orders arrive.
     pub async fn clear(&self) {
-        self.orders.write().await.clear();
+        self.orders
+            .write()
+            .await
+            .replace_all(Vec::new(), &self.delta_tx);
         let _ = self.tx.send(Vec::new());
     }
 
     /// Insert or update a single order and notify listeners.
     pub async fn upsert_order(&self, order: OrderInfo) {
-        let mut orders = self.orders.write().await;
-        Self::apply_upsert(&mut orders, order);
-        let snapshot = orders.clone();
-        drop(orders);
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            book.upsert(order, &self.delta_tx);
+            book.snapshot()
+        };
         let _ = self.tx.send(snapshot);
     }
 
@@ -302,9 +410,12 @@ impl OrderBook {
     /// message on this channel is a whole-book snapshot, so publishing per
     /// event during a refetch of N orders costs N clones of an N-element
     /// vector and N full payloads across the bridge.
+    ///
+    /// "Without notifying" is about the snapshot stream. The delta goes out
+    /// at once: it is one order, so there is nothing to batch, and a delta
+    /// subscriber must see every change in order.
     pub(crate) async fn upsert_order_deferred(&self, order: OrderInfo) {
-        let mut orders = self.orders.write().await;
-        Self::apply_upsert(&mut orders, order);
+        self.orders.write().await.upsert(order, &self.delta_tx);
     }
 
     /// Insert or update a single order, publishing at most once per
@@ -332,7 +443,7 @@ impl OrderBook {
             // Released before the snapshot is taken, so an update arriving
             // during the read opens a new window instead of being swallowed.
             scheduled.store(false, Ordering::Release);
-            let snapshot = orders.read().await.clone();
+            let snapshot = orders.read().await.snapshot();
             let _ = tx.send(snapshot);
         });
     }
@@ -363,40 +474,51 @@ impl OrderBook {
 
     /// Publish the current book to subscribers.
     pub(crate) async fn publish(&self) {
-        let snapshot = self.orders.read().await.clone();
+        let snapshot = self.orders.read().await.snapshot();
         let _ = self.tx.send(snapshot);
     }
 
-    fn apply_upsert(orders: &mut Vec<OrderInfo>, order: OrderInfo) {
-        if let Some(existing) = orders.iter_mut().find(|o| o.id == order.id) {
-            *existing = order;
-        } else {
-            orders.push(order);
-        }
+    /// The book and the revision it was read at, under one lock — the
+    /// starting point of a delta subscriber, and its way back after a lag.
+    /// See [`OrderBookDelta`] for the rule that goes with it.
+    #[allow(dead_code)] // first caller: the bridge stream of PR 3.2
+    pub(crate) async fn snapshot_with_revision(&self) -> (u64, Vec<OrderInfo>) {
+        let book = self.orders.read().await;
+        (book.revision, book.snapshot())
+    }
+
+    /// Subscribe to per-order changes. Subscribe **before** reading the
+    /// snapshot, so no change can fall between the two.
+    #[allow(dead_code)] // first caller: the bridge stream of PR 3.2
+    pub(crate) fn subscribe_deltas(&self) -> broadcast::Receiver<OrderBookDelta> {
+        self.delta_tx.subscribe()
     }
 
     /// Update the status of an existing cached order and notify listeners.
     ///
     /// No-op when the order is not in the cache (e.g. already removed).
     pub async fn update_order_status(&self, order_id: &str, status: OrderStatus) {
-        let mut orders = self.orders.write().await;
-        if let Some(existing) = orders.iter_mut().find(|o| o.id == order_id) {
-            existing.status = status;
-            let snapshot = orders.clone();
-            drop(orders);
-            let _ = self.tx.send(snapshot);
-            // Only trades have their entry's status set by hand.
-            crate::api::trade_touch::touch_trade(order_id);
-        }
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            let Some(mut order) = book.orders.get(order_id).cloned() else {
+                return;
+            };
+            order.status = status;
+            book.upsert(order, &self.delta_tx);
+            book.snapshot()
+        };
+        let _ = self.tx.send(snapshot);
+        // Only trades have their entry's status set by hand.
+        crate::api::trade_touch::touch_trade(order_id);
     }
 
     /// Get all cached orders, optionally filtered.
     pub async fn get_orders(&self, filters: Option<OrderFilters>) -> Vec<OrderInfo> {
         // Clone + filter under the read lock, then drop it before sorting.
         let mut result: Vec<OrderInfo> = {
-            let orders = self.orders.read().await;
-            orders
-                .iter()
+            let book = self.orders.read().await;
+            book.orders
+                .values()
                 .filter(|o| matches!(o.status, OrderStatus::Pending))
                 .filter(|o| {
                     let Some(ref f) = filters else { return true };
@@ -437,12 +559,7 @@ impl OrderBook {
 
     /// Get a single order by ID.
     pub async fn get_order(&self, order_id: &str) -> Option<OrderInfo> {
-        self.orders
-            .read()
-            .await
-            .iter()
-            .find(|o| o.id == order_id)
-            .cloned()
+        self.orders.read().await.orders.get(order_id).cloned()
     }
 
     /// Remove the order with the given ID from the cache and notify listeners.
@@ -458,10 +575,7 @@ impl OrderBook {
     /// The return value is what keeps a removal that changed nothing from
     /// publishing a whole-book snapshot.
     pub(crate) async fn remove_order_deferred(&self, order_id: &str) -> bool {
-        let mut orders = self.orders.write().await;
-        let before = orders.len();
-        orders.retain(|o| o.id != order_id);
-        orders.len() != before
+        self.orders.write().await.remove(order_id, &self.delta_tx)
     }
 
     /// Apply an order parsed from a Kind 38383 event.
@@ -8358,6 +8472,215 @@ mod tests {
             book.get_order("stranger-done").await.is_none(),
             "a finished order nobody can act on should not be retained"
         );
+    }
+
+    // ── Delta broadcast (docs/OPTIMIZATION_PLAN.md PR 3.1) ──
+
+    /// Everything a delta subscriber has heard so far, without waiting.
+    fn drain(rx: &mut broadcast::Receiver<OrderBookDelta>) -> Vec<OrderBookDelta> {
+        let mut seen = Vec::new();
+        while let Ok(delta) = rx.try_recv() {
+            seen.push(delta);
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn an_upsert_is_broadcast_as_one_delta_with_a_growing_revision() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.upsert_order(dummy_order_info("d-1")).await;
+        book.upsert_order(dummy_order_info("d-2")).await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert_eq!(seen.len(), 2);
+        match (&seen[0], &seen[1]) {
+            (
+                OrderBookDelta::Upserted { revision: first, order: a },
+                OrderBookDelta::Upserted { revision: second, order: b },
+            ) => {
+                assert_eq!((a.id.as_str(), b.id.as_str()), ("d-1", "d-2"));
+                assert!(second > first, "revisions must grow: {first} then {second}");
+            }
+            other => panic!("expected two upserts, got {other:?}"),
+        }
+    }
+
+    /// The coalescing window exists because a snapshot is the whole book. A
+    /// delta is one order, so it has nothing to wait for — and a subscriber
+    /// applying deltas must see every change, in order.
+    #[tokio::test]
+    async fn deferred_and_coalesced_upserts_still_emit_their_delta_at_once() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.upsert_order_deferred(dummy_order_info("quiet")).await;
+        book.upsert_order_coalesced(dummy_order_info("burst")).await;
+
+        // Assert
+        let ids: Vec<String> = drain(&mut deltas)
+            .into_iter()
+            .map(|d| match d {
+                OrderBookDelta::Upserted { order, .. } => order.id,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, ["quiet", "burst"]);
+    }
+
+    #[tokio::test]
+    async fn a_removal_is_a_delta_only_when_something_was_removed() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("gone")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.remove_order("never-there").await;
+        book.remove_order("gone").await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert!(
+            matches!(seen.as_slice(), [OrderBookDelta::Removed { order_id, .. }] if order_id == "gone"),
+            "got {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_status_change_is_an_upsert_of_the_changed_order() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("moves")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.update_order_status("moves", OrderStatus::FiatSent).await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert!(
+            matches!(seen.as_slice(), [OrderBookDelta::Upserted { order, .. }]
+                if order.id == "moves" && order.status == OrderStatus::FiatSent),
+            "got {seen:?}"
+        );
+    }
+
+    /// A wholesale replacement cannot be told as per-order deltas — a
+    /// subscriber would have to know what vanished — so it says "start over".
+    #[tokio::test]
+    async fn replacing_or_clearing_the_book_asks_subscribers_to_start_over() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("old")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.set_orders(vec![dummy_order_info("new")]).await;
+        book.clear().await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert!(
+            matches!(
+                seen.as_slice(),
+                [OrderBookDelta::Reset { .. }, OrderBookDelta::Reset { .. }]
+            ),
+            "got {seen:?}"
+        );
+    }
+
+    /// An order re-announced unchanged is the common case on the wire: it
+    /// must not cost a revision, a delta, or later a bridge message.
+    #[tokio::test]
+    async fn an_upsert_that_changes_nothing_emits_nothing() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("same")).await;
+        let (before, _) = book.snapshot_with_revision().await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.upsert_order_deferred(dummy_order_info("same")).await;
+
+        // Assert
+        assert!(drain(&mut deltas).is_empty());
+        assert_eq!(book.snapshot_with_revision().await.0, before);
+    }
+
+    /// The resync contract. A subscriber that lagged reads a snapshot and
+    /// resumes — and a mutation can land between the two. Its delta is either
+    /// already inside the snapshot (revision ≤ the snapshot's: skip it, or a
+    /// removal would be replayed over a re-insert) or newer (apply it). With
+    /// the revision as the boundary the mirror ends equal to the book.
+    #[tokio::test]
+    async fn a_resync_interleaved_with_a_mutation_converges_on_the_book() {
+        // Arrange: the subscriber was listening, then fell behind.
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+        book.upsert_order(dummy_order_info("a")).await;
+        book.upsert_order(dummy_order_info("b")).await;
+
+        // Act: it resyncs from a snapshot, while mutations keep landing — one
+        // before the snapshot read, two after it.
+        book.remove_order("a").await;
+        let (revision, snapshot) = book.snapshot_with_revision().await;
+        book.upsert_order(dummy_order_info("a")).await;
+        book.update_order_status("b", OrderStatus::Active).await;
+
+        let mut mirror: HashMap<String, OrderInfo> =
+            snapshot.into_iter().map(|o| (o.id.clone(), o)).collect();
+        for delta in drain(&mut deltas) {
+            if delta.revision() <= revision {
+                continue;
+            }
+            match delta {
+                OrderBookDelta::Upserted { order, .. } => {
+                    mirror.insert(order.id.clone(), order);
+                }
+                OrderBookDelta::Removed { order_id, .. } => {
+                    mirror.remove(&order_id);
+                }
+                OrderBookDelta::Reset { .. } => unreachable!("no reset in this run"),
+            }
+        }
+
+        // Assert
+        let (_, truth) = book.snapshot_with_revision().await;
+        let mut mirrored: Vec<(String, OrderStatus)> =
+            mirror.into_values().map(|o| (o.id, o.status)).collect();
+        let mut expected: Vec<(String, OrderStatus)> =
+            truth.into_iter().map(|o| (o.id, o.status)).collect();
+        mirrored.sort_by(|x, y| x.0.cmp(&y.0));
+        expected.sort_by(|x, y| x.0.cmp(&y.0));
+        assert_eq!(mirrored, expected);
+        assert_eq!(mirrored.len(), 2, "both orders are in the book at the end");
+    }
+
+    /// The snapshot stream is what Dart still reads: it must keep carrying
+    /// the whole book, built from the map.
+    #[tokio::test]
+    async fn the_snapshot_stream_still_carries_the_whole_book() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut snapshots = book.subscribe();
+
+        // Act
+        book.upsert_order(dummy_order_info("s-1")).await;
+        book.upsert_order(dummy_order_info("s-2")).await;
+
+        // Assert
+        let _first = snapshots.recv().await.unwrap();
+        let second = snapshots.recv().await.unwrap();
+        let mut ids: Vec<&str> = second.iter().map(|o| o.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["s-1", "s-2"]);
     }
 
     /// Orders of ours stay: the trade detail screen looks them up in the book

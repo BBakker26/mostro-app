@@ -215,6 +215,16 @@ bridged by flutter_rust_bridge.
   the Rust core, the database or protocol state (a test reads its imports); it sets
   `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on
   resume, once, in the foreground core.
+- **Trade screens are pushed, not polled — so every trade write must ring.** Rust's
+  `api::trade_touch::touch_trade(order_id)` is the doorbell behind `tradeStatusProvider` and the
+  invoice providers (`trade_state_provider.dart`): it says "read this order again", carries no
+  status and drives no notice — that is `TradeUpdate`'s job, and the two are separate on purpose
+  (a Kind 38383 update changes what a screen shows without being a lifecycle step). The
+  providers re-read on a touch and otherwise only every 30 s, so a new code path that writes a
+  trade row or sets a book entry's status **without** going through `sync_trade_fields_if_changed`,
+  `wipe_trade_row`, the save helper, `update_order_status` or `emit_trade_update*` must call
+  `touch_trade` itself, or the screen lags by up to the safety interval. Never take a status
+  from a pushed payload: a history replay re-emits old transitions (#474) — read it back.
 - **Dispute chat must wake, and does not yet.** Same envelope and same mechanism as peer chat:
   it is `p`-tagged to `pub(K_conv)`, which the push server cannot match, so the **sender** calls
   `/api/notify`. For a solver's message the sender is mostrix, which does not yet

@@ -4,6 +4,37 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-09-18
+
+### ✨ Features
+
+- **settings:** cache node kind 38385 info and fix the double radio on switch ([#508](https://github.com/MostroP2P/app/pull/508)) by @grunch
+- **nodes:** add MostroEuropa to the trusted node registry ([#509](https://github.com/MostroP2P/app/pull/509)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **invoice:** one add-invoice screen and one submission after a bond locks ([#514](https://github.com/MostroP2P/app/pull/514)) by @grunch
+- **node-selector:** list every accepted currency on a node card ([#512](https://github.com/MostroP2P/app/pull/512)) by @grunch
+- **nav:** centre the bottom nav bar's icons and labels vertically ([#511](https://github.com/MostroP2P/app/pull/511)) by @grunch
+- **orders:** tell both sides about a cooperative cancel request ([#505](https://github.com/MostroP2P/app/pull/505)) by @grunch
+- **invoice:** follow the trade status off the add-invoice screen ([#499](https://github.com/MostroP2P/app/pull/499)) by @grunch
+
+### ⚡ Performance
+
+- **startup:** the order book no longer waits for the capability fetch ([#507](https://github.com/MostroP2P/app/pull/507)) by @grunch
+- **startup:** PR 3.7 — measured cold start: 2.3 s → 0.5–0.8 s to runApp, first Online 2.5 s → 1.0 s ([#494](https://github.com/MostroP2P/app/pull/494)) by @grunch
+- **ui:** PR 3.3 — the order book follows deltas; one mapping per changed order ([#498](https://github.com/MostroP2P/app/pull/498)) by @grunch
+
+### 👷 Build & CI
+
+- **release:** attach the Android App Bundle for the Play Console ([#506](https://github.com/MostroP2P/app/pull/506)) by @grunch
+- **release:** check the keystore password and alias before building ([#503](https://github.com/MostroP2P/app/pull/503)) by @grunch
+- **release:** attach Linux, Windows, macOS and iOS builds to a release ([#501](https://github.com/MostroP2P/app/pull/501)) by @grunch
+
+### 🧹 Chores
+
+- ignore keystores and key.properties from the repo root ([#502](https://github.com/MostroP2P/app/pull/502)) by @grunch
+
 ## [2.0.0] - 2026-09-18
 
 ### ✨ Features

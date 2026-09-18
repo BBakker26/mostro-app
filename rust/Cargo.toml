@@ -74,6 +74,11 @@ bip39 = { version = "2", features = ["all-languages", "rand"] }
 # dependency, `bitcoin`, already comes in through mostro-core.
 lightning-invoice = "0.34"
 
+# `Stream` for reading a relay query as it arrives (nostr/first_answer.rs).
+# Already in the tree through nostr-sdk, whose prelude re-exports only
+# `StreamExt` — not the trait a generic bound needs.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
 # Native-only: SQLite + tokio do NOT compile to WASM
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

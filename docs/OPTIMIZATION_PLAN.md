@@ -333,6 +333,38 @@ Each PR stands alone; none requires Phase 3's redesign.
   messages. Silently dropping a counterparty's messages from a screen someone may need as a
   record of a trade is a worse failure than the memory it saves. Do it as real pagination.
 
+### PR 2.11 — The order book does not wait for the capability fetch `perf(startup)`
+- **Evidence (field log, release build, Linux):** all four relays `Connected` at `13:49:29`,
+  `subscribing to Kind 38383` at `13:49:37` — eight seconds in which no order was asked for.
+  The `Online` handler (`rust/src/api/nostr.rs`, `on_pool_online`) awaited
+  `fetch_and_set_node_capabilities()` and the outbox flush **before** `subscribe_orders()`,
+  and that fetch was a `fetch_events(..).timeout(10 s)`, which returns only once **every**
+  relay has sent EOSE. Timed per relay with the same Kind 38385 filter: three answered in
+  ~0.3 s after the socket opened, `relay.mostro.network` in **10.0 s** (erratic — 0.2 s and
+  1.4 s on later probes, one REQ unanswered for 13 s; no AUTH, no NOTICE). The book filter on
+  the fast relays reaches EOSE in ~0.3 s too, so the book was never the slow part.
+- **Fix:** `subscribe_orders()` runs first — it only spawns, and the public book needs nothing
+  the fetch returns; capabilities then flush keep their order (the flush wraps with the
+  node's PoW). The Kind 38385 read goes through `nostr::first_answer::newest_answer` over
+  `stream_events`: the first copy, a 750 ms grace for a newer one, newest `created_at` wins;
+  dropping the stream closes the REQ on the relays still silent. The About screen's fetch is
+  the same function and gains the same bound.
+- **What the new order costs:** the node's kind-14 history can now replay before the
+  capabilities are known. Every capability reader is on a send path except one —
+  `apply_payout_request` freezes a payout claim's deadline from `payout_claim_window_days` at
+  first receipt — so a *fresh* claim waits (bounded, 10 s) while a fetch is pending:
+  `bond_policy::fetch_pending()` is a counted RAII guard (the `Online` sequence can overlap
+  itself on a flapping pool) taken before the subscriptions open. The node switch opened its
+  subscriptions ahead of the re-fetch all along and had the same race; it holds the guard too.
+- **Not done:** `fetch_and_set_node_capabilities` still has no retry (the gap PR 2.5 notes).
+  And the relay's 10 s answers are a server-side matter this does not explain.
+- **Verify:** `newest_answer` under paused time (returns at the grace bound with a source
+  still silent; a newer copy inside the window wins; ends at once when every source answered);
+  the pending-fetch wait (no wait with none pending, overlapping fetches waited to the last,
+  given up on at the bound); source-order guards on `on_pool_online`. Field check: the gap
+  between `Connecting→Connected` and `subscribing to Kind 38383` drops from seconds to the
+  100 ms coalescing window.
+
 ---
 
 ## Phase 3 — Structural: delta pipeline & push-based state (the big lever)
@@ -559,6 +591,11 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   intentionally revisits the "order book is sourced only from daemon events" rule — the relay
   stays the source of truth; disk is a cache. Needs a short design proposal before code
   (repo working agreement).
+- **Re-measure first (after PR 2.11).** The "10 s timeout path" above conflated two things:
+  the book itself reaches EOSE in ~0.3 s on a healthy relay, and the seconds a cold start lost
+  were the capability fetch queued in front of it. With that gone, what a disk cache still
+  buys is the connect time (~1–1.5 s) and the offline case — weigh that against the
+  stale-order risk before building it.
 - **The cache must be keyed by node identity.** `OrderBook::clear()` exists precisely because
   a node switch has to drop the previous node's orders. Rendering a persisted cache before
   reconciliation completes would put them straight back — mixing two nodes' markets in one

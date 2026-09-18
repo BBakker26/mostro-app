@@ -4129,8 +4129,14 @@ async fn apply_payout_request(request: crate::mostro::bond_claims::PayoutRequest
         .await
         .ok()
         .flatten();
-    let window_days = crate::mostro::bond_policy::get_for(&request.node_pubkey)
-        .and_then(|p| p.payout_claim_window_days);
+    // Only a claim seen for the first time freezes a deadline, and only then
+    // is the policy worth waiting for: this can run from the history replay
+    // of a cold start, before the capability fetch has answered.
+    let window_days = match stored {
+        Some(_) => crate::mostro::bond_policy::get_for(&request.node_pubkey),
+        None => crate::mostro::bond_policy::get_for_once_settled(&request.node_pubkey).await,
+    }
+    .and_then(|p| p.payout_claim_window_days);
     let now = crate::rt::unix_now();
     let (claim, notice) = upsert_claim(stored.as_ref(), &request, window_days, now);
     let Some(claim) = claim else {
@@ -6855,6 +6861,11 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
     };
 
     seed_global_dm_coverage().await;
+
+    // Held until the capability re-fetch at the end: the new node's history
+    // replays through the subscriptions opened next, and a payout claim in it
+    // prices its deadline from that node's policy (§6.4).
+    let _capabilities_pending = crate::mostro::bond_policy::fetch_pending();
 
     if let Err(e) = subscribe_node_filters(&client, mostro_pubkey).await {
         log::error!("[orders] node switch: re-subscribe failed: {e}");

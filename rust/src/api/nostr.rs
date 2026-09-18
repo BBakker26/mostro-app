@@ -112,35 +112,59 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     // not (nostr-sdk 0.45): re-issue what each relay misses as it connects.
     crate::nostr::live_subs::spawn_repair(POOL.get().unwrap());
 
-    // Spawn a background task that flushes the outbox whenever the relay pool
-    // transitions to Online.  The task exits when the broadcast channel closes.
-    let pool_ref = POOL.get().unwrap().clone();
-    crate::rt::spawn(async move {
-        let mut rx = pool_ref.subscribe_connection_state();
-        log::info!("[nostr] connection state watcher started");
-        loop {
-            match rx.recv().await {
-                Ok(ConnectionState::Online) => {
-                    // Not run inline. The sequence takes seconds (a 10 s
-                    // capability fetch among them), and transitions arriving
-                    // meanwhile used to queue here and each re-run all of it
-                    // back to back — a flapping pool multiplied its own
-                    // storm. Coalesced, a burst costs one run, plus at most
-                    // one more for whatever arrived while it was in flight.
-                    ONLINE_SYNC.request(ONLINE_SETTLE, on_pool_online);
-                }
-                Ok(state) => {
-                    log::info!("[nostr] connection state changed: {state:?}");
-                }
-                Err(_) => {
-                    log::warn!("[nostr] connection state channel closed");
-                    break;
-                }
-            }
-        }
-    });
+    // Runs the Online sequence whenever the relay pool transitions to Online.
+    // Subscribed *before* the state is read, and both before the task is
+    // spawned: `RelayPool::new` already started the status monitor, which
+    // polls every 100 ms at start-up, and a broadcast channel replays nothing.
+    // An `Online` sent before this line shows in the state read next; one
+    // sent after it lands in `rx`. Subscribing inside the task left a window
+    // (the restore and seed above, then the scheduler) in which the first
+    // `Online` had no receiver — and with the state unchanged afterwards the
+    // monitor never sends another, so the book, the capabilities and the
+    // outbox waited for a relay to drop and come back.
+    let pool_ref = POOL.get().unwrap();
+    let rx = pool_ref.subscribe_connection_state();
+    let current = pool_ref.connection_state().await;
+    crate::rt::spawn(watch_connection_state(rx, current, || {
+        // Not run inline. The sequence takes seconds (a 10 s capability fetch
+        // among them), and transitions arriving meanwhile used to queue here
+        // and each re-run all of it back to back — a flapping pool multiplied
+        // its own storm. Coalesced, a burst costs one run, plus at most one
+        // more for whatever arrived while it was in flight.
+        ONLINE_SYNC.request(ONLINE_SETTLE, on_pool_online);
+    }));
 
     Ok(())
+}
+
+/// Call `on_online` for every `Online` on `rx` — and once up front when the
+/// pool was `current`ly online already, which is the transition `rx` was
+/// subscribed too late to see. When both report the same `Online`, the caller
+/// coalesces them. Ends when the channel closes.
+async fn watch_connection_state(
+    mut rx: tokio::sync::broadcast::Receiver<ConnectionState>,
+    current: ConnectionState,
+    on_online: impl Fn() + crate::rt::MaybeSend + 'static,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    log::info!("[nostr] connection state watcher started");
+    if current == ConnectionState::Online {
+        log::info!("[nostr] pool was online before the watcher subscribed");
+        on_online();
+    }
+    loop {
+        match rx.recv().await {
+            Ok(ConnectionState::Online) => on_online(),
+            Ok(state) => log::info!("[nostr] connection state changed: {state:?}"),
+            // Skipped states are gone; the next one still arrives.
+            Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => {
+                log::warn!("[nostr] connection state channel closed");
+                break;
+            }
+        }
+    }
 }
 
 /// The coalescing window of the Online sequence. Short on purpose: the first
@@ -927,6 +951,62 @@ mod tests {
     use nostr_sdk::prelude::*;
 
     const RATES: &str = r#"{"BTC":{"USD":50000.0}}"#;
+
+    /// Runs the watcher until the channel closes; returns how often it rang.
+    async fn online_calls(current: ConnectionState, sent: &[ConnectionState]) -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (tx, rx) = tokio::sync::broadcast::channel(16);
+        for state in sent {
+            tx.send(state.clone()).unwrap();
+        }
+        drop(tx);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sink = calls.clone();
+        watch_connection_state(rx, current, move || {
+            sink.fetch_add(1, Ordering::SeqCst);
+        })
+        .await;
+        calls.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn a_pool_already_online_when_the_watcher_starts_still_runs_the_sequence() {
+        // Arrange: the monitor reported `Online` before anyone subscribed, and
+        // with the state unchanged it never reports it again.
+        let current = ConnectionState::Online;
+
+        // Act
+        let calls = online_calls(current, &[]).await;
+
+        // Assert
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn an_online_transition_after_the_watcher_starts_runs_the_sequence() {
+        // Arrange
+        let current = ConnectionState::Reconnecting;
+
+        // Act
+        let calls = online_calls(current, &[ConnectionState::Online]).await;
+
+        // Assert
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn states_other_than_online_run_nothing() {
+        // Arrange
+        let current = ConnectionState::Reconnecting;
+        let sent = [ConnectionState::Offline, ConnectionState::Reconnecting];
+
+        // Act
+        let calls = online_calls(current, &sent).await;
+
+        // Assert
+        assert_eq!(calls, 0);
+    }
 
     fn rates_event(keys: &Keys, content: &str, created_at: u64) -> Event {
         EventBuilder::new(Kind::from(rates::RATES_KIND), content)

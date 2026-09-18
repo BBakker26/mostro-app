@@ -2750,6 +2750,12 @@ abstract class AppLocalizations {
   /// **'{time} left'**
   String timeLeftLabel(String time);
 
+  /// Add-invoice screen: the daemon answered NotAllowedByStatus — the order moved on (usually an earlier submission was accepted) and the app is re-reading its state
+  ///
+  /// In en, this message translates to:
+  /// **'This order is no longer waiting for an invoice. Updating its status…'**
+  String get invoiceNoLongerExpected;
+
   /// Snackbar when submitting an LN address before the sats amount is known
   ///
   /// In en, this message translates to:

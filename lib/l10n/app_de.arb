@@ -442,6 +442,7 @@
   "sellingSatsAmount": "Verkaufe {sats} Sats",
   "viewOrderLink": "Bestellung ansehen",
   "timeLeftLabel": "{time} übrig",
+  "invoiceNoLongerExpected": "Diese Order wartet nicht mehr auf eine Rechnung. Status wird aktualisiert…",
   "waitingForTradeAmount": "Warte auf den Trade-Betrag — bitte versuche es gleich noch einmal.",
   "fetchingTradeAmount": "Trade-Betrag wird abgerufen…",
   "enterInvoiceManually": "Rechnung manuell eingeben",

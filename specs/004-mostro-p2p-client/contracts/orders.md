@@ -248,10 +248,18 @@ their own amount.
 **Side effects**: Sends `AddInvoice` (with the correlation nonce) and waits
 for the daemon's acknowledgement — its reply (`waiting-seller-to-pay`,
 `buyer-invoice-accepted`, …) is also a status update and is processed
-normally. The UI advances only on acknowledgement.
+normally. The UI advances on acknowledgement **or** when the trade's status
+moves past the invoice step (`active`, `fiat-sent`, `dispute`, `success`),
+whichever comes first: the acknowledgement is awaited for 10 s only, and the
+daemon's reply queue can outlast that, so an accepted invoice may read as
+`NoDaemonResponse`. The invoice screen therefore follows the trade status
+rather than trusting the call's outcome alone.
 
 **Errors**: `InvalidInvoice` (daemon CantDo), `NoDaemonResponse` (stay on
-the invoice step), `TradeNotFound`.
+the invoice step — the submission may still have been accepted),
+`NotAllowedByStatus` (daemon CantDo: the order no longer waits for an invoice,
+i.e. client and daemon diverged; the screen runs `resync()` to recover the
+missed message and leaves once the status catches up), `TradeNotFound`.
 
 ---
 

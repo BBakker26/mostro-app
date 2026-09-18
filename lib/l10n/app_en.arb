@@ -1935,6 +1935,10 @@
       }
     }
   },
+  "invoiceNoLongerExpected": "This order is no longer waiting for an invoice. Updating its status…",
+  "@invoiceNoLongerExpected": {
+    "description": "Add-invoice screen: the daemon answered NotAllowedByStatus — the order moved on (usually an earlier submission was accepted) and the app is re-reading its state"
+  },
   "waitingForTradeAmount": "Waiting for trade amount — please try again shortly.",
   "@waitingForTradeAmount": {
     "description": "Snackbar when submitting an LN address before the sats amount is known"

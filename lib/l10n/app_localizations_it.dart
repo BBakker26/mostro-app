@@ -1503,6 +1503,10 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
+  String get invoiceNoLongerExpected =>
+      'Questo ordine non attende più una fattura. Aggiornamento dello stato…';
+
+  @override
   String get waitingForTradeAmount =>
       'In attesa dell\'importo dell\'operazione — riprova tra poco.';
 

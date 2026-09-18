@@ -1,5 +1,14 @@
 import 'package:mostro/l10n/app_localizations.dart';
 
+/// Whether [error] is the daemon's `NotAllowedByStatus`: the order is not in
+/// the state the request assumed. The Rust core still words this CantDo as
+/// prose; the marker is matched either way.
+bool isStatusRejection(Object error) {
+  final raw = error.toString();
+  return raw.contains('NotAllowedByStatus') ||
+      raw.contains('not allowed in the current order status');
+}
+
 /// Central mapping from the stable error markers the Rust core emits to
 /// localized, actionable messages.
 ///

@@ -316,6 +316,29 @@ void main() {
       });
     });
 
+    testWidgets('a card lists every accepted currency, never a +N', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(_now), () async {
+        const many = ['VES', 'BRL', 'ARS', 'EUR', 'COP', 'USD', 'CLP', 'PEN'];
+        await _pump(
+          tester,
+          nodes: [_fixtureNodes.first],
+          stats: {
+            defaultMostroPubkey: _stats(
+              defaultMostroPubkey,
+              infoSeenAt: _now,
+              accepted: many,
+            ),
+          },
+        );
+        for (final code in many) {
+          expect(find.text(code), findsOneWidget, reason: code);
+        }
+        expect(find.textContaining(RegExp(r'^\+\d+$')), findsNothing);
+      });
+    });
+
     testWidgets('shows skeletons while stats load, never a spinner', (
       tester,
     ) async {

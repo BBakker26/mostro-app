@@ -1519,6 +1519,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This order is no longer waiting for an invoice. Updating its status…';
 
   @override
+  String get invoiceSubmitInFlight =>
+      'An invoice for this order is already being sent. Wait for the reply.';
+
+  @override
   String get waitingForTradeAmount =>
       'Waiting for trade amount — please try again shortly.';
 

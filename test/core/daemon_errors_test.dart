@@ -128,6 +128,17 @@ void main() {
     );
   });
 
+  test('maps a refused duplicate invoice submission', () {
+    expect(
+      localizedDaemonError(
+        l10n,
+        'AnyhowException(InvoiceSubmitInFlight)',
+        fallback: 'x',
+      ),
+      l10n.invoiceSubmitInFlight,
+    );
+  });
+
   test('maps timeout and storage markers, and falls back otherwise', () {
     expect(
       localizedDaemonError(l10n, 'NoDaemonResponse', fallback: 'x'),

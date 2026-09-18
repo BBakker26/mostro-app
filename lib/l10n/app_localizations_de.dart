@@ -1543,6 +1543,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Diese Order wartet nicht mehr auf eine Rechnung. Status wird aktualisiert…';
 
   @override
+  String get invoiceSubmitInFlight =>
+      'Für diese Order wird bereits eine Rechnung gesendet. Warte auf die Antwort.';
+
+  @override
   String get waitingForTradeAmount =>
       'Warte auf den Trade-Betrag — bitte versuche es gleich noch einmal.';
 

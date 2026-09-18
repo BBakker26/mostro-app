@@ -451,6 +451,7 @@
   "viewOrderLink": "Bestellung ansehen",
   "timeLeftLabel": "{time} übrig",
   "invoiceNoLongerExpected": "Diese Order wartet nicht mehr auf eine Rechnung. Status wird aktualisiert…",
+  "invoiceSubmitInFlight": "Für diese Order wird bereits eine Rechnung gesendet. Warte auf die Antwort.",
   "waitingForTradeAmount": "Warte auf den Trade-Betrag — bitte versuche es gleich noch einmal.",
   "fetchingTradeAmount": "Trade-Betrag wird abgerufen…",
   "enterInvoiceManually": "Rechnung manuell eingeben",

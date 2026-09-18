@@ -49,6 +49,11 @@ String localizedDaemonError(
       raw.contains('invalid Lightning invoice')) {
     return l10n.invoiceRejected;
   }
+  // A second add-invoice while an earlier one still waits for the daemon:
+  // refused before it was sent, so the first keeps its reply.
+  if (raw.contains('InvoiceSubmitInFlight')) {
+    return l10n.invoiceSubmitInFlight;
+  }
   // Payout claim submission (docs/ANTI_ABUSE_BOND.md §6.4).
   if (raw.contains('InvoiceAmountMismatch')) {
     return l10n.bondClaimErrorAmount;

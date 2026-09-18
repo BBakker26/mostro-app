@@ -278,6 +278,46 @@ pub(crate) fn remove_pending_request(trade_pubkey_hex: &str, request_id: u64) {
     }
 }
 
+/// Register a buyer's add-invoice on `trade_pubkey_hex` and hand back the
+/// channel its reply arrives on — or `None` while an earlier add-invoice on
+/// this key still has a caller waiting.
+///
+/// The key is the take's, so every submission for one trade lands on the same
+/// entry. Two in flight (two copies of the invoice screen, each auto-submitting
+/// its own NWC invoice) cannot both be tracked: overwriting dropped the first
+/// caller's waiter, which surfaced as an instant `NoDaemonResponse`, and the
+/// daemon — which accepts one invoice — answered the other with
+/// `NotAllowedByStatus`. Refusing here keeps the second off the wire.
+///
+/// Only a live waiter blocks. A record detached by its timeout, one whose
+/// caller went away, or one of another kind (a bond take's) is replaced as
+/// before, so a retry is never locked out.
+pub(crate) fn register_add_invoice_request(
+    trade_pubkey_hex: &str,
+    request_id: u64,
+    trade_index: u32,
+) -> Option<tokio::sync::oneshot::Receiver<Wake>> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<Wake>();
+    let mut map = pending_requests().lock().ok()?;
+    let in_flight = map.get(trade_pubkey_hex).is_some_and(|p| {
+        matches!(p.kind, PendingRequestKind::AddInvoice)
+            && p.tx.as_ref().is_some_and(|waiter| !waiter.is_closed())
+    });
+    if in_flight {
+        return None;
+    }
+    map.insert(
+        trade_pubkey_hex.to_string(),
+        PendingRequest {
+            request_id,
+            trade_index,
+            kind: PendingRequestKind::AddInvoice,
+            tx: Some(tx),
+        },
+    );
+    Some(rx)
+}
+
 /// Drop the pending request remaining for `trade_pubkey_hex` — but only a
 /// *detached* one (`tx: None`: its 10 s timeout ran and no genuine late
 /// reply ever consumed it). Only for the end of the per-trade
@@ -923,6 +963,58 @@ mod tests {
             .is_none());
         remove_pending_request(key, 62);
         assert!(!pending_requests().lock().unwrap().contains_key(key));
+    }
+
+    /// Two add-invoice submissions on one trade key (two copies of the screen,
+    /// each auto-submitting its own NWC invoice): the second must be refused
+    /// before it is published. Overwriting the record dropped the first
+    /// caller's waiter — an instant `NoDaemonResponse` — and sent the daemon a
+    /// second invoice it answered with `NotAllowedByStatus`.
+    #[tokio::test]
+    async fn add_invoice_is_refused_while_another_is_waiting() {
+        let key = "test-add-invoice-in-flight-pubkey";
+
+        let mut rx_a = register_add_invoice_request(key, 81, 7).expect("first registers");
+        assert!(register_add_invoice_request(key, 82, 7).is_none());
+
+        // The first attempt is untouched: same nonce, waiter still attached.
+        assert!(matches!(
+            rx_a.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(pending_requests().lock().unwrap().get(key).unwrap().request_id, 81);
+
+        pending_requests().lock().unwrap().remove(key);
+    }
+
+    /// Only a caller that is still waiting blocks a resubmission: after the
+    /// 10 s timeout, or once the waiting future was dropped, a retry takes
+    /// the key over as it always did.
+    #[tokio::test]
+    async fn add_invoice_retry_replaces_an_attempt_nobody_waits_on() {
+        let key = "test-add-invoice-retry-pubkey";
+
+        let _rx_a = register_add_invoice_request(key, 83, 7).expect("first registers");
+        detach_request_waiter(key, 83);
+        let rx_b = register_add_invoice_request(key, 84, 7).expect("retry after timeout");
+
+        drop(rx_b);
+        assert!(register_add_invoice_request(key, 85, 7).is_some());
+        assert_eq!(pending_requests().lock().unwrap().get(key).unwrap().request_id, 85);
+
+        pending_requests().lock().unwrap().remove(key);
+    }
+
+    /// The take's own record can still hold the key (a bond take is answered
+    /// with `pay-bond-invoice` first): it never blocks the invoice.
+    #[tokio::test]
+    async fn add_invoice_replaces_a_record_of_another_kind() {
+        let key = "test-add-invoice-over-take-pubkey";
+        let _rx_t = insert_pending_take(key, 86);
+
+        assert!(register_add_invoice_request(key, 87, 7).is_some());
+
+        pending_requests().lock().unwrap().remove(key);
     }
 
     /// Action-only progression replies must still carry the status the

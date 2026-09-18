@@ -451,6 +451,7 @@
   "viewOrderLink": "Vedi ordine",
   "timeLeftLabel": "{time} rimasti",
   "invoiceNoLongerExpected": "Questo ordine non attende più una fattura. Aggiornamento dello stato…",
+  "invoiceSubmitInFlight": "Una fattura per questo ordine è già in fase di invio. Attendi la risposta.",
   "waitingForTradeAmount": "In attesa dell'importo dell'operazione — riprova tra poco.",
   "fetchingTradeAmount": "Recupero dell'importo dell'operazione…",
   "enterInvoiceManually": "Inserisci la fattura manualmente",

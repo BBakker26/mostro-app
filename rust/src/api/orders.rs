@@ -15,9 +15,9 @@ use crate::mostro::actions;
 use crate::mostro::pending::{
     claim_create_bond, classify_take_reply, detach_request_waiter, may_reconcile_stored_id,
     pending_local_uuid_for, pending_requests, purge_detached_pending_request,
-    remove_pending_request, take_matching_add_invoice, take_matching_dispute,
-    take_matching_request, take_matching_restore, take_matching_take, DaemonReply, DisputeMatch,
-    PendingRequest, PendingRequestKind, Wake,
+    register_add_invoice_request, remove_pending_request, take_matching_add_invoice,
+    take_matching_dispute, take_matching_request, take_matching_restore, take_matching_take,
+    DaemonReply, DisputeMatch, PendingRequest, PendingRequestKind, Wake,
 };
 use crate::mostro::status::{
     add_invoice_sync, cancellation_wipes_history, is_hard_terminal, map_core_status,
@@ -1599,19 +1599,22 @@ pub async fn send_invoice(
     // the bookkeeping. The trade key already has an active subscription from
     // the take (and the global feed covers cold starts), so no new
     // subscription is needed here.
+    //
+    // An earlier submission still waiting for its reply owns the key: this
+    // one is refused before it reaches the wire (see
+    // `register_add_invoice_request`).
     let trade_pk_hex = sender_keys.public_key().to_hex();
-    let (conf_tx, conf_rx) = tokio::sync::oneshot::channel::<Wake>();
-    if let Ok(mut map) = pending_requests().lock() {
-        map.insert(
-            trade_pk_hex.clone(),
-            PendingRequest {
-                request_id,
-                trade_index,
-                kind: PendingRequestKind::AddInvoice,
-                tx: Some(conf_tx),
-            },
+    let Some(conf_rx) = register_add_invoice_request(&trade_pk_hex, request_id, trade_index)
+    else {
+        crate::api::logging::blog_warn(
+            "orders",
+            format!(
+                "add_invoice: another submission is in flight for order={} — not sent",
+                crate::api::logging::short_id(&order_id),
+            ),
         );
-    }
+        return Err(anyhow::anyhow!("InvoiceSubmitInFlight"));
+    };
 
     if let Err(e) = publish_event_json(&event_json).await {
         remove_pending_request(&trade_pk_hex, request_id);
@@ -2838,9 +2841,11 @@ async fn dispatch_mostro_message(
     crate::api::logging::blog_info(
         "daemon-msg",
         format!(
-            "action={:?} order_id={:?} trade_index={:?} trade_pubkey={} age={}s payload={}",
+            "action={:?} order_id={:?} request_id={:?} trade_index={:?} trade_pubkey={} \
+             age={}s payload={}",
             kind.action,
             kind.id,
+            kind.request_id,
             kind.trade_index,
             &trade_pubkey_hex[..8],
             event_age_secs,

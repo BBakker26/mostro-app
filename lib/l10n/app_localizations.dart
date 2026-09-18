@@ -2804,6 +2804,12 @@ abstract class AppLocalizations {
   /// **'This order is no longer waiting for an invoice. Updating its status…'**
   String get invoiceNoLongerExpected;
 
+  /// Add-invoice screen: a second submission was refused because an earlier one for the same trade is still waiting for the daemon's reply (Rust marker InvoiceSubmitInFlight)
+  ///
+  /// In en, this message translates to:
+  /// **'An invoice for this order is already being sent. Wait for the reply.'**
+  String get invoiceSubmitInFlight;
+
   /// Snackbar when submitting an LN address before the sats amount is known
   ///
   /// In en, this message translates to:

@@ -1537,6 +1537,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'Questo ordine non attende più una fattura. Aggiornamento dello stato…';
 
   @override
+  String get invoiceSubmitInFlight =>
+      'Una fattura per questo ordine è già in fase di invio. Attendi la risposta.';
+
+  @override
   String get waitingForTradeAmount =>
       'In attesa dell\'importo dell\'operazione — riprova tra poco.';
 

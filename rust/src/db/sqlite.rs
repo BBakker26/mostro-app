@@ -787,6 +787,24 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn set_cooperative_cancel_state(
+        &self,
+        order_id: &str,
+        state: crate::api::types::CooperativeCancelState,
+    ) -> Result<()> {
+        // Bound via json(?) so the variant lands as a JSON string, the shape
+        // serde reads back into Option<CooperativeCancelState>.
+        let sql = "UPDATE trades SET data = json_set(\
+             data, '$.cooperative_cancel_state', json(?)) \
+             WHERE json_extract(data, '$.order.id') = ?";
+        sqlx::query(sql)
+            .bind(serde_json::to_string(&state)?)
+            .bind(order_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn update_trade_counterparty(
         &self,
         order_id: &str,
@@ -1295,6 +1313,80 @@ mod tests {
             .unwrap()
             .expect("order-b survives");
         assert_eq!(b.rated_at, None);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The cooperative-cancel request lives inside the JSON document: written
+    /// with `json_set`, read back through serde, scoped to one order.
+    #[tokio::test]
+    async fn set_cooperative_cancel_state_round_trips_and_stays_scoped() {
+        use crate::api::types::*;
+
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        let trade = |id: &str, order_id: &str| TradeInfo {
+            id: id.into(),
+            order: OrderInfo {
+                id: order_id.into(),
+                kind: OrderKind::Buy,
+                status: OrderStatus::Active,
+                amount_sats: Some(1),
+                fiat_amount: Some(1.0),
+                fiat_amount_min: None,
+                fiat_amount_max: None,
+                fiat_code: "CUP".into(),
+                payment_method: "bank".into(),
+                premium: 0.0,
+                creator_pubkey: "maker".into(),
+                created_at: 1,
+                expires_at: None,
+                is_mine: false,
+                rating: 0.0,
+                total_reviews: 0,
+                days_active: 0,
+            },
+            role: TradeRole::Buyer,
+            counterparty_pubkey: String::new(),
+            current_step: TradeStep::Buyer(BuyerStep::OrderTaken),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index: 1,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+            peer_rating: None,
+            peer_reviews: None,
+            peer_days: None,
+            rated_at: None,
+            bond: None,
+        };
+        storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
+        storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
+
+        storage
+            .set_cooperative_cancel_state("order-a", CooperativeCancelState::RequestedByPeer)
+            .await
+            .unwrap();
+
+        let a = storage
+            .get_trade_by_order_id("order-a")
+            .await
+            .unwrap()
+            .expect("order-a survives");
+        assert_eq!(
+            a.cooperative_cancel_state,
+            Some(CooperativeCancelState::RequestedByPeer)
+        );
+        let b = storage
+            .get_trade_by_order_id("order-b")
+            .await
+            .unwrap()
+            .expect("order-b survives");
+        assert_eq!(b.cooperative_cancel_state, None);
 
         drop(storage);
         let _ = std::fs::remove_file(&path);

@@ -1,6 +1,6 @@
 # appv2 Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-06-26
+Auto-generated from all feature plans. Last updated: 2026-09-17
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
@@ -167,16 +167,45 @@ bridged by flutter_rust_bridge.
 - Conventional commits (`feat/fix/docs/refactor/chore(scope)`), branches `type/kebab-desc`,
   everything via **PR to `main`** (gh CLI) + CodeRabbit review.
 
+## Releases (`docs/RELEASING.md`)
+- **A pushed tag `vX.Y.Z` is the release.** `.github/workflows/release.yml` builds two signed
+  APKs (`armeabi-v7a`, `arm64-v8a`), publishes the GitHub release and opens the `CHANGELOG.md`
+  PR. It refuses a tag that is not on `main` or whose version `pubspec.yaml` **and**
+  `rust/Cargo.toml` do not already carry — the About screen shows `CARGO_PKG_VERSION`. Bump
+  both with `./scripts/bump-version.sh X.Y.Z`, never one by hand.
+- **Desktop and iOS release builds live in `release-builds.yml`**, a reusable workflow that
+  `release.yml` and `release-dry-run.yml` both call — edit a build there, never in a caller.
+  The dry run is the only place a Windows, macOS or iOS build is compiled before a release
+  (path-filtered PRs; never a required check). `publish` requires only `android`: a failed
+  desktop build leaves its asset out and the notes say so. Asset names are a contract with
+  `tool/release/downloads.dart`. None of these builds is vendor-signed or notarized.
+- **The macOS app is sandboxed**: without `com.apple.security.network.client` in
+  `macos/Runner/*.entitlements` it builds, launches and reaches no relay.
+- **Release notes and `CHANGELOG.md` are generated** by `tool/release_notes.dart`, one entry
+  per merged PR grouped by the conventional-commit type of its **title**. Don't hand-edit
+  `CHANGELOG.md`; fix the PR title.
+- **Never publish an APK signed with the debug key**, which is what a release build falls back
+  to without `android/key.properties`: Android cannot update across a certificate change.
+- `ndk.abiFilters` and `--split-per-abi` are mutually exclusive in AGP — keep the guard in
+  `android/app/build.gradle.kts` (`test/ci/release_workflow_test.dart`).
+
 ## Domain gotchas (durable)
 - **Reputation/ratings come from Kind 38383 event tags, not a DB.** In-memory
   `RATING_STORE`/`DISPUTE_STORE` are correct by design — don't invent "persist to DB" tasks.
-  Chat history persists to the `messages` table since #246 (web still memory-only, #233).
+  Chat history persists to the `messages` table since #246 — on web to the IndexedDB `messages`
+  store (#233, closed).
 - **On native, relays persist in the `relays` table and grow from the node's kind 10002 list.**
   `initialize(None)` restores the persisted set (or seeds the defaults on a fresh install); the
   active node's NIP-65 list is subscribed live and applied **additively** (never disconnects).
   Removing a `MostroDiscovered` relay blacklists it, re-adding it lifts the blacklist. On **web**
-  the IndexedDB relay store is still a stub (#233), so none of that survives a reload: discovery
-  works in-session only and every persistence failure is logged and ignored.
+  the same rows live in the IndexedDB `relays` store (#233, closed). Relay persistence stays
+  best effort on both targets: a failed write is logged and ignored.
+- **A REQ issued while a relay is down never exists on it — reconnect or not** (nostr-sdk 0.45
+  drops a failed REQ from that relay's registry). So every long-lived subscription is opened,
+  replaced and closed through `nostr::live_subs` (`open` / `replace` / `close`), which records
+  the intent and re-issues it per relay as it connects; a bare `client.subscribe(..).with_id(..)`
+  or `client.unsubscribe(..)` fails a guard test. A resume that replaced `mostro-dm` offline
+  used to leave the session deaf to daemon messages. Rules and log signatures: `docs/RELAYS.md`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view
@@ -214,6 +243,16 @@ bridged by flutter_rust_bridge.
   the Rust core, the database or protocol state (a test reads its imports); it sets
   `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on
   resume, once, in the foreground core.
+- **Trade screens are pushed, not polled — so every trade write must ring.** Rust's
+  `api::trade_touch::touch_trade(order_id)` is the doorbell behind `tradeStatusProvider` and the
+  invoice providers (`trade_state_provider.dart`): it says "read this order again", carries no
+  status and drives no notice — that is `TradeUpdate`'s job, and the two are separate on purpose
+  (a Kind 38383 update changes what a screen shows without being a lifecycle step). The
+  providers re-read on a touch and otherwise only every 30 s, so a new code path that writes a
+  trade row or sets a book entry's status **without** going through `sync_trade_fields_if_changed`,
+  `wipe_trade_row`, the save helper, `update_order_status` or `emit_trade_update*` must call
+  `touch_trade` itself, or the screen lags by up to the safety interval. Never take a status
+  from a pushed payload: a history replay re-emits old transitions (#474) — read it back.
 - **Dispute chat must wake, and does not yet.** Same envelope and same mechanism as peer chat:
   it is `p`-tagged to `pub(K_conv)`, which the push server cannot match, so the **sender** calls
   `/api/notify`. For a solver's message the sender is mostrix, which does not yet

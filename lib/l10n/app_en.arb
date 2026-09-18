@@ -938,6 +938,38 @@
   "@cancelRequestFailed": {
     "description": "Snackbar shown when the cancel request fails"
   },
+  "tradeCardCancelRequestedByMeTitle": "Cancel requested",
+  "@tradeCardCancelRequestedByMeTitle": {
+    "description": "Notifications card title on the daemon confirming this user's cooperative-cancel request (protocol cancel.md); the trade stays open until the other party also cancels"
+  },
+  "tradeCardCancelRequestedByMeMessage": "You asked to cancel this trade. It stays open until the other party also cancels. If they do not respond, you can open a dispute.",
+  "@tradeCardCancelRequestedByMeMessage": {
+    "description": "Notifications card body on the daemon confirming this user's cooperative-cancel request"
+  },
+  "tradeCardCancelRequestedByPeerTitle": "The other party wants to cancel",
+  "@tradeCardCancelRequestedByPeerTitle": {
+    "description": "Notifications card title when the counterparty asked to cancel an active trade (protocol cancel.md); this user decides whether to accept"
+  },
+  "tradeCardCancelRequestedByPeerMessage": "They asked to cancel this trade. Accept to end it with no funds moved, or keep trading.",
+  "@tradeCardCancelRequestedByPeerMessage": {
+    "description": "Notifications card body when the counterparty asked to cancel an active trade"
+  },
+  "tradeCancelRequestedByMeNotice": "You asked to cancel this trade. It stays open until the other party also cancels. If they do not respond, you can open a dispute.",
+  "@tradeCancelRequestedByMeNotice": {
+    "description": "Notice on the trade screen while this user's cooperative-cancel request waits for the other party"
+  },
+  "tradeCancelRequestedByPeerNotice": "The other party asked to cancel this trade. Accept to end it with no funds moved, or keep trading.",
+  "@tradeCancelRequestedByPeerNotice": {
+    "description": "Notice on the trade screen while the counterparty's cooperative-cancel request waits for this user"
+  },
+  "acceptCancelButton": "Accept cancel",
+  "@acceptCancelButton": {
+    "description": "Label of the cancel button once the counterparty asked to cancel: this user's cancel accepts theirs and ends the trade"
+  },
+  "cancelTradeDialogContentAccept": "The other party asked to cancel. Cancelling now ends the trade for both of you and no funds are moved.",
+  "@cancelTradeDialogContentAccept": {
+    "description": "Body text for the cancel-trade confirmation dialog when the counterparty already asked to cancel: this cancel accepts theirs"
+  },
   "fiatSentFailed": "Failed to mark fiat as sent. Please try again.",
   "@fiatSentFailed": {
     "description": "Snackbar shown when the fiat-sent action fails"
@@ -1934,6 +1966,10 @@
         "type": "String"
       }
     }
+  },
+  "invoiceNoLongerExpected": "This order is no longer waiting for an invoice. Updating its status…",
+  "@invoiceNoLongerExpected": {
+    "description": "Add-invoice screen: the daemon answered NotAllowedByStatus — the order moved on (usually an earlier submission was accepted) and the app is re-reading its state"
   },
   "waitingForTradeAmount": "Waiting for trade amount — please try again shortly.",
   "@waitingForTradeAmount": {

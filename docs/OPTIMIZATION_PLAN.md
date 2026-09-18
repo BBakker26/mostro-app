@@ -341,6 +341,13 @@ Ordered; 3.2 depends on 3.1, 3.3 on 3.2. Requires PR 1.7 (lag visibility) first.
 PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towards M4:
 "Phase 3 done" means 3.1–3.7.
 
+> **Status (checked against `main` @ c4b89cf, 2026-09-17): not started, except 3.4 which is
+> partial.** The book is still `Arc<RwLock<Vec<OrderInfo>>>` broadcasting full snapshots (3.1),
+> there is no delta stream (3.2) and Dart still re-maps the whole book per emission with the
+> Rust `OrderFilters` path dead (3.3). `list_chat_rooms` does not exist (3.5),
+> `build_trade_key_map` still derives keys one by one and the `mostro-dm` REQ is re-issued per
+> new key (3.6), and `runApp` still waits for `nostr_api.initialize` (3.7).
+
 ### PR 3.1 — `feat(core): HashMap order book + delta broadcast type`
 - **Evidence:** `Vec` + full-snapshot `broadcast::Sender<Vec<OrderInfo>>`
   (`orders.rs:172-186`); O(n) `find` per upsert (`:211`); a delta model already exists for
@@ -358,6 +365,11 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   complete.
 - **Verify:** Rust unit tests for upsert/remove, and for a lag→resync that interleaves a
   mutation with the snapshot read.
+- **Done (#495).** `BookState { HashMap, revision }`; `OrderBookDelta` = `Upserted` /
+  `Removed` / `Reset`. A delta is sent while the write lock is held (revision order, one per
+  change, including the deferred and coalesced upserts — their batching only ever concerned
+  snapshots). An order re-announced unchanged costs no revision and no delta. Snapshots are
+  now ordered by id: a map has no order, and display order was always Dart's.
 
 ### PR 3.2 — `feat(bridge): delta stream over FRB`
 - **Fix:** new `on_order_deltas()` stream in `rust/src/api/orders.rs` emitting the delta enum;
@@ -365,6 +377,16 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   old snapshot stream one release for fallback, then remove.
 - **Verify:** `--check` codegen clean; Dart integration test: initial snapshot + applied
   deltas ≡ Rust book state.
+- **Done (#496).** `on_order_deltas()` + `get_order_book_snapshot()`; the consuming rule is
+  documented on `OrderDelta`. Two things the entry did not foresee: `Resync` also covers a
+  replaced or cleared book (node switch), and **`Loaded`** carries the pending feed's EOSE — an
+  empty book produces no delta, so without it a consumer never leaves its loading state
+  against a quiet node. `OrderBookSnapshot.loaded` carries the same fact for a consumer created
+  after that EOSE (Home re-created over an empty book), a gap the snapshot pipeline had too.
+  Revisions cross as `u32` (a plain Dart `int` everywhere). The
+  equivalence test lives in Rust (a `Mirror` doing what Dart does): `flutter test` has no Rust
+  library to run it against. The snapshot stream is still there, to be removed a release
+  after 3.3.
 
 ### PR 3.3 — `feat(ui): incremental order state in Dart`
 - **Evidence:** full re-map per emission (`home_order_providers.dart:144-163`); full
@@ -377,6 +399,18 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
   filter changes); precompute the payment-method token set once per `OrderItem`. Decide one
   sort order and delete the dead Rust filter path (or wire it up — decide in review).
 - **Verify:** provider unit tests; 3k-order fixture: one incoming event causes O(1) work.
+- **Done in part (#498).** `OrderBookFeed` keeps the Dart copy current from deltas: one
+  mapping per changed order (untouched orders keep their identity, so `orderByIdProvider`'s
+  `select` sees nothing move), and the list is handed over at most once per 50 ms — deltas
+  are per order, so emitting on each would rebuild the O(N²) cold start on the Dart side.
+  Payment-method tokens are computed once per order, and the selected set once per pass
+  instead of once per order.
+  **Not done, on purpose:** `filteredOrdersProvider` still filters and sorts the whole list
+  per emission. With the mapping and the per-order allocations gone that is a pointer walk
+  plus a sort, at most 20 times a second; an incrementally maintained sorted list is real
+  complexity (three sort orders, filters, ties) to buy back microseconds. Measure it in
+  PR 5.2 before building it. The dead Rust `OrderFilters` path is also untouched — whether
+  to delete it or wire it up is the PR 3.8 decision, and nothing here forces it.
 
 ### PR 3.4 — `feat(ui): replace per-trade polling with the push stream`
 - **Evidence:** bottom nav (every screen) keeps N infinite 2 s `getOrder()` polls alive
@@ -399,6 +433,14 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
      adding a reliable `TradeInfo` cache) leaves that screen with no invoice and no amount.
 - **Verify:** widget tests; idle bridge-call count on Trades drops to ~0; **plus** a test that
   a status change emitted while the provider is unmounted is still reflected when it remounts.
+- **Partial (#488, 2026-09-17).** `tradeStatusProvider` now wakes on a `TradeUpdate` for its
+  order and re-reads the status at once — the update is a doorbell, never the value, because a
+  history replay re-emits old transitions (#474). That removed the up-to-2 s gap between a
+  daemon message and the screen, which is what a user feels, **without** deleting anything:
+  the 2 s poll is still the safety net, precisely because blocker 1 stands. Still polling and
+  still to do: `tradeAmountProvider`, `tradeHoldInvoiceProvider`, `tradeInfoStreamProvider`
+  (the two `listTrades()` reads per second on the pay-invoice screen), and the status poll
+  itself once the stream can be trusted after lag and resume.
 
 ### PR 3.5 — `feat(core): chat room summaries in one call`
 - **Evidence:** rooms hydration does 2 bridge calls per trade in an unbounded `Future.wait`,
@@ -522,6 +564,11 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
 
 ## Phase 4 — Persistence & web parity (most work; depends on Phase 3 shape)
 
+> **Status (checked against `main` @ c4b89cf, 2026-09-17): only 4.2 has landed, and not
+> through this plan.** 4.1, 4.3 and 4.4 are not started: `save_order`/`list_orders` still have
+> no caller, `parse_order_event` still scans the tags once per field, and nothing evicts
+> `RATING_STORE`.
+
 ### PR 4.1 — `feat(db): persist the order book for instant cold start`
 - **Evidence:** the book is memory-only on all platforms; a dead `orders` table + unused
   `save_order`/`list_orders` already exist (`rust/src/db/sqlite.rs:146-190`, zero callers).
@@ -546,6 +593,11 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
 - **Fix:** cache the DB handle; implement the trades store; index messages by `trade_id`;
   batch writes. Split into 2–3 PRs if large.
 - **Verify:** web smoke test (`test/web/smoke/smoke.mjs`) + new wasm-target unit tests.
+- **Functionally done outside this plan (#233, closed 2026-09-09).** Every store is real now —
+  trades, trade keys, orders, relays, identity, outbox, bond claims — so a reload keeps state.
+  The two *performance* halves of this entry are still open: `list_messages` reads the whole
+  `messages` store and filters by `trade_id` in memory (no index), and the database is
+  re-opened per operation rather than cached.
 
 ### PR 4.3 — `perf(ingest): parse events in one tag pass`
 - **Evidence:** `parse_order_event` does a linear tag scan per field (~10 fields × ~15 tags,
@@ -564,6 +616,9 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
 ---
 
 ## Phase 5 — Scale validation & regression protection
+
+> **Status (checked against `main` @ c4b89cf, 2026-09-17): not started.** No `rust/benches/`,
+> no criterion dependency, no large-book widget test, no perf gate in `ci.yml`.
 
 ### PR 5.1 — `test(bench): Rust benchmark harness + large fixtures`
 - Criterion benches for: ingest of 5k-event batch, upsert into a 5k book, event parsing.
@@ -588,6 +643,7 @@ PR 3.8 is conditional (gated on the PR 5.2 measurements) and does not count towa
 | M2 | PR 2.1 + 2.2 | Cold start / refresh / node-switch stalls eliminated (O(N²) → O(N)) |
 | M3 | Phase 2 done | No resubscribe storms, no relay REQ leaks, chat/notifications snappy |
 | M4 | Phase 3 done | Per-event cost O(1); idle bridge traffic ~0; scales to 10k+ orders |
+| — | *reached so far* | *M1–M3. M4 is open: only a part of 3.4 has landed (#488).* |
 | M5 | Phase 4 done | Instant cold start; web on par with native |
 | M6 | Phase 5 done | Scale regressions blocked in CI |
 

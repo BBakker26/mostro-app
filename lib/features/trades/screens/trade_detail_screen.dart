@@ -32,6 +32,7 @@ import 'package:mostro/features/trades/widgets/trade_timeline.dart';
 import 'package:mostro/features/order/models/bond_rules.dart';
 import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
+import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/shared/widgets/counterpart_reputation_row.dart';
@@ -39,6 +40,7 @@ import 'package:mostro/shared/widgets/mostro_reactive_button.dart';
 import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
+import 'package:mostro/src/rust/api/types.dart' show CooperativeCancelState;
 
 export 'package:mostro/features/trades/models/trade_status.dart';
 
@@ -155,6 +157,15 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     context.go(AppRoute.home);
   }
 
+  /// The wire-level status a screen status stands for, where a cancel
+  /// request can be open: only `active` and `fiatSent` map back one-to-one;
+  /// everything else is a status no request is open in.
+  static OrderStatus _orderStatus(TradeStatus status) => switch (status) {
+    TradeStatus.active => OrderStatus.active,
+    TradeStatus.fiatSent => OrderStatus.fiatSent,
+    _ => OrderStatus.pending,
+  };
+
   /// Whether a cancel in [status] ends the trade outright. Mirrors Rust's
   /// `cancellation_wipes_history`: before `active` mostrod cancels at once —
   /// a take hands the order back to the book, a maker's order dies — and the
@@ -172,20 +183,34 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
 
   /// What a cancel in [status] does, as the confirmation dialog tells it.
   /// Before `active` mostrod cancels at once; from `active` on it is a
-  /// cooperative request; `inProgress` only says the order was taken, so it
-  /// may be either (#203).
+  /// cooperative request — or, when [peerAsked], the acceptance of the
+  /// counterparty's, which ends the trade; `inProgress` only says the order
+  /// was taken, so it may be either (#203).
   static String _cancelDialogContent(
     AppLocalizations l10n,
-    TradeStatus status,
-  ) {
+    TradeStatus status, {
+    bool peerAsked = false,
+  }) {
     if (_cancelEndsTrade(status)) {
       return l10n.cancelTradeDialogContentNotStarted;
+    }
+    if (peerAsked && CancelRequestNotice.requestIsOpen(_orderStatus(status))) {
+      return l10n.cancelTradeDialogContentAccept;
     }
     if (status == TradeStatus.inProgress) {
       return l10n.cancelTradeDialogContentMaybeStarted;
     }
     return l10n.cancelTradeDialogContent;
   }
+
+  /// Who, if anyone, asked to cancel this trade cooperatively — from the
+  /// trade row, which Rust keeps from the daemon's cancel-request messages
+  /// and from this side's own cancel.
+  CooperativeCancelState? _cancelRequest() =>
+      ref
+          .watch(tradeInfoProvider(widget.orderId))
+          .valueOrNull
+          ?.cooperativeCancelState;
 
   /// The trade's status now, from the live provider; [fallback] while it has
   /// no value yet. The status a callback was built with goes stale across an
@@ -223,7 +248,17 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
                         .valueOrNull;
                 final now =
                     live == null ? status : tradeStatusFromOrderStatus(live);
-                return Text(_cancelDialogContent(l10n, now));
+                // The counterparty's request can land while the dialog is
+                // open, and it changes no status: watch the row too.
+                final peerAsked =
+                    dialogRef
+                        .watch(tradeInfoProvider(widget.orderId))
+                        .valueOrNull
+                        ?.cooperativeCancelState ==
+                    CooperativeCancelState.requestedByPeer;
+                return Text(
+                  _cancelDialogContent(l10n, now, peerAsked: peerAsked),
+                );
               },
             ),
             actions: [
@@ -473,10 +508,12 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
         status == TradeStatus.loading &&
         ref.watch(tradeStatusProvider(widget.orderId)).hasError;
     final canRate = !ref.watch(privacyModeProvider);
+    final cancelRequest = _cancelRequest();
     final view = TradeView.of(
       status: status,
       isBuyer: isBuyer,
       canRate: canRate,
+      cancelRequested: cancelRequest == CooperativeCancelState.requestedByMe,
     );
     final order = ref.watch(orderByIdProvider(widget.orderId));
     // Counterpart reputation snapshot persisted from the daemon's follow-up
@@ -569,6 +606,9 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
           // The node slashed this user's own bond: a fact that outlives the
           // notification (docs/ANTI_ABUSE_BOND.md §8.3).
           BondSlashedNotice(orderId: widget.orderId),
+          // A pending cooperative-cancel request, this side's or the
+          // counterparty's (protocol `cancel.md`); nothing otherwise.
+          CancelRequestNotice(orderId: widget.orderId),
           if (view.showsReputation && peerRating != null) ...[
             const SizedBox(height: 12),
             CounterpartReputationRow(
@@ -594,7 +634,9 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
         ],
       ),
       bottomNavigationBar:
-          view.hasActions ? _actionBar(l10n, view, status) : null,
+          view.hasActions
+              ? _actionBar(l10n, view, status, cancelRequest)
+              : null,
     );
   }
 
@@ -890,7 +932,12 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
 
   // ── Action bar ───────────────────────────────────────────────────────────
 
-  Widget _actionBar(AppLocalizations l10n, TradeView view, TradeStatus status) {
+  Widget _actionBar(
+    AppLocalizations l10n,
+    TradeView view,
+    TradeStatus status,
+    CooperativeCancelState? cancelRequest,
+  ) {
     final primary = switch (view.primary) {
       TradePrimaryAction.none => null,
       TradePrimaryAction.addInvoice => TradePrimarySpec(
@@ -950,9 +997,16 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     final secondary = [
       for (final action in view.secondary)
         switch (action) {
+          // Once the counterparty asked to cancel, this side's cancel is
+          // the acceptance that ends the trade: say so on the button.
           TradeSecondaryAction.cancel => TradeSecondarySpec(
             label:
-                view.cancelIsFullWidth ? l10n.cancelTradeButton : l10n.cancel,
+                cancelRequest == CooperativeCancelState.requestedByPeer &&
+                        CancelRequestNotice.requestIsOpen(_orderStatus(status))
+                    ? l10n.acceptCancelButton
+                    : view.cancelIsFullWidth
+                    ? l10n.cancelTradeButton
+                    : l10n.cancel,
             automationId: AutomationIds.tradeCancel,
             onPressed: () => _cancelOrder(status),
             isDestructive: true,

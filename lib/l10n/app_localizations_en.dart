@@ -714,6 +714,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cancelRequestFailed => 'Failed to cancel. Please try again.';
 
   @override
+  String get tradeCardCancelRequestedByMeTitle => 'Cancel requested';
+
+  @override
+  String get tradeCardCancelRequestedByMeMessage =>
+      'You asked to cancel this trade. It stays open until the other party also cancels. If they do not respond, you can open a dispute.';
+
+  @override
+  String get tradeCardCancelRequestedByPeerTitle =>
+      'The other party wants to cancel';
+
+  @override
+  String get tradeCardCancelRequestedByPeerMessage =>
+      'They asked to cancel this trade. Accept to end it with no funds moved, or keep trading.';
+
+  @override
+  String get tradeCancelRequestedByMeNotice =>
+      'You asked to cancel this trade. It stays open until the other party also cancels. If they do not respond, you can open a dispute.';
+
+  @override
+  String get tradeCancelRequestedByPeerNotice =>
+      'The other party asked to cancel this trade. Accept to end it with no funds moved, or keep trading.';
+
+  @override
+  String get acceptCancelButton => 'Accept cancel';
+
+  @override
+  String get cancelTradeDialogContentAccept =>
+      'The other party asked to cancel. Cancelling now ends the trade for both of you and no funds are moved.';
+
+  @override
   String get fiatSentFailed => 'Failed to mark fiat as sent. Please try again.';
 
   @override
@@ -1483,6 +1513,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String timeLeftLabel(String time) {
     return '$time left';
   }
+
+  @override
+  String get invoiceNoLongerExpected =>
+      'This order is no longer waiting for an invoice. Updating its status…';
 
   @override
   String get waitingForTradeAmount =>

@@ -1265,14 +1265,11 @@ pub(crate) async fn subscribe_incoming_chat(
         .remove(&channel.guard_key(&order_id));
     if let Ok(pool) = crate::api::nostr::get_pool() {
         let client = pool.client();
-        // Unsubscribing a subscription that already went away is not an
-        // error worth surfacing: the loop is exiting either way.
-        if let Err(e) = client
-            .unsubscribe(&chat_subscription_id(channel, &order_id))
-            .await
-        {
-            log::debug!("[messages] unsubscribe on exit failed: {e}");
-        }
+        // Through the registry, or a reconnect repair would resurrect the
+        // REQ of a chat nobody listens to any more.
+        crate::nostr::live_subs::live_subs()
+            .close(&client, &chat_subscription_id(channel, &order_id))
+            .await;
     }
     log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
 }
@@ -1385,13 +1382,21 @@ async fn run_chat_subscription(
     // and would otherwise be missed.
     let mut rx = client.notifications();
 
-    if let Err(e) = client.subscribe(filter).with_id(sub_id.clone()).await {
-        log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
-        return;
-    }
+    // `replace`, not a bare subscribe: issued while relays are still coming
+    // back (a resume), it must reach each of them as it connects.
+    let issued = match crate::nostr::live_subs::live_subs()
+        .replace(&client, sub_id.clone(), filter)
+        .await
+    {
+        Ok(issued) => issued,
+        Err(e) => {
+            log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
+            return;
+        }
+    };
 
     log::info!(
-        "[messages] incoming-chat subscription active order={order_id} author={} since={cursor}",
+        "[messages] incoming-chat subscription {issued:?} order={order_id} author={} since={cursor}",
         sign_pubkey.to_hex(),
     );
 

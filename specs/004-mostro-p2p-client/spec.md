@@ -293,7 +293,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - What happens if the Mostro node does not respond when creating an order? → A timeout fires; the order is treated as not created (nothing is shown in My Trades or the order book) and a "no response, try again later" message is shown.
 - What happens if a dispute is opened but no admin is available? → The dispute shows "Initiated" status; the user waits in the Disputes tab until an admin picks up the case.
 - What happens when a user tries to submit a 0-star rating? → The Submit button remains disabled; at least 1 star must be selected.
-- What happens when a cooperative cancel is pending agreement from the other party? → The Cancel button is grayed out (disabled) and a Contact button appears to allow both parties to coordinate.
+- What happens when a cooperative cancel is pending agreement from the other party? → Both sides are told, from the daemon's `cooperative-cancel-initiated-by-{you,peer}`: a Notifications card each, and a notice on the trade screen. The requester's screen drops the Cancel action (the trade stays open; Dispute and the step's primary action stay). The counterparty's Cancel reads "Accept cancel", and its confirmation dialog says the cancel ends the trade for both. The chat card is the Contact button.
 - What happens if the shared key for dispute chat is not yet established? → The dispute chat input is hidden; the system retries key establishment automatically and shows it once available.
 
 ---

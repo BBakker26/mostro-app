@@ -232,10 +232,104 @@ pub struct OrderFilters {
 /// through this: daemon-message handlers and user actions publish directly.
 const PUBLISH_COALESCE_MS: u64 = 200;
 
-/// Shared order cache + broadcast channel for UI updates.
+/// One change to the book, as broadcast to delta subscribers.
+///
+/// Every per-order variant carries the book revision it produced. Revisions grow by one
+/// per change, and a delta is sent while the book's write lock is still held,
+/// so subscribers receive them in revision order. That is what makes a resync
+/// safe: a subscriber that fell behind reads
+/// [`OrderBook::snapshot_with_revision`] and from then on applies only deltas
+/// **newer** than the snapshot's revision — one at or below it is already in
+/// the snapshot, and replaying it could undo a later change.
+///
+/// The internal form; [`OrderDeltaStream`] turns it into the bridge's
+/// [`OrderDelta`]. `frb(ignore)` because flutter_rust_bridge scans this
+/// module and would emit bindings for it.
+#[derive(Debug, Clone)]
+#[flutter_rust_bridge::frb(ignore)]
+pub(crate) enum OrderBookDelta {
+    Upserted { revision: u64, order: OrderInfo },
+    Removed { revision: u64, order_id: String },
+    /// The book was replaced or emptied wholesale. What vanished cannot be
+    /// told order by order, so the subscriber starts over from a snapshot —
+    /// which carries the revision, so this needs none.
+    Reset,
+    /// The pending feed's stored events ended; see `OrderDelta::Loaded`.
+    Loaded,
+}
+
+#[cfg(test)]
+impl OrderBookDelta {
+    /// The revision a per-order delta produced.
+    fn revision(&self) -> u64 {
+        match self {
+            Self::Upserted { revision, .. } | Self::Removed { revision, .. } => *revision,
+            Self::Reset | Self::Loaded => unreachable!("carries no revision"),
+        }
+    }
+}
+
+/// The book proper: orders by id, and how many times they changed.
+#[derive(Default)]
+#[flutter_rust_bridge::frb(ignore)]
+struct BookState {
+    orders: HashMap<String, OrderInfo>,
+    revision: u64,
+    /// The pending feed's stored events ended for the node this book holds;
+    /// see `OrderBookSnapshot::loaded`.
+    loaded: bool,
+}
+
+impl BookState {
+    /// Insert or replace `order`. An order re-announced unchanged — the
+    /// common case on the wire — is not a change: no revision, no delta.
+    fn upsert(&mut self, order: OrderInfo, deltas: &broadcast::Sender<OrderBookDelta>) {
+        if self.orders.get(&order.id) == Some(&order) {
+            return;
+        }
+        self.revision += 1;
+        self.orders.insert(order.id.clone(), order.clone());
+        let _ = deltas.send(OrderBookDelta::Upserted {
+            revision: self.revision,
+            order,
+        });
+    }
+
+    /// Whether anything was there to remove.
+    fn remove(&mut self, order_id: &str, deltas: &broadcast::Sender<OrderBookDelta>) -> bool {
+        if self.orders.remove(order_id).is_none() {
+            return false;
+        }
+        self.revision += 1;
+        let _ = deltas.send(OrderBookDelta::Removed {
+            revision: self.revision,
+            order_id: order_id.to_string(),
+        });
+        true
+    }
+
+    fn replace_all(&mut self, orders: Vec<OrderInfo>, deltas: &broadcast::Sender<OrderBookDelta>) {
+        self.orders = orders.into_iter().map(|o| (o.id.clone(), o)).collect();
+        self.revision += 1;
+        let _ = deltas.send(OrderBookDelta::Reset);
+    }
+
+    /// The whole book, ordered by id: a map has no order of its own, and a
+    /// snapshot that reshuffles between emissions makes every consumer and
+    /// every test compare more than changed. Display order is the UI's.
+    fn snapshot(&self) -> Vec<OrderInfo> {
+        let mut orders: Vec<OrderInfo> = self.orders.values().cloned().collect();
+        orders.sort_by(|a, b| a.id.cmp(&b.id));
+        orders
+    }
+}
+
+/// Shared order cache + broadcast channels for UI updates.
 pub struct OrderBook {
-    orders: Arc<RwLock<Vec<OrderInfo>>>,
+    orders: Arc<RwLock<BookState>>,
     tx: broadcast::Sender<Vec<OrderInfo>>,
+    /// One message per change; see [`OrderBookDelta`].
+    delta_tx: broadcast::Sender<OrderBookDelta>,
     /// Set while a coalescing window is armed. Shared with the window's task,
     /// which clears it.
     publish_scheduled: Arc<AtomicBool>,
@@ -255,6 +349,11 @@ pub struct OrderBook {
 /// this channel ever carries deltas.
 const ORDER_STREAM_CAPACITY: usize = 64;
 
+/// Deltas retained for a subscriber that has fallen behind. One per changed
+/// order, so a cold-start ingest of a few thousand orders fits; past it the
+/// subscriber lags and resyncs from a snapshot, which is always correct.
+const ORDER_DELTA_CAPACITY: usize = 4096;
+
 impl Default for OrderBook {
     fn default() -> Self {
         Self::new()
@@ -264,9 +363,11 @@ impl Default for OrderBook {
 impl OrderBook {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(ORDER_STREAM_CAPACITY);
+        let (delta_tx, _) = broadcast::channel(ORDER_DELTA_CAPACITY);
         Self {
-            orders: Arc::new(RwLock::new(Vec::new())),
+            orders: Arc::new(RwLock::new(BookState::default())),
             tx,
+            delta_tx,
             publish_scheduled: Arc::new(AtomicBool::new(false)),
             wire_orders: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
@@ -274,8 +375,12 @@ impl OrderBook {
 
     /// Replace the cached order list and notify listeners.
     pub async fn set_orders(&self, orders: Vec<OrderInfo>) {
-        *self.orders.write().await = orders.clone();
-        let _ = self.tx.send(orders);
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            book.replace_all(orders, &self.delta_tx);
+            book.snapshot()
+        };
+        let _ = self.tx.send(snapshot);
     }
 
     /// Empty the cached order list and notify listeners with an empty book.
@@ -283,16 +388,22 @@ impl OrderBook {
     /// Used on a node switch so orders belonging to the previously-active node
     /// disappear from the UI immediately, before the new node's orders arrive.
     pub async fn clear(&self) {
-        self.orders.write().await.clear();
+        {
+            let mut book = self.orders.write().await;
+            book.replace_all(Vec::new(), &self.delta_tx);
+            // Emptied for another node, whose relay has confirmed nothing.
+            book.loaded = false;
+        }
         let _ = self.tx.send(Vec::new());
     }
 
     /// Insert or update a single order and notify listeners.
     pub async fn upsert_order(&self, order: OrderInfo) {
-        let mut orders = self.orders.write().await;
-        Self::apply_upsert(&mut orders, order);
-        let snapshot = orders.clone();
-        drop(orders);
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            book.upsert(order, &self.delta_tx);
+            book.snapshot()
+        };
         let _ = self.tx.send(snapshot);
     }
 
@@ -302,9 +413,12 @@ impl OrderBook {
     /// message on this channel is a whole-book snapshot, so publishing per
     /// event during a refetch of N orders costs N clones of an N-element
     /// vector and N full payloads across the bridge.
+    ///
+    /// "Without notifying" is about the snapshot stream. The delta goes out
+    /// at once: it is one order, so there is nothing to batch, and a delta
+    /// subscriber must see every change in order.
     pub(crate) async fn upsert_order_deferred(&self, order: OrderInfo) {
-        let mut orders = self.orders.write().await;
-        Self::apply_upsert(&mut orders, order);
+        self.orders.write().await.upsert(order, &self.delta_tx);
     }
 
     /// Insert or update a single order, publishing at most once per
@@ -332,7 +446,7 @@ impl OrderBook {
             // Released before the snapshot is taken, so an update arriving
             // during the read opens a new window instead of being swallowed.
             scheduled.store(false, Ordering::Release);
-            let snapshot = orders.read().await.clone();
+            let snapshot = orders.read().await.snapshot();
             let _ = tx.send(snapshot);
         });
     }
@@ -358,43 +472,78 @@ impl OrderBook {
             return false;
         }
         self.publish().await;
+        {
+            // Flag and event under the write lock, like every delta: a
+            // consumer that subscribed and then read `loaded == false` is
+            // guaranteed to hear the event.
+            let mut book = self.orders.write().await;
+            book.loaded = true;
+            let _ = self.delta_tx.send(OrderBookDelta::Loaded);
+        }
         true
     }
 
     /// Publish the current book to subscribers.
     pub(crate) async fn publish(&self) {
-        let snapshot = self.orders.read().await.clone();
+        let snapshot = self.orders.read().await.snapshot();
         let _ = self.tx.send(snapshot);
     }
 
-    fn apply_upsert(orders: &mut Vec<OrderInfo>, order: OrderInfo) {
-        if let Some(existing) = orders.iter_mut().find(|o| o.id == order.id) {
-            *existing = order;
-        } else {
-            orders.push(order);
+    /// The book and the revision it was read at, under one lock — the
+    /// starting point of a delta subscriber, and its way back after a lag.
+    /// See [`OrderBookDelta`] for the rule that goes with it.
+    #[cfg(test)] // production reads it through `bridge_snapshot`
+    pub(crate) async fn snapshot_with_revision(&self) -> (u64, Vec<OrderInfo>) {
+        let book = self.orders.read().await;
+        (book.revision, book.snapshot())
+    }
+
+    /// [`Self::snapshot_with_revision`] in the bridge's terms.
+    pub(crate) async fn bridge_snapshot(&self) -> crate::api::types::OrderBookSnapshot {
+        let (revision, orders, loaded) = {
+            let book = self.orders.read().await;
+            (book.revision, book.snapshot(), book.loaded)
+        };
+        crate::api::types::OrderBookSnapshot {
+            loaded,
+            // Past u32 the stream only ever says Resync (see
+            // `bridge_revision`), so what is reported here no longer matters.
+            revision: bridge_revision(revision).unwrap_or(u32::MAX),
+            orders,
         }
+    }
+
+    /// Subscribe to per-order changes. Subscribe **before** reading the
+    /// snapshot, so no change can fall between the two.
+    pub(crate) fn subscribe_deltas(&self) -> broadcast::Receiver<OrderBookDelta> {
+        self.delta_tx.subscribe()
     }
 
     /// Update the status of an existing cached order and notify listeners.
     ///
     /// No-op when the order is not in the cache (e.g. already removed).
     pub async fn update_order_status(&self, order_id: &str, status: OrderStatus) {
-        let mut orders = self.orders.write().await;
-        if let Some(existing) = orders.iter_mut().find(|o| o.id == order_id) {
-            existing.status = status;
-            let snapshot = orders.clone();
-            drop(orders);
-            let _ = self.tx.send(snapshot);
-        }
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            let Some(mut order) = book.orders.get(order_id).cloned() else {
+                return;
+            };
+            order.status = status;
+            book.upsert(order, &self.delta_tx);
+            book.snapshot()
+        };
+        let _ = self.tx.send(snapshot);
+        // Only trades have their entry's status set by hand.
+        crate::api::trade_touch::touch_trade(order_id);
     }
 
     /// Get all cached orders, optionally filtered.
     pub async fn get_orders(&self, filters: Option<OrderFilters>) -> Vec<OrderInfo> {
         // Clone + filter under the read lock, then drop it before sorting.
         let mut result: Vec<OrderInfo> = {
-            let orders = self.orders.read().await;
-            orders
-                .iter()
+            let book = self.orders.read().await;
+            book.orders
+                .values()
                 .filter(|o| matches!(o.status, OrderStatus::Pending))
                 .filter(|o| {
                     let Some(ref f) = filters else { return true };
@@ -435,12 +584,7 @@ impl OrderBook {
 
     /// Get a single order by ID.
     pub async fn get_order(&self, order_id: &str) -> Option<OrderInfo> {
-        self.orders
-            .read()
-            .await
-            .iter()
-            .find(|o| o.id == order_id)
-            .cloned()
+        self.orders.read().await.orders.get(order_id).cloned()
     }
 
     /// Remove the order with the given ID from the cache and notify listeners.
@@ -456,10 +600,7 @@ impl OrderBook {
     /// The return value is what keeps a removal that changed nothing from
     /// publishing a whole-book snapshot.
     pub(crate) async fn remove_order_deferred(&self, order_id: &str) -> bool {
-        let mut orders = self.orders.write().await;
-        let before = orders.len();
-        orders.retain(|o| o.id != order_id);
-        orders.len() != before
+        self.orders.write().await.remove(order_id, &self.delta_tx)
     }
 
     /// Apply an order parsed from a Kind 38383 event.
@@ -492,9 +633,15 @@ impl OrderBook {
             }
             return;
         }
+        let touched = ours.then(|| order.id.clone());
         match publish {
             Publish::Coalesced => self.upsert_order_coalesced(order).await,
             Publish::WhenBatchEnds => self.upsert_order_deferred(order).await,
+        }
+        // Ours only: the firehose is everybody else's orders, and a trade
+        // screen never follows those.
+        if let Some(order_id) = touched {
+            crate::api::trade_touch::touch_trade(&order_id);
         }
     }
 
@@ -2121,8 +2268,13 @@ fn resolve_add_invoice_destination(
 ///   terminal status then refused the daemon's `pending` republish: the
 ///   ex-taker never saw the order in the book again. A cancel the daemon
 ///   refuses now also leaves a live trade looking live.
-/// * **Anything further along**: marked `Canceled` straight away, as before,
-///   so the UI reflects it without waiting for the daemon.
+/// * **Anything further along**: the status stays and the row records
+///   `cooperative_cancel_state = RequestedByMe`. From `active` on the cancel
+///   is a request the counterparty must agree to (protocol `cancel.md`,
+///   "Cancel cooperatively"); the daemon's
+///   `cooperative-cancel-initiated-by-you` confirms it and
+///   `cooperative-cancel-accepted` ends the trade. An `in-progress` row may
+///   still be a never-active take, which the daemon's `Canceled` settles.
 async fn apply_local_cancel(order_id: &str) {
     order_book().remove_order(order_id).await;
     let Some(db) = crate::db::app_db::db() else {
@@ -2154,23 +2306,30 @@ async fn apply_local_cancel(order_id: &str) {
         );
         return;
     }
+    // From `active` on the cancel is a request the counterparty must agree
+    // to (protocol `cancel.md`, "Cancel cooperatively"): the status stays,
+    // the row remembers who asked. The daemon's
+    // `cooperative-cancel-initiated-by-you` confirms it and
+    // `cooperative-cancel-accepted` ends the trade — an optimistic
+    // `Canceled` here made that acceptance look like a replay over a
+    // finished trade and dropped it. An `in-progress` row may still be a
+    // never-active take; then the daemon's `Canceled` settles it as before.
     if let Err(e) = db
-        .update_trade_fields(
+        .set_cooperative_cancel_state(
             order_id,
-            Some(crate::api::types::OrderStatus::Canceled),
-            None,
-            None,
+            crate::api::types::CooperativeCancelState::RequestedByMe,
         )
         .await
     {
         crate::api::logging::blog_warn(
             "orders",
             format!(
-                "cancel status not persisted for order={}: {e}",
+                "cancel request not persisted for order={}: {e}",
                 crate::api::logging::short_id(order_id),
             ),
         );
     }
+    crate::api::trade_touch::touch_trade(order_id);
 }
 
 /// End a trade that never went active: its row, its session and — for a take
@@ -2779,6 +2938,8 @@ async fn dispatch_mostro_message(
                             order_book().upsert_order(info).await;
                         }
                         let _ = db.update_trade_order_id(&local_id, &did).await;
+                        crate::api::trade_touch::touch_trade(&local_id);
+                        crate::api::trade_touch::touch_trade(&did);
                         // Replace the stale local_id → trade_index mapping
                         // with daemon_id → trade_index in both DB and memory.
                         let _ = db.delete_trade_key(&local_id).await;
@@ -3569,8 +3730,6 @@ async fn dispatch_mostro_message(
         | Action::Released
         | Action::PurchaseCompleted
         | Action::CooperativeCancelAccepted
-        | Action::CooperativeCancelInitiatedByPeer
-        | Action::CooperativeCancelInitiatedByYou
         | Action::DisputeInitiatedByYou
         | Action::DisputeInitiatedByPeer
         | Action::AdminSettled
@@ -3655,6 +3814,70 @@ async fn dispatch_mostro_message(
                     kind.action
                 );
             }
+        }
+        // A cooperative-cancel request moves nothing: the trade goes on until
+        // the counterparty also cancels (protocol `cancel.md`, "Cancel
+        // cooperatively"), so the status table above has no row for it. The
+        // trade row remembers who asked and the UI is told, with the trade's
+        // own status — dropping these as "no status change" left the
+        // requester unconfirmed and the counterparty unaware.
+        Action::CooperativeCancelInitiatedByYou | Action::CooperativeCancelInitiatedByPeer => {
+            let order_id = match &kind.id {
+                Some(id) => id.to_string(),
+                None => {
+                    log::debug!("[orders] daemon-msg {:?} has no order id", kind.action);
+                    return;
+                }
+            };
+            if status_arm_gate(&row_state, &kind.action, &order_id) {
+                return;
+            }
+            if status_write_blocked(&order_id, &kind.action, event_ts).await {
+                return;
+            }
+            record_status_event(&order_id, event_ts).await;
+            let (state, reason) =
+                if matches!(kind.action, Action::CooperativeCancelInitiatedByYou) {
+                    (
+                        crate::api::types::CooperativeCancelState::RequestedByMe,
+                        crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByMe,
+                    )
+                } else {
+                    (
+                        crate::api::types::CooperativeCancelState::RequestedByPeer,
+                        crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByPeer,
+                    )
+                };
+            if let Some(db) = crate::db::app_db::db() {
+                if let Err(e) = db.set_cooperative_cancel_state(&order_id, state).await {
+                    crate::api::logging::blog_warn(
+                        "orders",
+                        format!(
+                            "cancel request not persisted for order={}: {e}",
+                            crate::api::logging::short_id(&order_id),
+                        ),
+                    );
+                }
+            }
+            // The status the screens already show: a request can follow the
+            // fiat-sent step as well as the active one.
+            let status = current_local_status(&order_id)
+                .await
+                .unwrap_or(crate::api::types::OrderStatus::Active);
+            crate::api::logging::blog_info(
+                "orders",
+                format!(
+                    "cancel requested order={} by={} status={status:?} src=kind14/{:?}",
+                    crate::api::logging::short_id(&order_id),
+                    if matches!(reason, crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByMe) {
+                        "me"
+                    } else {
+                        "peer"
+                    },
+                    kind.action,
+                ),
+            );
+            emit_trade_update_at(&order_id, status, Some(reason), event_ts);
         }
         // The daemon announces which solver took the dispute, and carries their
         // pubkey in the payload. That pubkey is what both sides ECDH against to
@@ -4632,6 +4855,7 @@ async fn persist_bond(order_id: &str, bond: &crate::api::types::BondInfo) {
             ),
         );
     }
+    crate::api::trade_touch::touch_trade(order_id);
 }
 
 /// The first trade-flow message after `pay-bond-invoice` is the only signal
@@ -5257,6 +5481,7 @@ async fn wipe_trade_row(
     wiped_index: u32,
 ) -> Result<()> {
     db.delete_trade_by_order_id(order_id).await?;
+    crate::api::trade_touch::touch_trade(order_id);
     if let Err(e) = db
         .set_setting(
             &crate::db::settings_keys::trade_wiped(order_id),
@@ -5293,6 +5518,7 @@ async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeIn
         );
     }
     let saved = db.save_trade(trade).await;
+    crate::api::trade_touch::touch_trade(&trade.order.id);
     crate::api::push::request_reconcile();
     saved
 }
@@ -5350,6 +5576,9 @@ async fn sync_trade_fields_if_changed(
             ),
         );
     }
+    // The fields this writes (status, hold invoice, amount) are what the
+    // invoice screens wait for, and not every caller follows with an update.
+    crate::api::trade_touch::touch_trade(order_id);
     true
 }
 
@@ -5448,6 +5677,7 @@ async fn maybe_capture_peer_reveal(
         if let Err(e) = db.update_trade_counterparty(order_id, &peer_hex).await {
             log::warn!("[orders] peer-reveal: failed to persist counterparty: {e}");
         }
+        crate::api::trade_touch::touch_trade(order_id);
     }
     apply_peer_reveal(order_id, &peer_hex, &trade_keys, trade_index, role).await;
 }
@@ -5673,7 +5903,11 @@ async fn apply_single_order_update(mut order: OrderInfo) {
             order.status = local;
         }
     }
+    let order_id = order.id.clone();
     order_book().upsert_order(order).await;
+    // No TradeUpdate here — a public bucket is not a lifecycle step — yet the
+    // entry and maybe the row just changed under an open trade screen.
+    crate::api::trade_touch::touch_trade(&order_id);
 }
 
 /// What the single-order task made of one notification.
@@ -5765,16 +5999,19 @@ async fn subscribe_single_order(order_id: &str) {
         let mut rx = client.notifications();
         let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, &order_id);
         let sub_id = single_order_subscription_id(&order_id);
-        if replaced {
-            // The earlier take's REQ is still open under this same id, and
-            // nostr-sdk refuses a subscribe whose id exists (it keeps the old
-            // filter and reports that per relay, not as an error). Drop it so
-            // this subscribe is accepted and owned by this task; the relay
-            // replays the order's latest event on the new REQ, so nothing is
-            // missed in between.
-            let _ = client.unsubscribe(&sub_id).await;
-        }
-        if let Err(e) = client.subscribe(filter).with_id(sub_id.clone()).await {
+        // A retake: the earlier take's REQ is still open under this same id,
+        // and nostr-sdk refuses a subscribe whose id exists (it keeps the old
+        // filter and reports that per relay, not as an error). `replace` drops
+        // it and issues this one in a single critical section, so the
+        // superseded task cannot slot its own subscribe in between; the relay
+        // replays the order's latest event on the new REQ, so nothing is
+        // missed.
+        let subscribed = if replaced {
+            replace_subscription(&client, sub_id.clone(), filter).await
+        } else {
+            subscribe_accepted(&client, sub_id.clone(), filter).await
+        };
+        if let Err(e) = subscribed {
             release_single_order_task(&order_id, generation);
             log::warn!("[orders] subscribe_single_order subscribe failed: {e}");
             return;
@@ -5829,11 +6066,9 @@ async fn subscribe_single_order(order_id: &str) {
         // this task still owns it: a superseded task leaves the REQ to the
         // retake's task, which re-opened it under the same id.
         if release_single_order_task(&order_id, generation) {
-            if let Err(e) = client.unsubscribe(&sub_id).await {
-                log::warn!(
-                    "[orders] subscribe_single_order unsubscribe failed for order={order_id}: {e}"
-                );
-            }
+            crate::nostr::live_subs::live_subs()
+                .close(&client, &sub_id)
+                .await;
         } else {
             crate::api::logging::blog_debug(
                 "orders",
@@ -6504,58 +6739,36 @@ fn relay_list_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
 /// Subscribe `filter` under `id`, failing when no relay accepted the REQ.
 ///
 /// The SDK reports per-relay failures inside an `Ok` output, which is how a
-/// rejected subscribe used to pass for a live one. Empty success is not a
-/// transient state, either: a REQ that failed on a relay is *removed* from
-/// that relay's subscription registry (nostr-sdk 0.45,
-/// `subscribe_long_lived`), so reconnect resubscription cannot revive it —
-/// the subscription exists nowhere and never will. No relay accepting it is
-/// an error here; a partial failure is logged.
+/// rejected subscribe used to pass for a live one. For a caller that needs
+/// coverage now, no relay accepting it is an error; a partial failure is
+/// logged and repaired when that relay connects (`nostr::live_subs`).
 async fn subscribe_accepted(
     client: &nostr_sdk::prelude::Client,
     id: nostr_sdk::prelude::SubscriptionId,
     filter: nostr_sdk::prelude::Filter,
 ) -> Result<()> {
-    let output = client
-        .subscribe(filter)
-        .with_id(id.clone())
+    crate::nostr::live_subs::live_subs()
+        .open(client, id, filter)
         .await
-        .map_err(|e| anyhow::anyhow!("subscribe {id} failed: {e}"))?;
-    if output.success.is_empty() {
-        return Err(anyhow::anyhow!(
-            "subscribe {id} rejected by every relay: {:?}",
-            output.failed
-        ));
-    }
-    for (url, err) in &output.failed {
-        crate::api::logging::blog_warn(
-            "relay",
-            format!(
-                "sub {id} failed relay={} err={}",
-                crate::api::logging::display_relay(&url.to_string()),
-                crate::api::logging::sanitize_relay_text(err),
-            ),
-        );
-    }
-    Ok(())
 }
 
 /// Point the long-lived subscription `id` at `filter`, replacing whatever it
 /// carried before.
 ///
-/// nostr-sdk 0.45 refuses a subscribe whose id already exists and keeps the
-/// old filters, so the id is closed first (a no-op when it was never open).
 /// The brief gap between CLOSE and REQ loses nothing: a node switch refetches
 /// the book right after, and the Kind-14 feed has no `since`, so its REQ
-/// replays history.
+/// replays history. With the pool offline the REQ lands nowhere and that is
+/// not an error: the intent is recorded and each relay gets it as it connects
+/// — a resume used to delete `mostro-dm` for the rest of the session here.
 async fn replace_subscription(
     client: &nostr_sdk::prelude::Client,
     id: nostr_sdk::prelude::SubscriptionId,
     filter: nostr_sdk::prelude::Filter,
 ) -> Result<()> {
-    if let Err(e) = client.unsubscribe(&id).await {
-        log::warn!("[orders] closing {id} before re-subscribing failed: {e}");
-    }
-    subscribe_accepted(client, id, filter).await
+    crate::nostr::live_subs::live_subs()
+        .replace(client, id, filter)
+        .await
+        .map(|_| ())
 }
 
 /// (Re)subscribe the order-book (Kind 38383) and Mostro-reply (Kind 14)
@@ -6762,11 +6975,13 @@ fn global_dm_keys() -> &'static tokio::sync::RwLock<HashMap<String, (nostr_sdk::
     GLOBAL_DM_KEYS.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()))
 }
 
-/// Add a freshly derived trade key to the global decryption map and refresh
-/// the bulk Kind-14 relay filter to include it, so daemon messages for this
-/// key (including an admin-took-dispute long after creation) are received
-/// for the whole life of the process, not just while the temporary per-trade
-/// receiver runs. Idempotent: a key already covered causes no relay churn.
+/// Add a freshly derived trade key to the global decryption map and schedule
+/// a refresh of the bulk Kind-14 relay filter to include it, so daemon
+/// messages for this key (including an admin-took-dispute long after
+/// creation) are received for the whole life of the process, not just while
+/// the temporary per-trade receiver runs. Idempotent: a key already covered
+/// causes no relay churn. Coverage is never pruned — see
+/// `specs/004-mostro-p2p-client/contracts/orders.md`.
 pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::prelude::Keys, trade_index: u32) {
     let hex = keys.public_key().to_hex();
     {
@@ -6776,8 +6991,24 @@ pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::prelude::Keys, t
         }
         map.insert(hex, (keys.clone(), trade_index));
     }
-    resubscribe_global_dm_filter().await;
+    // The map above is what decrypts, and it is current as of this line. The
+    // relay filter follows in the background, once per burst of new keys:
+    // re-issuing it is a CLOSE plus a history-replaying REQ on every relay,
+    // and this runs inside create/take, which used to wait for all of it.
+    // Nothing here depends on the refresh having landed — the reply to the
+    // request about to be sent arrives on the per-trade subscription, which
+    // its caller does await.
+    DM_FILTER_REFRESH.request(DM_FILTER_REFRESH_WINDOW, resubscribe_global_dm_filter);
 }
+
+/// Wide enough to take in keys derived back to back (a create plus its range
+/// remainder, a restore), far below the 30 minutes the per-trade subscription
+/// covers a new key for anyway.
+const DM_FILTER_REFRESH_WINDOW: crate::rt::time::Duration =
+    crate::rt::time::Duration::from_millis(500);
+
+static DM_FILTER_REFRESH: crate::nostr::coalesce::Coalesced =
+    crate::nostr::coalesce::Coalesced::new();
 
 /// Re-issue the bulk Kind-14 subscription with the current coverage set.
 /// Same stable id, so the relay replaces the filter in place. No-op before
@@ -6816,14 +7047,15 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::prelude::Keys, u32
         Ok(Some(info)) => info.trade_key_index,
         _ => return map,
     };
-    for idx in 1..=max_index {
-        match crate::api::identity::get_active_trade_keys(idx).await {
-            Ok(keys) => {
-                let hex = keys.public_key().to_hex();
-                map.insert(hex, (keys, idx));
+    // One batch, not a call per index: each of those re-derived the BIP-39
+    // seed, so startup paid a PBKDF2 for every trade the user ever made.
+    match crate::api::identity::get_active_trade_keys_up_to(max_index).await {
+        Ok(all) => {
+            for (keys, idx) in all.into_iter().zip(1u32..) {
+                map.insert(keys.public_key().to_hex(), (keys, idx));
             }
-            Err(e) => log::warn!("[orders] failed to derive trade key {idx}: {e}"),
         }
+        Err(e) => log::warn!("[orders] failed to derive trade keys 1..={max_index}: {e}"),
     }
     map
 }
@@ -7358,6 +7590,7 @@ pub(crate) fn emit_trade_update_at(
         reason,
         occurred_at,
     });
+    crate::api::trade_touch::touch_trade(order_id);
     // Every status a trade can take changes what the push server should
     // hold for its key (a wipe, a terminal outcome, a new bond window).
     crate::api::push::request_reconcile();
@@ -7432,6 +7665,66 @@ impl OrdersStream {
                 }
                 Err(broadcast::error::RecvError::Closed) => return None,
             }
+        }
+    }
+}
+
+/// A book revision as the bridge carries it. `u32` because that is a plain
+/// `int` in Dart on every target, where `u64` is a `BigInt`. `None` past its
+/// range — four billion changes in one process — where the stream degrades
+/// to `Resync` on every change: slower, never wrong.
+fn bridge_revision(revision: u64) -> Option<u32> {
+    u32::try_from(revision).ok().filter(|r| *r < u32::MAX)
+}
+
+/// The whole order book and the revision it was read at — the starting point
+/// of a delta consumer, and its way back after a [`OrderDelta::Resync`].
+///
+/// [`OrderDelta::Resync`]: crate::api::types::OrderDelta::Resync
+pub async fn get_order_book_snapshot() -> Result<crate::api::types::OrderBookSnapshot> {
+    Ok(order_book().bridge_snapshot().await)
+}
+
+/// Stream of per-order changes to the book. Call this **before**
+/// [`get_order_book_snapshot`], so no change can fall between the two; see
+/// [`OrderDelta`](crate::api::types::OrderDelta) for the rule to apply them.
+pub async fn on_order_deltas() -> Result<OrderDeltaStream> {
+    Ok(OrderDeltaStream::over(order_book()))
+}
+
+/// Wrapper for flutter_rust_bridge Dart Stream generation.
+pub struct OrderDeltaStream {
+    rx: broadcast::Receiver<OrderBookDelta>,
+}
+
+impl OrderDeltaStream {
+    pub(crate) fn over(book: &OrderBook) -> Self {
+        Self {
+            rx: book.subscribe_deltas(),
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<crate::api::types::OrderDelta> {
+        use crate::api::types::OrderDelta;
+        match self.rx.recv().await {
+            Ok(OrderBookDelta::Upserted { revision, order }) => Some(
+                bridge_revision(revision)
+                    .map_or(OrderDelta::Resync, |revision| OrderDelta::Upserted { revision, order }),
+            ),
+            Ok(OrderBookDelta::Removed { revision, order_id }) => Some(
+                bridge_revision(revision).map_or(OrderDelta::Resync, |revision| {
+                    OrderDelta::Removed { revision, order_id }
+                }),
+            ),
+            Ok(OrderBookDelta::Reset) => Some(OrderDelta::Resync),
+            Ok(OrderBookDelta::Loaded) => Some(OrderDelta::Loaded),
+            // Unlike a dropped snapshot, a dropped delta is a hole in the
+            // consumer's book. It cannot be patched, only started over.
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                log::warn!("[orders] order-delta stream lagged, {n} deltas dropped — resync");
+                Some(OrderDelta::Resync)
+            }
+            Err(broadcast::error::RecvError::Closed) => None,
         }
     }
 }
@@ -8107,25 +8400,42 @@ mod tests {
     }
 
     /// The SDK reports a subscribe that failed on every relay as an `Ok`
-    /// output. Accepting that meant a feed with no REQ anywhere was logged
-    /// as created; a relay that was never connected must make it an error.
+    /// output, and drops the failed REQ from each relay's registry, so a
+    /// reconnect never brings it back. That used to be an error here, which
+    /// left nothing to retry: a resume that ran before the relays were back
+    /// deleted `mostro-dm` for the rest of the session. It is now deferred —
+    /// recorded, and issued on the relay the moment it connects.
     #[tokio::test]
-    async fn a_subscription_no_relay_accepts_is_an_error() {
+    async fn node_filters_issued_offline_come_alive_when_the_relay_connects() {
         use nostr_sdk::local_relay::MockRelay;
         use nostr_sdk::prelude::{Client, Keys};
 
+        // Arrange
         let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
         let client = Client::new();
-        client
-            .add_relay(relay.url().await)
-            .await
-            .expect("add relay");
+        client.add_relay(&url).await.expect("add relay");
 
+        // Act
         let result = subscribe_node_filters(&client, Keys::generate().public_key()).await;
+        let while_offline = client.subscription(&orders_subscription_id()).await;
+        client
+            .try_connect_relay(&url, std::time::Duration::from_secs(3))
+            .await
+            .expect("connect");
+        crate::nostr::live_subs::live_subs()
+            .repair_relay(&client, url.as_str())
+            .await;
 
+        // Assert
+        assert!(result.is_ok(), "offline is deferred, not failed: {result:?}");
+        assert!(while_offline.is_empty(), "no relay could have taken the REQ");
         assert!(
-            result.is_err(),
-            "a subscription no relay accepted must not pass for a live one"
+            !client
+                .subscription(&orders_subscription_id())
+                .await
+                .is_empty(),
+            "the deferred subscription must exist once the relay is up"
         );
     }
 
@@ -8322,6 +8632,420 @@ mod tests {
         );
     }
 
+    // ── Delta broadcast (docs/OPTIMIZATION_PLAN.md PR 3.1) ──
+
+    /// Everything a delta subscriber has heard so far, without waiting.
+    fn drain(rx: &mut broadcast::Receiver<OrderBookDelta>) -> Vec<OrderBookDelta> {
+        let mut seen = Vec::new();
+        while let Ok(delta) = rx.try_recv() {
+            seen.push(delta);
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn an_upsert_is_broadcast_as_one_delta_with_a_growing_revision() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.upsert_order(dummy_order_info("d-1")).await;
+        book.upsert_order(dummy_order_info("d-2")).await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert_eq!(seen.len(), 2);
+        match (&seen[0], &seen[1]) {
+            (
+                OrderBookDelta::Upserted { revision: first, order: a },
+                OrderBookDelta::Upserted { revision: second, order: b },
+            ) => {
+                assert_eq!((a.id.as_str(), b.id.as_str()), ("d-1", "d-2"));
+                assert!(second > first, "revisions must grow: {first} then {second}");
+            }
+            other => panic!("expected two upserts, got {other:?}"),
+        }
+    }
+
+    /// The coalescing window exists because a snapshot is the whole book. A
+    /// delta is one order, so it has nothing to wait for — and a subscriber
+    /// applying deltas must see every change, in order.
+    #[tokio::test]
+    async fn deferred_and_coalesced_upserts_still_emit_their_delta_at_once() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.upsert_order_deferred(dummy_order_info("quiet")).await;
+        book.upsert_order_coalesced(dummy_order_info("burst")).await;
+
+        // Assert
+        let ids: Vec<String> = drain(&mut deltas)
+            .into_iter()
+            .map(|d| match d {
+                OrderBookDelta::Upserted { order, .. } => order.id,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(ids, ["quiet", "burst"]);
+    }
+
+    #[tokio::test]
+    async fn a_removal_is_a_delta_only_when_something_was_removed() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("gone")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.remove_order("never-there").await;
+        book.remove_order("gone").await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert!(
+            matches!(seen.as_slice(), [OrderBookDelta::Removed { order_id, .. }] if order_id == "gone"),
+            "got {seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_status_change_is_an_upsert_of_the_changed_order() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("moves")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.update_order_status("moves", OrderStatus::FiatSent).await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert!(
+            matches!(seen.as_slice(), [OrderBookDelta::Upserted { order, .. }]
+                if order.id == "moves" && order.status == OrderStatus::FiatSent),
+            "got {seen:?}"
+        );
+    }
+
+    /// A wholesale replacement cannot be told as per-order deltas — a
+    /// subscriber would have to know what vanished — so it says "start over".
+    #[tokio::test]
+    async fn replacing_or_clearing_the_book_asks_subscribers_to_start_over() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("old")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.set_orders(vec![dummy_order_info("new")]).await;
+        book.clear().await;
+
+        // Assert
+        let seen = drain(&mut deltas);
+        assert!(
+            matches!(
+                seen.as_slice(),
+                [OrderBookDelta::Reset, OrderBookDelta::Reset]
+            ),
+            "got {seen:?}"
+        );
+    }
+
+    /// An order re-announced unchanged is the common case on the wire: it
+    /// must not cost a revision, a delta, or later a bridge message.
+    #[tokio::test]
+    async fn an_upsert_that_changes_nothing_emits_nothing() {
+        // Arrange
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("same")).await;
+        let (before, _) = book.snapshot_with_revision().await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.upsert_order_deferred(dummy_order_info("same")).await;
+
+        // Assert
+        assert!(drain(&mut deltas).is_empty());
+        assert_eq!(book.snapshot_with_revision().await.0, before);
+    }
+
+    /// The resync contract. A subscriber that lagged reads a snapshot and
+    /// resumes — and a mutation can land between the two. Its delta is either
+    /// already inside the snapshot (revision ≤ the snapshot's: skip it, or a
+    /// removal would be replayed over a re-insert) or newer (apply it). With
+    /// the revision as the boundary the mirror ends equal to the book.
+    #[tokio::test]
+    async fn a_resync_interleaved_with_a_mutation_converges_on_the_book() {
+        // Arrange: the subscriber was listening, then fell behind.
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+        book.upsert_order(dummy_order_info("a")).await;
+        book.upsert_order(dummy_order_info("b")).await;
+
+        // Act: it resyncs from a snapshot, while mutations keep landing — one
+        // before the snapshot read, two after it.
+        book.remove_order("a").await;
+        let (revision, snapshot) = book.snapshot_with_revision().await;
+        book.upsert_order(dummy_order_info("a")).await;
+        book.update_order_status("b", OrderStatus::Active).await;
+
+        let mut mirror: HashMap<String, OrderInfo> =
+            snapshot.into_iter().map(|o| (o.id.clone(), o)).collect();
+        for delta in drain(&mut deltas) {
+            if delta.revision() <= revision {
+                continue;
+            }
+            match delta {
+                OrderBookDelta::Upserted { order, .. } => {
+                    mirror.insert(order.id.clone(), order);
+                }
+                OrderBookDelta::Removed { order_id, .. } => {
+                    mirror.remove(&order_id);
+                }
+                OrderBookDelta::Reset | OrderBookDelta::Loaded => {
+                    unreachable!("neither happens in this run")
+                }
+            }
+        }
+
+        // Assert
+        let (_, truth) = book.snapshot_with_revision().await;
+        let mut mirrored: Vec<(String, OrderStatus)> =
+            mirror.into_values().map(|o| (o.id, o.status)).collect();
+        let mut expected: Vec<(String, OrderStatus)> =
+            truth.into_iter().map(|o| (o.id, o.status)).collect();
+        mirrored.sort_by(|x, y| x.0.cmp(&y.0));
+        expected.sort_by(|x, y| x.0.cmp(&y.0));
+        assert_eq!(mirrored, expected);
+        assert_eq!(mirrored.len(), 2, "both orders are in the book at the end");
+    }
+
+    // ── Delta stream over the bridge (docs/OPTIMIZATION_PLAN.md PR 3.2) ──
+
+    use crate::api::types::OrderDelta;
+
+    /// What Dart does with the stream, in Rust: start from a snapshot, apply
+    /// what is newer, start over on a resync.
+    struct Mirror {
+        revision: u32,
+        orders: HashMap<String, OrderInfo>,
+    }
+
+    impl Mirror {
+        async fn from(book: &OrderBook) -> Self {
+            let snapshot = book.bridge_snapshot().await;
+            Self {
+                revision: snapshot.revision,
+                orders: snapshot
+                    .orders
+                    .into_iter()
+                    .map(|o| (o.id.clone(), o))
+                    .collect(),
+            }
+        }
+
+        /// Returns `false` when the delta asked for a resync.
+        fn apply(&mut self, delta: OrderDelta) -> bool {
+            match delta {
+                OrderDelta::Upserted { revision, order } if revision > self.revision => {
+                    self.revision = revision;
+                    self.orders.insert(order.id.clone(), order);
+                }
+                OrderDelta::Removed { revision, order_id } if revision > self.revision => {
+                    self.revision = revision;
+                    self.orders.remove(&order_id);
+                }
+                OrderDelta::Resync => return false,
+                OrderDelta::Loaded => {}
+                _stale => {}
+            }
+            true
+        }
+
+        fn ids(&self) -> Vec<String> {
+            let mut ids: Vec<String> = self.orders.keys().cloned().collect();
+            ids.sort();
+            ids
+        }
+    }
+
+    async fn book_ids(book: &OrderBook) -> Vec<String> {
+        book.bridge_snapshot().await.orders.into_iter().map(|o| o.id).collect()
+    }
+
+    async fn next_delta(stream: &mut OrderDeltaStream) -> OrderDelta {
+        tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("a delta within 2 s")
+            .expect("the stream is open")
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_plus_the_deltas_after_it_equals_the_book() {
+        // Arrange: subscribe first, then read — the order Dart must follow.
+        let book = OrderBook::new();
+        book.upsert_order(dummy_order_info("before")).await;
+        let mut stream = OrderDeltaStream::over(&book);
+        let mut mirror = Mirror::from(&book).await;
+
+        // Act
+        book.upsert_order(dummy_order_info("added")).await;
+        book.update_order_status("before", OrderStatus::Active).await;
+        book.remove_order("added").await;
+        for _ in 0..3 {
+            assert!(mirror.apply(next_delta(&mut stream).await));
+        }
+
+        // Assert
+        assert_eq!(mirror.ids(), book_ids(&book).await);
+        assert_eq!(mirror.orders["before"].status, OrderStatus::Active);
+    }
+
+    /// Subscribing before the snapshot means the first deltas heard can
+    /// already be inside it. Applying one would re-insert a removed order.
+    #[tokio::test]
+    async fn deltas_already_inside_the_snapshot_are_skipped() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+        book.upsert_order(dummy_order_info("short-lived")).await;
+        book.remove_order("short-lived").await;
+        let mut mirror = Mirror::from(&book).await;
+
+        // Act: both deltas predate the snapshot.
+        for _ in 0..2 {
+            assert!(mirror.apply(next_delta(&mut stream).await));
+        }
+
+        // Assert
+        assert!(mirror.orders.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_replaced_book_reaches_dart_as_a_resync() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+
+        // Act
+        book.clear().await;
+
+        // Assert
+        assert!(matches!(next_delta(&mut stream).await, OrderDelta::Resync));
+    }
+
+    /// An empty book produces no per-order delta, so a consumer waiting for
+    /// its first one to leave the loading state would wait forever — on a
+    /// cold start against a quiet node, and whenever the last order leaves.
+    /// The relay's EOSE on the pending feed is the confirmation it needs.
+    #[tokio::test]
+    async fn the_end_of_stored_orders_reaches_a_delta_consumer() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+
+        // Act
+        let published = book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Assert
+        assert!(published);
+        assert!(matches!(next_delta(&mut stream).await, OrderDelta::Loaded));
+    }
+
+    /// `Loaded` is an event, and a consumer created later never hears it: the
+    /// feed's EOSE comes once per subscription, not once per screen. A Home
+    /// screen re-created over a genuinely empty book would wait forever, so
+    /// the snapshot remembers the confirmation.
+    #[tokio::test]
+    async fn a_snapshot_says_whether_the_stored_book_was_already_replayed() {
+        // Arrange
+        let book = OrderBook::new();
+        assert!(!book.bridge_snapshot().await.loaded, "nothing confirmed yet");
+
+        // Act
+        book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Assert
+        assert!(book.bridge_snapshot().await.loaded);
+    }
+
+    /// A node switch empties the book before the new node answered: that
+    /// emptiness is not confirmed by anyone.
+    #[tokio::test]
+    async fn clearing_the_book_forgets_the_confirmation() {
+        // Arrange
+        let book = OrderBook::new();
+        book.publish_on_stored_events_end(&orders_subscription_id()).await;
+
+        // Act
+        book.clear().await;
+
+        // Assert
+        assert!(!book.bridge_snapshot().await.loaded);
+    }
+
+    /// Only the pending feed: the recent-changes and Kind 14 feeds end their
+    /// stored events too, once per relay each.
+    #[tokio::test]
+    async fn the_end_of_another_feed_tells_a_delta_consumer_nothing() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.publish_on_stored_events_end(&recent_orders_subscription_id()).await;
+
+        // Assert
+        assert!(drain(&mut deltas).is_empty());
+    }
+
+    /// A lagged subscriber cannot know what it missed. It is told to start
+    /// over — once — and a fresh snapshot plus what follows converges again.
+    #[tokio::test]
+    async fn a_subscriber_that_fell_behind_resyncs_and_converges() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut stream = OrderDeltaStream::over(&book);
+        let mut mirror = Mirror::from(&book).await;
+
+        // Act: more changes than the channel holds, none of them read.
+        for n in 0..=ORDER_DELTA_CAPACITY {
+            book.upsert_order_deferred(dummy_order_info(&format!("flood-{n}"))).await;
+        }
+        assert!(!mirror.apply(next_delta(&mut stream).await), "expected a resync");
+        mirror = Mirror::from(&book).await;
+        book.remove_order("flood-0").await;
+        while mirror.orders.contains_key("flood-0") {
+            mirror.apply(next_delta(&mut stream).await);
+        }
+
+        // Assert
+        assert_eq!(mirror.ids(), book_ids(&book).await);
+    }
+
+    /// The snapshot stream is what Dart still reads: it must keep carrying
+    /// the whole book, built from the map.
+    #[tokio::test]
+    async fn the_snapshot_stream_still_carries_the_whole_book() {
+        // Arrange
+        let book = OrderBook::new();
+        let mut snapshots = book.subscribe();
+
+        // Act
+        book.upsert_order(dummy_order_info("s-1")).await;
+        book.upsert_order(dummy_order_info("s-2")).await;
+
+        // Assert
+        let _first = snapshots.recv().await.unwrap();
+        let second = snapshots.recv().await.unwrap();
+        let mut ids: Vec<&str> = second.iter().map(|o| o.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["s-1", "s-2"]);
+    }
+
     /// Orders of ours stay: the trade detail screen looks them up in the book
     /// by id after the trade finishes.
     #[tokio::test]
@@ -8337,6 +9061,42 @@ mod tests {
             book.get_order("mine-done").await.is_some(),
             "our own history must remain addressable by id"
         );
+    }
+
+    /// The book feed can be the first to show one of our orders finished — a
+    /// pull-to-refresh, or the daemon's private message running late — and
+    /// the trade screen reads the book.
+    #[tokio::test]
+    async fn the_book_feed_applying_an_order_of_ours_rings_the_doorbell() {
+        // Arrange
+        let book = OrderBook::new();
+        let order_id = format!("touch-feed-{}", uuid::Uuid::new_v4());
+        let mut mine = dummy_order_info(&order_id);
+        mine.status = crate::api::types::OrderStatus::Success;
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        book.apply_ingested_order(mine, true, Publish::WhenBatchEnds).await;
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    /// The firehose is everybody else's orders: ringing for those would put a
+    /// bridge message behind every relay event.
+    #[tokio::test]
+    async fn the_book_feed_applying_a_strangers_order_stays_silent() {
+        // Arrange
+        let book = OrderBook::new();
+        let order_id = format!("touch-stranger-{}", uuid::Uuid::new_v4());
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        book.apply_ingested_order(dummy_order_info(&order_id), false, Publish::WhenBatchEnds)
+            .await;
+
+        // Assert
+        assert!(!rang_for(&mut touches, &order_id).await);
     }
 
     /// Build a signed Kind 38383 event for `order_id` at `status`, the shape
@@ -10136,6 +10896,138 @@ mod tests {
         );
     }
 
+    // ── Trade doorbell wiring (docs/OPTIMIZATION_PLAN.md PR 3.4) ──
+
+    /// Waits for `order_id`'s touch; `false` when none comes. The channel is
+    /// process-wide, so touches of other tests' orders are skipped.
+    async fn rang_for(
+        stream: &mut crate::api::trade_touch::TradeTouchStream,
+        order_id: &str,
+    ) -> bool {
+        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            loop {
+                match stream.next().await {
+                    Some(t) if t.order_id.as_deref() == Some(order_id) => return true,
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// A Kind 38383 update of our own order changes what the trade screen
+    /// reads and emits no TradeUpdate: only the 2 s poll used to notice.
+    #[tokio::test]
+    async fn a_public_update_of_our_order_rings_the_doorbell() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_public_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let taken = wire_order(&order_id, OrderStatus::WaitingBuyerInvoice);
+        order_book().upsert_order(taken.clone()).await;
+        db.save_trade(&cancel_test_row(taken)).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    /// The pay-invoice screen polled `list_trades` twice a second for this.
+    #[tokio::test]
+    async fn a_hold_invoice_reaching_the_row_rings_the_doorbell() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_invoice_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::WaitingPayment));
+        db.save_trade(&row).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        let changed = sync_trade_fields_if_changed(
+            db,
+            &order_id,
+            Some(&row),
+            None,
+            Some("lnbc1holdinvoice".to_string()),
+            None,
+        )
+        .await;
+
+        // Assert
+        assert!(changed);
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    #[tokio::test]
+    async fn a_write_that_changes_nothing_stays_silent() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_noop_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::Active));
+        db.save_trade(&row).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        let changed = sync_trade_fields_if_changed(
+            db,
+            &order_id,
+            Some(&row),
+            Some(OrderStatus::Active),
+            None,
+            None,
+        )
+        .await;
+
+        // Assert
+        assert!(!changed);
+        assert!(!rang_for(&mut touches, &order_id).await);
+    }
+
+    #[tokio::test]
+    async fn a_lifecycle_update_rings_the_doorbell() {
+        // Arrange
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        emit_trade_update(&order_id, OrderStatus::FiatSent);
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    #[tokio::test]
+    async fn a_wiped_trade_rings_the_doorbell() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_touch_wipe_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::WaitingBuyerInvoice));
+        db.save_trade(&row).await.expect("save the trade row");
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        wipe_trade_row(db, &order_id, 1, 1).await.expect("wipe");
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
     /// A confirmed take is its order's only row. A row an earlier take of the
     /// same order left behind (its `Canceled` lost, or written before takers'
     /// cancels were wiped) used to stay next to the new one, and lookups by
@@ -10208,24 +11100,91 @@ mod tests {
         );
     }
 
-    /// Past `waiting-*` nothing changes: the cancel of an active trade still
-    /// marks its row `Canceled` straight away.
+    /// Every update the channel carried for `order_id`, as (status, reason).
+    /// The channel is process-wide, so other tests' emissions are skipped.
+    fn drain_updates_for(
+        rx: &mut tokio::sync::broadcast::Receiver<crate::api::types::TradeUpdate>,
+        order_id: &str,
+    ) -> Vec<(
+        crate::api::types::OrderStatus,
+        Option<crate::api::types::TradeUpdateReason>,
+    )> {
+        let mut emitted = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                emitted.push((update.status, update.reason));
+            }
+        }
+        emitted
+    }
+
+    /// Past `waiting-*` a cancel is a request: the trade goes on until the
+    /// counterparty also cancels (protocol `cancel.md`, "Cancel
+    /// cooperatively"). The row keeps its status and remembers who asked.
+    /// Marking it `Canceled` here showed a cancelled trade the daemon still
+    /// ran, and that terminal status then dropped the daemon's own
+    /// cooperative-cancel messages as replays over a finished trade — the
+    /// requester never learned the counterparty had agreed.
     #[tokio::test]
-    async fn cancel_of_an_active_trade_still_marks_it_canceled() {
+    async fn cancel_of_an_active_trade_is_a_request_the_daemon_settles() {
+        use crate::api::types::{CooperativeCancelState, OrderStatus, TradeUpdateReason};
+        use mostro_core::message::Action;
+
         let path = std::env::temp_dir()
             .join(format!("mostro_cancel_active_{}.db", std::process::id()));
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
         let db = crate::db::app_db::db().expect("store initialised");
 
-        let order_id = uuid::Uuid::new_v4().to_string();
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
         let mut order_info = dummy_order_info(&order_id);
-        order_info.status = crate::api::types::OrderStatus::Active;
+        order_info.status = OrderStatus::Active;
         db.save_trade(&cancel_test_row(order_info))
             .await
             .expect("save the trade row");
 
         apply_local_cancel(&order_id).await;
 
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("trade lookup")
+            .expect("the row must still be there");
+        assert_eq!(
+            row.order.status,
+            OrderStatus::Active,
+            "an active trade stays active until the counterparty agrees"
+        );
+        assert_eq!(
+            row.cooperative_cancel_state,
+            Some(CooperativeCancelState::RequestedByMe),
+            "the row must remember that this side asked"
+        );
+
+        // The daemon confirms the request: the UI hears it, the trade stays put.
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_daemon_action(
+            order_uuid,
+            Action::CooperativeCancelInitiatedByYou,
+            "test-coop-cancel-by-you",
+        )
+        .await;
+        assert_eq!(
+            drain_updates_for(&mut rx, &order_id),
+            vec![(
+                OrderStatus::Active,
+                Some(TradeUpdateReason::CooperativeCancelRequestedByMe)
+            )],
+            "the daemon's confirmation must reach the UI, without a status change"
+        );
+
+        // The counterparty agrees: the trade ends as cooperatively cancelled.
+        dispatch_daemon_action(
+            order_uuid,
+            Action::CooperativeCancelAccepted,
+            "test-coop-cancel-accepted",
+        )
+        .await;
         assert_eq!(
             db.get_trade_by_order_id(&order_id)
                 .await
@@ -10233,8 +11192,60 @@ mod tests {
                 .expect("the row must still be there")
                 .order
                 .status,
-            crate::api::types::OrderStatus::Canceled,
-            "an active trade's row is still marked Canceled optimistically"
+            OrderStatus::CooperativelyCanceled,
+            "the counterparty's agreement must not be dropped as a replay"
+        );
+    }
+
+    /// The counterparty's request reaches this side as
+    /// `cooperative-cancel-initiated-by-peer`. The row remembers it and the
+    /// UI hears it — with the trade's own status, since a request can come
+    /// after the fiat was sent — or the peer waits for an answer to a
+    /// question nobody was shown.
+    #[tokio::test]
+    async fn a_peers_cancel_request_is_remembered_and_announced() {
+        use crate::api::types::{CooperativeCancelState, OrderStatus, TradeUpdateReason};
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir()
+            .join(format!("mostro_cancel_by_peer_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.status = OrderStatus::FiatSent;
+        db.save_trade(&cancel_test_row(order_info))
+            .await
+            .expect("save the trade row");
+
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_daemon_action(
+            order_uuid,
+            Action::CooperativeCancelInitiatedByPeer,
+            "test-coop-cancel-by-peer",
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("trade lookup")
+            .expect("the row must still be there");
+        assert_eq!(row.order.status, OrderStatus::FiatSent, "a request moves nothing");
+        assert_eq!(
+            row.cooperative_cancel_state,
+            Some(CooperativeCancelState::RequestedByPeer),
+            "the row must remember that the counterparty asked"
+        );
+        assert_eq!(
+            drain_updates_for(&mut rx, &order_id),
+            vec![(
+                OrderStatus::FiatSent,
+                Some(TradeUpdateReason::CooperativeCancelRequestedByPeer)
+            )],
+            "the peer's request must reach the UI with the trade's own status"
         );
     }
 

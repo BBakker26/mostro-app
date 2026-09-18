@@ -722,6 +722,36 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo cancelar. Por favor, inténtelo de nuevo.';
 
   @override
+  String get tradeCardCancelRequestedByMeTitle => 'Cancelación solicitada';
+
+  @override
+  String get tradeCardCancelRequestedByMeMessage =>
+      'Pediste cancelar este intercambio. Sigue abierto hasta que la otra parte también cancele. Si no responde, puedes abrir una disputa.';
+
+  @override
+  String get tradeCardCancelRequestedByPeerTitle =>
+      'La otra parte quiere cancelar';
+
+  @override
+  String get tradeCardCancelRequestedByPeerMessage =>
+      'Pidió cancelar este intercambio. Acepta para terminarlo sin mover fondos, o sigue con el intercambio.';
+
+  @override
+  String get tradeCancelRequestedByMeNotice =>
+      'Pediste cancelar este intercambio. Sigue abierto hasta que la otra parte también cancele. Si no responde, puedes abrir una disputa.';
+
+  @override
+  String get tradeCancelRequestedByPeerNotice =>
+      'La otra parte pidió cancelar este intercambio. Acepta para terminarlo sin mover fondos, o sigue con el intercambio.';
+
+  @override
+  String get acceptCancelButton => 'Aceptar cancelación';
+
+  @override
+  String get cancelTradeDialogContentAccept =>
+      'La otra parte pidió cancelar. Si cancelas ahora, el intercambio termina para ambos y no se mueven fondos.';
+
+  @override
   String get fiatSentFailed =>
       'Error al marcar el fiat como enviado. Por favor, inténtelo de nuevo.';
 
@@ -1502,6 +1532,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String timeLeftLabel(String time) {
     return 'Quedan $time';
   }
+
+  @override
+  String get invoiceNoLongerExpected =>
+      'Esta orden ya no espera una factura. Actualizando su estado…';
 
   @override
   String get waitingForTradeAmount =>

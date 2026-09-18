@@ -723,6 +723,36 @@ class AppLocalizationsFr extends AppLocalizations {
       'Échec de l\'annulation. Veuillez réessayer.';
 
   @override
+  String get tradeCardCancelRequestedByMeTitle => 'Annulation demandée';
+
+  @override
+  String get tradeCardCancelRequestedByMeMessage =>
+      'Vous avez demandé l\'annulation de cet échange. Il reste ouvert jusqu\'à ce que l\'autre partie annule aussi. Sans réponse de sa part, vous pouvez ouvrir un litige.';
+
+  @override
+  String get tradeCardCancelRequestedByPeerTitle =>
+      'L\'autre partie veut annuler';
+
+  @override
+  String get tradeCardCancelRequestedByPeerMessage =>
+      'Elle a demandé l\'annulation de cet échange. Acceptez pour y mettre fin sans mouvement de fonds, ou poursuivez l\'échange.';
+
+  @override
+  String get tradeCancelRequestedByMeNotice =>
+      'Vous avez demandé l\'annulation de cet échange. Il reste ouvert jusqu\'à ce que l\'autre partie annule aussi. Sans réponse de sa part, vous pouvez ouvrir un litige.';
+
+  @override
+  String get tradeCancelRequestedByPeerNotice =>
+      'L\'autre partie a demandé l\'annulation de cet échange. Acceptez pour y mettre fin sans mouvement de fonds, ou poursuivez l\'échange.';
+
+  @override
+  String get acceptCancelButton => 'Accepter l\'annulation';
+
+  @override
+  String get cancelTradeDialogContentAccept =>
+      'L\'autre partie a demandé l\'annulation. Annuler maintenant met fin à l\'échange pour vous deux, sans mouvement de fonds.';
+
+  @override
   String get fiatSentFailed =>
       'Échec de la confirmation du paiement fiat. Veuillez réessayer.';
 
@@ -1506,6 +1536,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String timeLeftLabel(String time) {
     return '$time restant';
   }
+
+  @override
+  String get invoiceNoLongerExpected =>
+      'Cet ordre n\'attend plus de facture. Mise à jour de son statut…';
 
   @override
   String get waitingForTradeAmount =>

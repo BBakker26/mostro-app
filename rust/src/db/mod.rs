@@ -317,6 +317,17 @@ pub trait Storage: Send + Sync {
     /// exists.
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
 
+    /// Record who asked to cancel an active trade cooperatively
+    /// (`$.cooperative_cancel_state`) on the trade identified by `order.id`.
+    /// The status is left alone: the protocol has no cancel-requested status,
+    /// the trade goes on until the counterparty also cancels. No-op when no
+    /// matching trade exists.
+    async fn set_cooperative_cancel_state(
+        &self,
+        order_id: &str,
+        state: crate::api::types::CooperativeCancelState,
+    ) -> Result<()>;
+
     /// Persist the counterparty's trade pubkey on the trade identified by
     /// `order.id` (issue #334). Written when a daemon message reveals it, for
     /// both roles — the trade row is the durable peer record; the in-memory

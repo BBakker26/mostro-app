@@ -206,6 +206,14 @@ bridged by flutter_rust_bridge.
   the intent and re-issues it per relay as it connects; a bare `client.subscribe(..).with_id(..)`
   or `client.unsubscribe(..)` fails a guard test. A resume that replaced `mostro-dm` offline
   used to leave the session deaf to daemon messages. Rules and log signatures: `docs/RELAYS.md`.
+- **Nothing relay-bound may sit in front of `subscribe_orders()` in `on_pool_online`.** The
+  capability fetch (Kind 38385) used to, and one relay slow to answer kept the book empty for
+  8 s of a cold start (`fetch_events` waits for EOSE from **every** relay). The book subscribes
+  first; the fetch reads the replaceable event through `nostr::first_answer::newest_answer`
+  (first copy + a short grace) instead. The price of that order: the node's history can replay
+  before the capabilities are known, so a receive-path reader of them must wait — today only a
+  fresh payout claim's deadline, via `bond_policy::get_for_once_settled`, and whoever opens
+  subscriptions ahead of a capability fetch holds a `bond_policy::fetch_pending()` guard.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view

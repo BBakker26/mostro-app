@@ -183,14 +183,21 @@ static ONLINE_SYNC: crate::nostr::coalesce::Coalesced = crate::nostr::coalesce::
 /// Everything that has to happen once the pool can reach a relay again.
 async fn on_pool_online() {
     log::info!(
-        "[nostr] relay pool ONLINE — fetching node capabilities, flushing queue, subscribing orders"
+        "[nostr] relay pool ONLINE — subscribing orders, fetching node capabilities, flushing queue"
     );
-    // Fetch capabilities first so queued messages are wrapped with the
-    // correct difficulty before being flushed.
-    fetch_and_set_node_capabilities().await;
-    let _ = flush_message_queue().await;
-    // Start (or re-start) Kind 38383 order book subscription.
+    // Taken before the subscriptions open: their history replay can carry an
+    // `add-bond-invoice`, whose deadline waits for the fetch below (§6.4).
+    let capabilities_pending = crate::mostro::bond_policy::fetch_pending();
+    // Start (or re-start) Kind 38383 order book subscription. First, and it
+    // only spawns: the book is public and needs nothing the capability fetch
+    // returns, while that fetch is a relay round trip. Behind it, a relay slow
+    // to answer kept the book empty for eight seconds of a cold start.
     crate::api::orders::subscribe_orders().await;
+    // Capabilities before the flush, so queued messages are wrapped with the
+    // correct difficulty.
+    fetch_and_set_node_capabilities().await;
+    drop(capabilities_pending);
+    let _ = flush_message_queue().await;
     // Rebuild chat listeners for persisted active trades — sessions are
     // in-memory, so after a restart nothing else would resubscribe.
     // Idempotent: orders with a live chat task are skipped by the
@@ -612,23 +619,40 @@ pub async fn fetch_mostro_instance_tags(
         .custom_tag(SingleLetterTag::LOWERCASE_D, &mostro_pubkey_hex)
         .limit(1);
 
-    let events = client
-        .fetch_events(filter)
+    // Streamed, not `fetch_events`: that returns once *every* relay has sent
+    // EOSE, so one relay sitting on the REQ cost the whole 10 s — at startup,
+    // with the answer already in hand from the others. The event is
+    // replaceable, so the first copy plus a short grace for a newer one (by
+    // NIP-01's order) is enough. Dropping the stream closes the REQ on the relays still silent.
+    let stream = client
+        .stream_events(filter)
         .timeout(Duration::from_secs(10))
         .await
-        .map_err(|e| anyhow::anyhow!("fetch_events failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("stream_events failed: {e}"))?;
+    let copies = stream.filter_map(|(relay, item)| async move {
+        item.inspect_err(|e| log::debug!("[nostr] 38385 from {relay}: {e}"))
+            .ok()
+    });
+    let event = crate::nostr::first_answer::newest_answer(
+        Box::pin(copies),
+        INSTANCE_INFO_GRACE,
+        crate::nostr::first_answer::replaceable_rank,
+    )
+    .await;
 
-    if let Some(event) = events.first() {
-        let tags = event
+    Ok(event.map(|event| {
+        event
             .tags
             .iter()
             .map(|t| t.as_slice().to_vec())
-            .collect::<Vec<Vec<String>>>();
-        Ok(Some(tags))
-    } else {
-        Ok(None)
-    }
+            .collect::<Vec<Vec<String>>>()
+    }))
 }
+
+/// How long [`fetch_mostro_instance_tags`] keeps listening after the first
+/// copy of the node's info event, in case that relay held a stale one. Relays
+/// that answer at all do so within a few hundred milliseconds of each other.
+const INSTANCE_INFO_GRACE: std::time::Duration = std::time::Duration::from_millis(750);
 
 /// Price of one BTC in `fiat_code`, as published by `mostro_pubkey_hex` in its
 /// Kind 30078 (`d` = `mostro-rates`) event.
@@ -766,10 +790,28 @@ fn tag_value(event: &nostr_sdk::prelude::Event, name: &str) -> Option<String> {
 /// from the same event, and a second relay query for the escrow tags would
 /// double the traffic for no new information.
 pub(crate) async fn fetch_and_set_node_capabilities() {
+    let mostro_pubkey_hex = crate::config::active_mostro_pubkey();
+    let fetched = fetch_mostro_instance_tags(mostro_pubkey_hex.clone()).await;
+    apply_node_capabilities(&mostro_pubkey_hex, fetched);
+}
+
+/// Store what `node`'s info event said — or, for a failed or empty fetch,
+/// forget what was known.
+///
+/// A fetch outlived by a node switch is dropped whole, success or failure.
+/// Every store here is a single slot for "the active node": the slower fetch
+/// of the node left behind used to land after the new node's and overwrite
+/// it — the bond policy then answered `None` for the active node, and the
+/// escrow mode, which carries no node tag at all, was simply the wrong node's.
+fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>) {
     use crate::mostro::escrow_mode;
 
-    let mostro_pubkey_hex = crate::config::active_mostro_pubkey();
-    match fetch_mostro_instance_tags(mostro_pubkey_hex.clone()).await {
+    if !node.eq_ignore_ascii_case(&crate::config::active_mostro_pubkey()) {
+        log::info!("[nostr] capabilities of a node no longer active — dropped");
+        return;
+    }
+    let mostro_pubkey_hex = node.to_string();
+    match fetched {
         Ok(Some(tags)) => {
             // Both difficulties: `pow` for every event, `pow_first_contact`
             // for the first event of a trade. An absent first-contact tag is
@@ -951,6 +993,83 @@ mod tests {
     use nostr_sdk::prelude::*;
 
     const RATES: &str = r#"{"BTC":{"USD":50000.0}}"#;
+
+    fn bond_enabled_tags() -> Vec<Vec<String>> {
+        [("bond_enabled", "true"), ("bond_payout_claim_window_days", "30")]
+            .iter()
+            .map(|(k, v)| vec![k.to_string(), v.to_string()])
+            .collect()
+    }
+
+    #[test]
+    fn a_capability_fetch_for_a_node_no_longer_active_writes_nothing() {
+        // Arrange: the user switched nodes while this fetch was in flight. Its
+        // answer is about a node nobody is talking to any more.
+        let left_behind = "a".repeat(64);
+        assert_ne!(left_behind, crate::config::active_mostro_pubkey());
+
+        // Act
+        apply_node_capabilities(&left_behind, Ok(Some(bond_enabled_tags())));
+
+        // Assert: had it been written, the single policy slot would now hold
+        // this node's answer in place of the active node's.
+        assert_eq!(crate::mostro::bond_policy::get_for(&left_behind), None);
+    }
+
+    /// The body of `on_pool_online`, up to the next top-level item.
+    fn on_pool_online_body() -> &'static str {
+        let source = include_str!("nostr.rs");
+        let start = source
+            .find("async fn on_pool_online()")
+            .expect("on_pool_online exists");
+        let body = &source[start..];
+        &body[..body.find("\n}\n").expect("on_pool_online ends")]
+    }
+
+    #[test]
+    fn the_order_book_is_subscribed_before_the_capability_fetch() {
+        // Arrange: the capability fetch is a relay round trip bounded only by
+        // a 10 s timeout, and the public book needs none of what it returns.
+        let body = on_pool_online_body();
+
+        // Act
+        let subscribe = body.find("subscribe_orders().await");
+        let capabilities = body.find("fetch_and_set_node_capabilities().await");
+
+        // Assert
+        assert!(
+            subscribe.expect("subscribes the book") < capabilities.expect("fetches capabilities"),
+            "a slow relay must not hold the order book behind the capability fetch"
+        );
+    }
+
+    #[test]
+    fn the_capability_fetch_is_announced_before_the_subscriptions_open() {
+        // Arrange: a payout claim replayed by those subscriptions prices its
+        // deadline from the fetch, and only waits for one it knows is coming.
+        let body = on_pool_online_body();
+
+        // Act
+        let announced = body.find("bond_policy::fetch_pending()");
+        let subscribe = body.find("subscribe_orders().await");
+
+        // Assert
+        assert!(announced.expect("announces the fetch") < subscribe.expect("subscribes the book"));
+    }
+
+    #[test]
+    fn the_outbox_is_still_flushed_after_the_capability_fetch() {
+        // Arrange: queued messages are wrapped at flush time and need the
+        // node's PoW difficulty, which only the fetch provides.
+        let body = on_pool_online_body();
+
+        // Act
+        let capabilities = body.find("fetch_and_set_node_capabilities().await");
+        let flush = body.find("flush_message_queue().await");
+
+        // Assert
+        assert!(capabilities.expect("fetches capabilities") < flush.expect("flushes the outbox"));
+    }
 
     fn rates_event(keys: &Keys, content: &str, created_at: u64) -> Event {
         EventBuilder::new(Kind::from(rates::RATES_KIND), content)

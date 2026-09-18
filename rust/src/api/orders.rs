@@ -4202,8 +4202,14 @@ async fn apply_payout_request(request: crate::mostro::bond_claims::PayoutRequest
         .await
         .ok()
         .flatten();
-    let window_days = crate::mostro::bond_policy::get_for(&request.node_pubkey)
-        .and_then(|p| p.payout_claim_window_days);
+    // Only a claim seen for the first time freezes a deadline, and only then
+    // is the policy worth waiting for: this can run from the history replay
+    // of a cold start, before the capability fetch has answered.
+    let window_days = match stored {
+        Some(_) => crate::mostro::bond_policy::get_for(&request.node_pubkey),
+        None => crate::mostro::bond_policy::get_for_once_settled(&request.node_pubkey).await,
+    }
+    .and_then(|p| p.payout_claim_window_days);
     let now = crate::rt::unix_now();
     let (claim, notice) = upsert_claim(stored.as_ref(), &request, window_days, now);
     let Some(claim) = claim else {
@@ -6896,6 +6902,14 @@ async fn replace_global_dm_filter(
 /// subscription loop keeps running and picks up the new node via its
 /// per-event active-pubkey check — no loop restart, so no duplicate loops.
 pub(crate) async fn refresh_subscriptions_for_active_node() {
+    // Held from the first line to the capability re-fetch at the end. The
+    // previous subscriptions stay live through every await below, and the new
+    // node's history replays through the ones opened here: a payout claim in
+    // either prices its deadline from the policy that fetch brings (§6.4), so
+    // it must find the fetch pending — not a policy just cleared and nobody
+    // said to be coming.
+    let _capabilities_pending = crate::mostro::bond_policy::fetch_pending();
+
     // Drop stale orders immediately so the UI doesn't show the old node's book.
     order_book().clear().await;
 
@@ -13653,6 +13667,23 @@ mod tests {
     /// tombstone silently swallowing every daemon message of the new trade,
     /// and `a_retake_after_a_wipe_lifts_the_tombstone` above only proves the
     /// helper works, not that the callers use it. Pin the callers statically.
+    #[test]
+    fn a_node_switch_announces_its_capability_fetch_before_anything_awaits() {
+        // Arrange
+        let source = include_str!("orders.rs");
+        let start = source
+            .find("pub(crate) async fn refresh_subscriptions_for_active_node()")
+            .expect("the node switch exists");
+        let body = &source[start..];
+
+        // Act
+        let announced = body.find("bond_policy::fetch_pending()");
+        let first_await = body.find(".await");
+
+        // Assert: a claim arriving during any await must find the fetch pending.
+        assert!(announced.expect("announces the fetch") < first_await.expect("awaits something"));
+    }
+
     #[test]
     fn production_code_saves_trades_only_through_persist_trade_row() {
         let source = include_str!("orders.rs");

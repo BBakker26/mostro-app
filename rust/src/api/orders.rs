@@ -2268,8 +2268,13 @@ fn resolve_add_invoice_destination(
 ///   terminal status then refused the daemon's `pending` republish: the
 ///   ex-taker never saw the order in the book again. A cancel the daemon
 ///   refuses now also leaves a live trade looking live.
-/// * **Anything further along**: marked `Canceled` straight away, as before,
-///   so the UI reflects it without waiting for the daemon.
+/// * **Anything further along**: the status stays and the row records
+///   `cooperative_cancel_state = RequestedByMe`. From `active` on the cancel
+///   is a request the counterparty must agree to (protocol `cancel.md`,
+///   "Cancel cooperatively"); the daemon's
+///   `cooperative-cancel-initiated-by-you` confirms it and
+///   `cooperative-cancel-accepted` ends the trade. An `in-progress` row may
+///   still be a never-active take, which the daemon's `Canceled` settles.
 async fn apply_local_cancel(order_id: &str) {
     order_book().remove_order(order_id).await;
     let Some(db) = crate::db::app_db::db() else {
@@ -2301,19 +2306,25 @@ async fn apply_local_cancel(order_id: &str) {
         );
         return;
     }
+    // From `active` on the cancel is a request the counterparty must agree
+    // to (protocol `cancel.md`, "Cancel cooperatively"): the status stays,
+    // the row remembers who asked. The daemon's
+    // `cooperative-cancel-initiated-by-you` confirms it and
+    // `cooperative-cancel-accepted` ends the trade — an optimistic
+    // `Canceled` here made that acceptance look like a replay over a
+    // finished trade and dropped it. An `in-progress` row may still be a
+    // never-active take; then the daemon's `Canceled` settles it as before.
     if let Err(e) = db
-        .update_trade_fields(
+        .set_cooperative_cancel_state(
             order_id,
-            Some(crate::api::types::OrderStatus::Canceled),
-            None,
-            None,
+            crate::api::types::CooperativeCancelState::RequestedByMe,
         )
         .await
     {
         crate::api::logging::blog_warn(
             "orders",
             format!(
-                "cancel status not persisted for order={}: {e}",
+                "cancel request not persisted for order={}: {e}",
                 crate::api::logging::short_id(order_id),
             ),
         );
@@ -3719,8 +3730,6 @@ async fn dispatch_mostro_message(
         | Action::Released
         | Action::PurchaseCompleted
         | Action::CooperativeCancelAccepted
-        | Action::CooperativeCancelInitiatedByPeer
-        | Action::CooperativeCancelInitiatedByYou
         | Action::DisputeInitiatedByYou
         | Action::DisputeInitiatedByPeer
         | Action::AdminSettled
@@ -3805,6 +3814,70 @@ async fn dispatch_mostro_message(
                     kind.action
                 );
             }
+        }
+        // A cooperative-cancel request moves nothing: the trade goes on until
+        // the counterparty also cancels (protocol `cancel.md`, "Cancel
+        // cooperatively"), so the status table above has no row for it. The
+        // trade row remembers who asked and the UI is told, with the trade's
+        // own status — dropping these as "no status change" left the
+        // requester unconfirmed and the counterparty unaware.
+        Action::CooperativeCancelInitiatedByYou | Action::CooperativeCancelInitiatedByPeer => {
+            let order_id = match &kind.id {
+                Some(id) => id.to_string(),
+                None => {
+                    log::debug!("[orders] daemon-msg {:?} has no order id", kind.action);
+                    return;
+                }
+            };
+            if status_arm_gate(&row_state, &kind.action, &order_id) {
+                return;
+            }
+            if status_write_blocked(&order_id, &kind.action, event_ts).await {
+                return;
+            }
+            record_status_event(&order_id, event_ts).await;
+            let (state, reason) =
+                if matches!(kind.action, Action::CooperativeCancelInitiatedByYou) {
+                    (
+                        crate::api::types::CooperativeCancelState::RequestedByMe,
+                        crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByMe,
+                    )
+                } else {
+                    (
+                        crate::api::types::CooperativeCancelState::RequestedByPeer,
+                        crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByPeer,
+                    )
+                };
+            if let Some(db) = crate::db::app_db::db() {
+                if let Err(e) = db.set_cooperative_cancel_state(&order_id, state).await {
+                    crate::api::logging::blog_warn(
+                        "orders",
+                        format!(
+                            "cancel request not persisted for order={}: {e}",
+                            crate::api::logging::short_id(&order_id),
+                        ),
+                    );
+                }
+            }
+            // The status the screens already show: a request can follow the
+            // fiat-sent step as well as the active one.
+            let status = current_local_status(&order_id)
+                .await
+                .unwrap_or(crate::api::types::OrderStatus::Active);
+            crate::api::logging::blog_info(
+                "orders",
+                format!(
+                    "cancel requested order={} by={} status={status:?} src=kind14/{:?}",
+                    crate::api::logging::short_id(&order_id),
+                    if matches!(reason, crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByMe) {
+                        "me"
+                    } else {
+                        "peer"
+                    },
+                    kind.action,
+                ),
+            );
+            emit_trade_update_at(&order_id, status, Some(reason), event_ts);
         }
         // The daemon announces which solver took the dispute, and carries their
         // pubkey in the payload. That pubkey is what both sides ECDH against to
@@ -11027,24 +11100,91 @@ mod tests {
         );
     }
 
-    /// Past `waiting-*` nothing changes: the cancel of an active trade still
-    /// marks its row `Canceled` straight away.
+    /// Every update the channel carried for `order_id`, as (status, reason).
+    /// The channel is process-wide, so other tests' emissions are skipped.
+    fn drain_updates_for(
+        rx: &mut tokio::sync::broadcast::Receiver<crate::api::types::TradeUpdate>,
+        order_id: &str,
+    ) -> Vec<(
+        crate::api::types::OrderStatus,
+        Option<crate::api::types::TradeUpdateReason>,
+    )> {
+        let mut emitted = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                emitted.push((update.status, update.reason));
+            }
+        }
+        emitted
+    }
+
+    /// Past `waiting-*` a cancel is a request: the trade goes on until the
+    /// counterparty also cancels (protocol `cancel.md`, "Cancel
+    /// cooperatively"). The row keeps its status and remembers who asked.
+    /// Marking it `Canceled` here showed a cancelled trade the daemon still
+    /// ran, and that terminal status then dropped the daemon's own
+    /// cooperative-cancel messages as replays over a finished trade — the
+    /// requester never learned the counterparty had agreed.
     #[tokio::test]
-    async fn cancel_of_an_active_trade_still_marks_it_canceled() {
+    async fn cancel_of_an_active_trade_is_a_request_the_daemon_settles() {
+        use crate::api::types::{CooperativeCancelState, OrderStatus, TradeUpdateReason};
+        use mostro_core::message::Action;
+
         let path = std::env::temp_dir()
             .join(format!("mostro_cancel_active_{}.db", std::process::id()));
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
         let db = crate::db::app_db::db().expect("store initialised");
 
-        let order_id = uuid::Uuid::new_v4().to_string();
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
         let mut order_info = dummy_order_info(&order_id);
-        order_info.status = crate::api::types::OrderStatus::Active;
+        order_info.status = OrderStatus::Active;
         db.save_trade(&cancel_test_row(order_info))
             .await
             .expect("save the trade row");
 
         apply_local_cancel(&order_id).await;
 
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("trade lookup")
+            .expect("the row must still be there");
+        assert_eq!(
+            row.order.status,
+            OrderStatus::Active,
+            "an active trade stays active until the counterparty agrees"
+        );
+        assert_eq!(
+            row.cooperative_cancel_state,
+            Some(CooperativeCancelState::RequestedByMe),
+            "the row must remember that this side asked"
+        );
+
+        // The daemon confirms the request: the UI hears it, the trade stays put.
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_daemon_action(
+            order_uuid,
+            Action::CooperativeCancelInitiatedByYou,
+            "test-coop-cancel-by-you",
+        )
+        .await;
+        assert_eq!(
+            drain_updates_for(&mut rx, &order_id),
+            vec![(
+                OrderStatus::Active,
+                Some(TradeUpdateReason::CooperativeCancelRequestedByMe)
+            )],
+            "the daemon's confirmation must reach the UI, without a status change"
+        );
+
+        // The counterparty agrees: the trade ends as cooperatively cancelled.
+        dispatch_daemon_action(
+            order_uuid,
+            Action::CooperativeCancelAccepted,
+            "test-coop-cancel-accepted",
+        )
+        .await;
         assert_eq!(
             db.get_trade_by_order_id(&order_id)
                 .await
@@ -11052,8 +11192,60 @@ mod tests {
                 .expect("the row must still be there")
                 .order
                 .status,
-            crate::api::types::OrderStatus::Canceled,
-            "an active trade's row is still marked Canceled optimistically"
+            OrderStatus::CooperativelyCanceled,
+            "the counterparty's agreement must not be dropped as a replay"
+        );
+    }
+
+    /// The counterparty's request reaches this side as
+    /// `cooperative-cancel-initiated-by-peer`. The row remembers it and the
+    /// UI hears it — with the trade's own status, since a request can come
+    /// after the fiat was sent — or the peer waits for an answer to a
+    /// question nobody was shown.
+    #[tokio::test]
+    async fn a_peers_cancel_request_is_remembered_and_announced() {
+        use crate::api::types::{CooperativeCancelState, OrderStatus, TradeUpdateReason};
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir()
+            .join(format!("mostro_cancel_by_peer_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.status = OrderStatus::FiatSent;
+        db.save_trade(&cancel_test_row(order_info))
+            .await
+            .expect("save the trade row");
+
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_daemon_action(
+            order_uuid,
+            Action::CooperativeCancelInitiatedByPeer,
+            "test-coop-cancel-by-peer",
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("trade lookup")
+            .expect("the row must still be there");
+        assert_eq!(row.order.status, OrderStatus::FiatSent, "a request moves nothing");
+        assert_eq!(
+            row.cooperative_cancel_state,
+            Some(CooperativeCancelState::RequestedByPeer),
+            "the row must remember that the counterparty asked"
+        );
+        assert_eq!(
+            drain_updates_for(&mut rx, &order_id),
+            vec![(
+                OrderStatus::FiatSent,
+                Some(TradeUpdateReason::CooperativeCancelRequestedByPeer)
+            )],
+            "the peer's request must reach the UI with the trade's own status"
         );
     }
 

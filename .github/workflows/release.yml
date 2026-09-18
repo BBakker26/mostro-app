@@ -214,16 +214,16 @@ jobs:
 
           # Fail here, in seconds, rather than at :app:packageRelease after
           # fifteen minutes of compiling: the store password must open the
-          # keystore and the alias must be in it.
-          if ! keytool -list -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-              -alias "$ANDROID_KEY_ALIAS" > /dev/null 2>&1; then
-            aliases=$(keytool -list -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" 2>/dev/null \
-              | sed -n 's/^\([^,]*\),.*PrivateKeyEntry.*/\1/p' | paste -sd ' ' -)
-            if [ -n "$aliases" ]; then
-              echo "::error::ANDROID_KEY_ALIAS names no key in the keystore. Keys in it: $aliases"
-            else
-              echo "::error::ANDROID_KEYSTORE_PASSWORD does not open the keystore, or it holds no private key."
-            fi
+          # keystore and the alias must name a private key in it (a
+          # certificate-only entry cannot sign). The password goes in through
+          # the environment, not argv, where other processes could read it.
+          if ! listing=$(keytool -list -keystore "$keystore" -storepass:env ANDROID_KEYSTORE_PASSWORD 2>/dev/null); then
+            echo "::error::ANDROID_KEYSTORE_PASSWORD does not open the keystore."
+            exit 1
+          fi
+          keys=$(sed -n 's/^\([^,]*\),.*PrivateKeyEntry.*/\1/p' <<< "$listing")
+          if ! grep -qix -- "$ANDROID_KEY_ALIAS" <<< "$keys"; then
+            echo "::error::ANDROID_KEY_ALIAS names no private key in the keystore. Private keys in it: $(paste -sd ' ' <<< "$keys")"
             exit 1
           fi
 

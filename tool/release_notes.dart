@@ -4,7 +4,10 @@
 //   dart run tool/release_notes.dart \
 //     --tag v2.0.1 [--previous-tag v2.0.0] --repository MostroP2P/app \
 //     --commits commits.tsv --pull-requests prs.json \
-//     --body-out RELEASE_BODY.md --changelog CHANGELOG.md
+//     --body-out RELEASE_BODY.md --changelog CHANGELOG.md [--assets-dir dist]
+//
+//   --assets-dir  the files that were built; the Downloads section links only
+//                 those and names the platforms that are missing.
 //
 //   commits.tsv  git log --first-parent --format=%H%x09%s <previous>..<tag>
 //   prs.json     gh pr list --state merged --limit 10000 \
@@ -54,7 +57,17 @@ void main(List<String> arguments) {
     _fail('malformed input: ${error.message}');
   }
 
-  File(options['body-out']!).writeAsStringSync(notes.renderReleaseBody());
+  final assetsDir = options['assets-dir'];
+  final assets =
+      assetsDir == null
+          ? null
+          : {
+            for (final entity in Directory(assetsDir).listSync())
+              if (entity is File) entity.uri.pathSegments.last,
+          };
+  File(
+    options['body-out']!,
+  ).writeAsStringSync(notes.renderReleaseBody(assets: assets));
 
   final changelog = File(options['changelog']!);
   changelog.writeAsStringSync(

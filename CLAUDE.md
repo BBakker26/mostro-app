@@ -173,6 +173,14 @@ bridged by flutter_rust_bridge.
   PR. It refuses a tag that is not on `main` or whose version `pubspec.yaml` **and**
   `rust/Cargo.toml` do not already carry — the About screen shows `CARGO_PKG_VERSION`. Bump
   both with `./scripts/bump-version.sh X.Y.Z`, never one by hand.
+- **Desktop and iOS release builds live in `release-builds.yml`**, a reusable workflow that
+  `release.yml` and `release-dry-run.yml` both call — edit a build there, never in a caller.
+  The dry run is the only place a Windows, macOS or iOS build is compiled before a release
+  (path-filtered PRs; never a required check). `publish` requires only `android`: a failed
+  desktop build leaves its asset out and the notes say so. Asset names are a contract with
+  `tool/release/downloads.dart`. None of these builds is vendor-signed or notarized.
+- **The macOS app is sandboxed**: without `com.apple.security.network.client` in
+  `macos/Runner/*.entitlements` it builds, launches and reaches no relay.
 - **Release notes and `CHANGELOG.md` are generated** by `tool/release_notes.dart`, one entry
   per merged PR grouped by the conventional-commit type of its **title**. Don't hand-edit
   `CHANGELOG.md`; fix the PR title.

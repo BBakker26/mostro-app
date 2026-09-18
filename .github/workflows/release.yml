@@ -223,6 +223,18 @@ jobs:
             --build-name "$VERSION" --build-number "$BUILD_NUMBER" \
             --dart-define=GIT_COMMIT="$(git rev-parse HEAD)"
 
+      # The Android App Bundle is what the Play Console takes. One file, all
+      # ABIs; Play derives the per-device APKs. Signed with the same key, or
+      # Play would see a different app.
+      - name: Build app bundle
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+        run: |
+          flutter build appbundle --release \
+            --build-name "$VERSION" --build-number "$BUILD_NUMBER" \
+            --dart-define=GIT_COMMIT="$(git rev-parse HEAD)"
+
       - name: Remove signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks" android/key.properties
@@ -245,11 +257,19 @@ jobs:
               exit 1
             fi
           done
+          aab="dist/mostro-$TAG.aab"
+          mv build/app/outputs/bundle/release/app-release.aab "$aab"
+          if jarsigner -verify -verbose:summary -certs "$aab" | grep -q 'CN=Android Debug'; then
+            echo "::error::$aab is signed with the debug key."
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: asset-android
-          path: dist/*.apk
+          path: |
+            dist/*.apk
+            dist/*.aab
           if-no-files-found: error
 
   # Desktop and iOS. None of these sees a secret, so they run beside the android

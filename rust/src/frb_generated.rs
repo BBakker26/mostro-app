@@ -9060,6 +9060,8 @@ impl SseDecode for crate::api::types::TradeUpdateReason {
             1 => crate::api::types::TradeUpdateReason::MakerCanceled,
             2 => crate::api::types::TradeUpdateReason::BondLostRace,
             3 => crate::api::types::TradeUpdateReason::BondExpired,
+            4 => crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByMe,
+            5 => crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByPeer,
             _ => unreachable!("Invalid variant for TradeUpdateReason: {}", inner),
         };
     }
@@ -11518,6 +11520,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::TradeUpdateReason {
             Self::MakerCanceled => 1.into_dart(),
             Self::BondLostRace => 2.into_dart(),
             Self::BondExpired => 3.into_dart(),
+            Self::CooperativeCancelRequestedByMe => 4.into_dart(),
+            Self::CooperativeCancelRequestedByPeer => 5.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -13525,6 +13529,8 @@ impl SseEncode for crate::api::types::TradeUpdateReason {
                 crate::api::types::TradeUpdateReason::MakerCanceled => 1,
                 crate::api::types::TradeUpdateReason::BondLostRace => 2,
                 crate::api::types::TradeUpdateReason::BondExpired => 3,
+                crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByMe => 4,
+                crate::api::types::TradeUpdateReason::CooperativeCancelRequestedByPeer => 5,
                 _ => {
                     unimplemented!("");
                 }

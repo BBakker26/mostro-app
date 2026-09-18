@@ -1364,6 +1364,54 @@ abstract class AppLocalizations {
   /// **'Failed to cancel. Please try again.'**
   String get cancelRequestFailed;
 
+  /// Notifications card title on the daemon confirming this user's cooperative-cancel request (protocol cancel.md); the trade stays open until the other party also cancels
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel requested'**
+  String get tradeCardCancelRequestedByMeTitle;
+
+  /// Notifications card body on the daemon confirming this user's cooperative-cancel request
+  ///
+  /// In en, this message translates to:
+  /// **'You asked to cancel this trade. It stays open until the other party also cancels. If they do not respond, you can open a dispute.'**
+  String get tradeCardCancelRequestedByMeMessage;
+
+  /// Notifications card title when the counterparty asked to cancel an active trade (protocol cancel.md); this user decides whether to accept
+  ///
+  /// In en, this message translates to:
+  /// **'The other party wants to cancel'**
+  String get tradeCardCancelRequestedByPeerTitle;
+
+  /// Notifications card body when the counterparty asked to cancel an active trade
+  ///
+  /// In en, this message translates to:
+  /// **'They asked to cancel this trade. Accept to end it with no funds moved, or keep trading.'**
+  String get tradeCardCancelRequestedByPeerMessage;
+
+  /// Notice on the trade screen while this user's cooperative-cancel request waits for the other party
+  ///
+  /// In en, this message translates to:
+  /// **'You asked to cancel this trade. It stays open until the other party also cancels. If they do not respond, you can open a dispute.'**
+  String get tradeCancelRequestedByMeNotice;
+
+  /// Notice on the trade screen while the counterparty's cooperative-cancel request waits for this user
+  ///
+  /// In en, this message translates to:
+  /// **'The other party asked to cancel this trade. Accept to end it with no funds moved, or keep trading.'**
+  String get tradeCancelRequestedByPeerNotice;
+
+  /// Label of the cancel button once the counterparty asked to cancel: this user's cancel accepts theirs and ends the trade
+  ///
+  /// In en, this message translates to:
+  /// **'Accept cancel'**
+  String get acceptCancelButton;
+
+  /// Body text for the cancel-trade confirmation dialog when the counterparty already asked to cancel: this cancel accepts theirs
+  ///
+  /// In en, this message translates to:
+  /// **'The other party asked to cancel. Cancelling now ends the trade for both of you and no funds are moved.'**
+  String get cancelTradeDialogContentAccept;
+
   /// Snackbar shown when the fiat-sent action fails
   ///
   /// In en, this message translates to:

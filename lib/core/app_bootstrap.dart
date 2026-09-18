@@ -26,6 +26,7 @@ import 'package:mostro/src/rust/frb_generated.dart';
 import 'package:mostro/src/rust/api.dart' as rust_api;
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/src/rust/api/escrow.dart' as escrow_api;
+import 'package:mostro/src/rust/api/node_stats.dart' as node_stats_api;
 import 'package:mostro/src/rust/api/nwc.dart' as nwc_api;
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
@@ -199,6 +200,8 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();
 
+  _warmNodeInfoCache();
+
   final container = ProviderContainer(
     overrides: [
       firstRunProvider.overrideWith(
@@ -276,6 +279,18 @@ void _mirrorTradeKeyIndex(identity_api.TradeKeyIndexStream stream) {
       }
     }
   });
+}
+
+/// Download every known node's kind 38385 settings in the background, so the
+/// node selector opens on local data instead of waiting for the relays. Never
+/// awaited: startup does not depend on it, and a failure only means the
+/// selector fills in from its own fetch, as it did before the cache existed.
+void _warmNodeInfoCache() {
+  unawaited(
+    node_stats_api.refreshMostroNodeInfoCache().catchError((Object e) {
+      debugPrint('[main] node info warm-up failed: $e');
+    }),
+  );
 }
 
 /// Reconnect a previously saved NWC wallet in the background.

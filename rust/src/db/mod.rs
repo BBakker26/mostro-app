@@ -55,6 +55,13 @@ pub mod settings_keys {
     /// by `refresh_mostro_node_metadata`; stale entries are acceptable.
     pub const MOSTRO_NODE_METADATA: &str = "mostro_node_metadata";
 
+    /// Cached kind 38385 instance events of known Mostro nodes, JSON map of
+    /// pubkey (hex) → `crate::api::node_stats::CachedNodeInfo` (the event's
+    /// `created_at` and raw tags). Lets the node selector paint fee, range,
+    /// currencies, custody and bond before any relay answers; refreshed at
+    /// startup and by every `fetch_mostro_node_stats`.
+    pub const MOSTRO_NODE_INFO: &str = "mostro_node_info";
+
     /// Developer escrow-mode override — `"auto"` or `"force_cashu"`.
     /// See [`crate::mostro::escrow_mode::EscrowModeOverride`].
     pub const ESCROW_MODE_OVERRIDE: &str = "escrow_mode_override";

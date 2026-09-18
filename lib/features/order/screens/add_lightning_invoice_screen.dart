@@ -37,14 +37,17 @@ import 'package:mostro/src/rust/api/types.dart'
 /// moved on: the daemon took one, and the trade screen is where it continues.
 ///
 /// `settledHoldInvoice` is not over: after a failed payout the daemon asks
-/// for a new invoice while the order still reads settled. Cancellations end
-/// the step too, but leave for home with their own notice
-/// (`_listenForCancellation`).
+/// for a new invoice while the order still reads settled — also after an
+/// admin settle, which mostrod records as `settled-hold-invoice` before
+/// paying, so the admin outcomes below are final. Cancellations end the step
+/// too, but leave for home with their own notice (`_listenForCancellation`).
 bool invoiceStepIsOver(OrderStatus status) => switch (status) {
   OrderStatus.active ||
   OrderStatus.fiatSent ||
   OrderStatus.dispute ||
-  OrderStatus.success => true,
+  OrderStatus.success ||
+  OrderStatus.settledByAdmin ||
+  OrderStatus.completedByAdmin => true,
   _ => false,
 };
 

@@ -86,6 +86,10 @@ void main() {
       OrderStatus.fiatSent,
       OrderStatus.dispute,
       OrderStatus.success,
+      // How a dispute ends. A payout that fails after an admin settle comes
+      // back as settledHoldInvoice, not as either of these.
+      OrderStatus.settledByAdmin,
+      OrderStatus.completedByAdmin,
     ]) {
       expect(invoiceStepIsOver(status), isTrue, reason: '$status');
     }

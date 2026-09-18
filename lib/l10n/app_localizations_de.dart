@@ -722,6 +722,36 @@ class AppLocalizationsDe extends AppLocalizations {
       'Abbrechen fehlgeschlagen. Bitte erneut versuchen.';
 
   @override
+  String get tradeCardCancelRequestedByMeTitle => 'Stornierung angefragt';
+
+  @override
+  String get tradeCardCancelRequestedByMeMessage =>
+      'Du hast die Stornierung dieses Handels angefragt. Er bleibt offen, bis die Gegenpartei ebenfalls storniert. Antwortet sie nicht, kannst du einen Streitfall eröffnen.';
+
+  @override
+  String get tradeCardCancelRequestedByPeerTitle =>
+      'Die Gegenpartei möchte stornieren';
+
+  @override
+  String get tradeCardCancelRequestedByPeerMessage =>
+      'Sie hat die Stornierung dieses Handels angefragt. Nimm an, um ihn ohne Geldbewegung zu beenden, oder handle weiter.';
+
+  @override
+  String get tradeCancelRequestedByMeNotice =>
+      'Du hast die Stornierung dieses Handels angefragt. Er bleibt offen, bis die Gegenpartei ebenfalls storniert. Antwortet sie nicht, kannst du einen Streitfall eröffnen.';
+
+  @override
+  String get tradeCancelRequestedByPeerNotice =>
+      'Die Gegenpartei hat die Stornierung dieses Handels angefragt. Nimm an, um ihn ohne Geldbewegung zu beenden, oder handle weiter.';
+
+  @override
+  String get acceptCancelButton => 'Stornierung annehmen';
+
+  @override
+  String get cancelTradeDialogContentAccept =>
+      'Die Gegenpartei hat die Stornierung angefragt. Wenn du jetzt stornierst, endet der Handel für beide, ohne dass Geld bewegt wird.';
+
+  @override
   String get fiatSentFailed =>
       'Fiat-Zahlung konnte nicht bestätigt werden. Bitte erneut versuchen.';
 

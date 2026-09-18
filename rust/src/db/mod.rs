@@ -55,6 +55,13 @@ pub mod settings_keys {
     /// by `refresh_mostro_node_metadata`; stale entries are acceptable.
     pub const MOSTRO_NODE_METADATA: &str = "mostro_node_metadata";
 
+    /// Cached kind 38385 instance events of known Mostro nodes, JSON map of
+    /// pubkey (hex) → `crate::api::node_stats::CachedNodeInfo` (the event's
+    /// `created_at` and raw tags). Lets the node selector paint fee, range,
+    /// currencies, custody and bond before any relay answers; refreshed at
+    /// startup and by every `fetch_mostro_node_stats`.
+    pub const MOSTRO_NODE_INFO: &str = "mostro_node_info";
+
     /// Developer escrow-mode override — `"auto"` or `"force_cashu"`.
     /// See [`crate::mostro::escrow_mode::EscrowModeOverride`].
     pub const ESCROW_MODE_OVERRIDE: &str = "escrow_mode_override";
@@ -316,6 +323,17 @@ pub trait Storage: Send + Sync {
     /// duplicate-rating guard survive a restart. No-op when no matching trade
     /// exists.
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
+
+    /// Record who asked to cancel an active trade cooperatively
+    /// (`$.cooperative_cancel_state`) on the trade identified by `order.id`.
+    /// The status is left alone: the protocol has no cancel-requested status,
+    /// the trade goes on until the counterparty also cancels. No-op when no
+    /// matching trade exists.
+    async fn set_cooperative_cancel_state(
+        &self,
+        order_id: &str,
+        state: crate::api::types::CooperativeCancelState,
+    ) -> Result<()>;
 
     /// Persist the counterparty's trade pubkey on the trade identified by
     /// `order.id` (issue #334). Written when a daemon message reveals it, for

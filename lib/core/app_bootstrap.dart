@@ -26,6 +26,7 @@ import 'package:mostro/src/rust/frb_generated.dart';
 import 'package:mostro/src/rust/api.dart' as rust_api;
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/src/rust/api/escrow.dart' as escrow_api;
+import 'package:mostro/src/rust/api/node_stats.dart' as node_stats_api;
 import 'package:mostro/src/rust/api/nwc.dart' as nwc_api;
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
@@ -58,23 +59,32 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   WidgetsFlutterBinding.ensureInitialized();
   registerFontLicenses();
 
-  // Initialize Firebase (no-op if firebase_options.dart is the placeholder).
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } on UnsupportedError catch (e) {
-    debugPrint(
-      '[main] Firebase not configured: $e — push notifications disabled.',
-    );
-  }
-
-  await RustLib.init();
-
-  // Pre-read SharedPreferences so providers start with synchronous initial
+  // Three independent platform round trips, started together rather than
+  // one after the other: all of this runs before the first frame. The record
+  // `wait` listens to every future from the start, so a failure in one is
+  // never an unhandled error while another is still being awaited.
+  //
+  // SharedPreferences is pre-read so providers start with synchronous initial
   // values — eliminates the AsyncValue.loading() race that caused the router
   // to show the home screen before redirecting to /walkthrough on first launch.
-  final prefs = await SharedPreferences.getInstance();
+  final SharedPreferences prefs;
+  try {
+    (_, _, prefs) =
+        await (
+          _initFirebase(),
+          RustLib.init(),
+          SharedPreferences.getInstance(),
+        ).wait;
+  } on ParallelWaitError<
+    Object?,
+    (AsyncError?, AsyncError?, AsyncError?)
+  > catch (e) {
+    // Startup still dies on any of these, as it did when they ran in turn —
+    // but with the failure itself, not a wrapper around three slots, so a
+    // crash report names the bridge panic or the platform error directly.
+    final first = e.errors.$1 ?? e.errors.$2 ?? e.errors.$3!;
+    Error.throwWithStackTrace(first.error, first.stackTrace);
+  }
   final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
   final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
   final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
@@ -199,6 +209,8 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();
 
+  _warmNodeInfoCache();
+
   final container = ProviderContainer(
     overrides: [
       firstRunProvider.overrideWith(
@@ -247,6 +259,19 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   );
 }
 
+/// Initialize Firebase (no-op if firebase_options.dart is the placeholder).
+Future<void> _initFirebase() async {
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } on UnsupportedError catch (e) {
+    debugPrint(
+      '[main] Firebase not configured: $e — push notifications disabled.',
+    );
+  }
+}
+
 /// Persists every consumed trade-key index reported by Rust.
 ///
 /// Runs for the process lifetime. A write failure is logged and the loop
@@ -276,6 +301,18 @@ void _mirrorTradeKeyIndex(identity_api.TradeKeyIndexStream stream) {
       }
     }
   });
+}
+
+/// Download every known node's kind 38385 settings in the background, so the
+/// node selector opens on local data instead of waiting for the relays. Never
+/// awaited: startup does not depend on it, and a failure only means the
+/// selector fills in from its own fetch, as it did before the cache existed.
+void _warmNodeInfoCache() {
+  unawaited(
+    node_stats_api.refreshMostroNodeInfoCache().catchError((Object e) {
+      debugPrint('[main] node info warm-up failed: $e');
+    }),
+  );
 }
 
 /// Reconnect a previously saved NWC wallet in the background.

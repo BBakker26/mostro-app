@@ -592,6 +592,17 @@ impl Storage for IndexedDbStorage {
             .await
     }
 
+    async fn set_cooperative_cancel_state(
+        &self,
+        order_id: &str,
+        state: crate::api::types::CooperativeCancelState,
+    ) -> Result<()> {
+        self.patch_trade_by_order_id(order_id, |doc| {
+            trade_json::set_cooperative_cancel_state(doc, &state)
+        })
+        .await
+    }
+
     async fn update_trade_counterparty(
         &self,
         order_id: &str,

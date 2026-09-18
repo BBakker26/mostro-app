@@ -8,6 +8,7 @@ library;
 Map<String, String> releaseAssetNames(String tag) => {
   'android-v8': 'mostro-$tag-arm64-v8a.apk',
   'android-v7': 'mostro-$tag-armeabi-v7a.apk',
+  'android-aab': 'mostro-$tag.aab',
   'linux': 'mostro-$tag-linux-x64.tar.gz',
   'windows': 'mostro-$tag-windows-x64.zip',
   'macos': 'mostro-$tag-macos-universal.zip',
@@ -17,6 +18,7 @@ Map<String, String> releaseAssetNames(String tag) => {
 const _platformLabels = {
   'android-v8': 'Android (v8)',
   'android-v7': 'Android (v7)',
+  'android-aab': 'Android (app bundle)',
   'linux': 'Linux',
   'windows': 'Windows',
   'macos': 'macOS',
@@ -58,6 +60,13 @@ String renderDownloads({
       );
     }
     out.writeln(_androidNotes);
+  }
+  if (has('android-aab')) {
+    out.writeln(
+      '${link('android-aab')} is the **Android App Bundle** for the Google '
+      'Play Console — the store builds the per-device APKs from it. It is '
+      'not installable on a phone.\n',
+    );
   }
 
   final desktop = ['linux', 'windows', 'macos'].where(has).toList();

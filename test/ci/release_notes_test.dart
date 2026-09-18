@@ -334,6 +334,16 @@ void main() {
       }
     });
 
+    test('offers the app bundle to Play Console, not to phones', () {
+      // Act
+      final body = notesFor([merge(1)], [pr(1, 'feat: a')]).renderReleaseBody();
+
+      // Assert
+      expect(body, contains('/releases/download/v2.0.1/mostro-v2.0.1.aab'));
+      expect(body, contains('Google Play'));
+      expect(body, contains('not installable'));
+    });
+
     test('says how to open builds the OS does not trust', () {
       // Act
       final body = notesFor([merge(1)], [pr(1, 'feat: a')]).renderReleaseBody();
@@ -374,6 +384,7 @@ void main() {
       expect(names.keys, [
         'android-v8',
         'android-v7',
+        'android-aab',
         'linux',
         'windows',
         'macos',

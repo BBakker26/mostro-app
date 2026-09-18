@@ -194,6 +194,7 @@ class AutomationIds {
   /// the cause (`dispute` / `timeout`); absent unless this user's bond was
   /// slashed.
   static const String tradeBondSlashed = 'trade.bondSlashed';
+  static const String tradeCancelRequest = 'trade.cancelRequest';
   static const String bondSlashedViewPolicy = 'bond.slashed.viewPolicy';
 
   /// Present only while the slashed trade's row still exists (a timeout

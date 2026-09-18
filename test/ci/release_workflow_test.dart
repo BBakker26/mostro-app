@@ -69,6 +69,18 @@ void main() {
       expect(build.hasMatch(android), isTrue);
     });
 
+    test('builds the app bundle for Play Console with the same key', () {
+      // Arrange
+      final android = job('android');
+
+      // Assert — the .aab is what the Play Console takes; a build signed by
+      // another key than the APKs would be rejected as a different app.
+      expect(android, contains('flutter build appbundle --release'));
+      expect(android, contains(r'dist/mostro-$TAG.aab'));
+      expect(android, contains('jarsigner -verify'));
+      expect(android, contains('dist/*.aab'));
+    });
+
     test('refuses to publish an APK signed with the debug key', () {
       // Arrange
       final android = job('android');

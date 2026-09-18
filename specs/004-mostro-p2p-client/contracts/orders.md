@@ -208,7 +208,16 @@ function does not validate ownership or status.
   daemon's `pending` republish — the ex-taker never saw the order in the book
   again. No reference client writes anything before the daemon replies. A
   cancel the daemon refuses also leaves a live trade looking live.
-- A row further along is marked `Canceled` straight away.
+- A row further along keeps its status and records
+  `cooperative_cancel_state = RequestedByMe`: from `active` on the cancel is
+  a request the counterparty must agree to (protocol `cancel.md`, "Cancel
+  cooperatively"), and the daemon's `cooperative-cancel-initiated-by-you`
+  confirms it. It used to be marked `Canceled` at once; that showed a
+  cancelled trade the daemon still ran, and the terminal status then made
+  the daemon's `cooperative-cancel-accepted` look like a replay over a
+  finished trade and dropped it, so the requester never learned the
+  counterparty had agreed. An `in-progress` row may still be a never-active
+  take; the daemon's `Canceled` then settles it as before.
 
 **Between the request and the daemon's answer.** The call returns once the
 message is published; nothing waits for the daemon.
@@ -229,9 +238,9 @@ message is published; nothing waits for the daemon.
 - Refused (`CantDo`): nothing changes locally, which is right, because the
   trade is still live. But the user is not told: `cancel_order` does not wait
   for the reply, and the `CantDo` arm finds no pending request to route it to.
-- A trade further along reads `Canceled` at once (above), although from
-  `active` on the daemon only records a cooperative request until the
-  counterparty agrees.
+- A trade further along stays as it was, with the request noted on the row
+  (above); the trade screen says the cancel waits for the counterparty and
+  drops the `Cancel` action until the daemon settles the trade.
 
 **Errors**: no trade-key binding for the order (`no persisted trade key for
 order …`), trade-key or identity load failures, and publish failures. Daemon
@@ -365,7 +374,17 @@ TradeUpdate {
   reason: TradeUpdateReason?  # optional cause for local/cancellation transitions
   occurred_at: i64      # Unix seconds: daemon event time, or local action time
 }
+
+TradeUpdateReason: UserCanceled | MakerCanceled | BondLostRace | BondExpired
+                 | CooperativeCancelRequestedByMe | CooperativeCancelRequestedByPeer
 ```
+
+The two `CooperativeCancelRequested*` reasons ride on an emission whose
+`status` did **not** change (it is the row's current `Active` / `FiatSent`):
+they say a cooperative-cancel request was confirmed for this side or made
+by the counterparty. Consumers keyed on status alone (the trade screen's
+status provider) see nothing new; the Notifications cards key on status
+**and** reason, so each request gets its own card, once.
 
 ### on_order_status_changed(order_id: String) → Stream<OrderStatus>
 Emits when a specific order's status changes.
@@ -516,6 +535,7 @@ what rebuilds sessions after one.
 | `FiatSentOk`                       | (status sync)                                       | `status → FiatSent`                                                              |
 | `HoldInvoicePaymentSettled` / `Released` | (status sync)                                 | `status → SettledHoldInvoice`: the seller's escrow settled, the buyer payout is still pending; shown as `payout-pending`, not as completion |
 | `PurchaseCompleted`                | (status sync)                                       | `status → Success`: the buyer payout completed; only now may either party rate |
+| `CooperativeCancelInitiatedByYou` / `CooperativeCancelInitiatedByPeer` | (none)     | No status change (the protocol has no cancel-requested status): `cooperative_cancel_state → RequestedByMe` / `RequestedByPeer` on the row, and a `TradeUpdate` with the row's **current** status (`Active` or `FiatSent`) and reason `CooperativeCancelRequestedByMe` / `CooperativeCancelRequestedByPeer`, so the trade screen and the Notifications cards announce the request. Gated like a status sync (terminal row, cursor). |
 | `CooperativeCancelAccepted`        | (status sync)                                       | `status → CooperativelyCanceled`                                                 |
 | `AdminSettled` / `AdminCanceled`   | (status sync)                                       | `status → SettledByAdmin` / `CanceledByAdmin`                                    |
 | `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |

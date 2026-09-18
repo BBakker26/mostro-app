@@ -468,8 +468,9 @@ pub struct TradeUpdate {
     pub order_id: String,
     pub status: OrderStatus,
     /// Why the status changed, when the wire action alone is ambiguous
-    /// (`docs/ANTI_ABUSE_BOND.md` §6.1). `None` from every emitter that has
-    /// nothing to add.
+    /// (`docs/ANTI_ABUSE_BOND.md` §6.1), or what happened when it did not
+    /// change at all (a cooperative-cancel request). `None` from every
+    /// emitter that has nothing to add.
     #[serde(default)]
     pub reason: Option<TradeUpdateReason>,
     /// When the change happened, in Unix seconds: the daemon message's own
@@ -546,6 +547,14 @@ pub enum TradeUpdateReason {
     BondLostRace,
     /// The bond bolt11 expired unpaid; the local row was closed.
     BondExpired,
+    /// This side asked to cancel an active trade; the status is unchanged
+    /// until the counterparty also cancels (protocol `cancel.md`, "Cancel
+    /// cooperatively"). Emitted on the daemon's
+    /// `cooperative-cancel-initiated-by-you`.
+    CooperativeCancelRequestedByMe,
+    /// The counterparty asked to cancel; this side decides whether to
+    /// cancel too. Emitted on `cooperative-cancel-initiated-by-peer`.
+    CooperativeCancelRequestedByPeer,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

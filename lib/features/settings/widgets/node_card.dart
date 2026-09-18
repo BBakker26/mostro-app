@@ -482,7 +482,7 @@ class _CurrencyRow extends StatelessWidget {
             border: pal.warnBorder,
             ink: pal.warnInk,
           ),
-        for (final code in chips.shown)
+        for (final code in chips)
           code == mine
               ? chip(
                 text: code,
@@ -497,12 +497,6 @@ class _CurrencyRow extends StatelessWidget {
                 bg: pal.chipNeutralBg,
                 ink: pal.chipNeutralInk,
               ),
-        if (chips.overflow > 0)
-          chip(
-            text: '+${chips.overflow}',
-            bg: pal.chipNeutralBg,
-            ink: pal.chipNeutralInk,
-          ),
       ],
     );
   }

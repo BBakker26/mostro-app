@@ -6,24 +6,58 @@ import 'package:mostro/features/home/widgets/side_swipe.dart';
 void main() {
   group('sideAfterSwipe', () {
     test('a swipe to the left moves Buy to Sell, the tab on the right', () {
-      expect(sideAfterSwipe(OrderType.buy, -800), OrderType.sell);
+      expect(
+        sideAfterSwipe(OrderType.buy, -800, const Offset(-200, 0)),
+        OrderType.sell,
+      );
     });
 
     test('a swipe to the right moves Sell to Buy, the tab on the left', () {
-      expect(sideAfterSwipe(OrderType.sell, 800), OrderType.buy);
+      expect(
+        sideAfterSwipe(OrderType.sell, 800, const Offset(200, 0)),
+        OrderType.buy,
+      );
     });
 
     test('a swipe past the last tab stays put', () {
-      expect(sideAfterSwipe(OrderType.sell, -800), isNull);
-      expect(sideAfterSwipe(OrderType.buy, 800), isNull);
+      expect(
+        sideAfterSwipe(OrderType.sell, -800, const Offset(-200, 0)),
+        isNull,
+      );
+      expect(sideAfterSwipe(OrderType.buy, 800, const Offset(200, 0)), isNull);
     });
 
     test('a slow drag is not a swipe', () {
       expect(
-        sideAfterSwipe(OrderType.buy, -(minSideSwipeVelocity - 1)),
+        sideAfterSwipe(
+          OrderType.buy,
+          -(minSideSwipeVelocity - 1),
+          const Offset(-200, 0),
+        ),
         isNull,
       );
-      expect(sideAfterSwipe(OrderType.sell, minSideSwipeVelocity - 1), isNull);
+      expect(
+        sideAfterSwipe(
+          OrderType.sell,
+          minSideSwipeVelocity - 1,
+          const Offset(200, 0),
+        ),
+        isNull,
+      );
+    });
+
+    test('a diagonal swipe is not a swipe, however fast', () {
+      expect(
+        sideAfterSwipe(OrderType.buy, -1500, const Offset(-200, -120)),
+        isNull,
+      );
+    });
+
+    test('a mostly horizontal swipe with a little drift still counts', () {
+      expect(
+        sideAfterSwipe(OrderType.buy, -1500, const Offset(-200, -60)),
+        OrderType.sell,
+      );
     });
   });
 
@@ -68,6 +102,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(changes, [OrderType.buy]);
+    });
+
+    testWidgets('a diagonal fling over the list changes nothing', (
+      tester,
+    ) async {
+      final changes = await pump(tester, OrderType.buy);
+
+      // Horizontal enough to win the arena (a steeper one goes to the list),
+      // yet ~28° off horizontal: the finger travelled on both axes.
+      await tester.fling(find.text('order 2'), const Offset(-300, -160), 1500);
+      await tester.pumpAndSettle();
+
+      expect(changes, isEmpty);
     });
 
     testWidgets(

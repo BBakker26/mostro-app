@@ -22,7 +22,8 @@ command serves both runs:
 1. **`origin/main` does not carry the version yet** — it branches `chore/release-v2.0.1` off
    `origin/main`, runs `scripts/bump-version.sh` (`pubspec.yaml`, `rust/Cargo.toml`,
    `rust/Cargo.lock`), commits, pushes, opens the PR and returns to the branch you were on.
-   It refuses a version that does not move past `main`'s, or a dirty working tree.
+   It refuses a version that does not move past `main`'s, or a dirty working tree; if a step
+   fails midway it returns to your branch and drops the local release branch.
 2. **That PR is still open** — it prints the link and does nothing else.
 3. **`origin/main` carries the version** — it tags `origin/main` (not your checkout, whatever
    branch you are on) with an annotated `v2.0.1` and pushes the tag.

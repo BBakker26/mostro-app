@@ -43,9 +43,9 @@ void main() {
   String ghCalls() => ghLog.existsSync() ? ghLog.readAsStringSync() : '';
 
   /// Commits [version] to the clone's files and pushes it to `origin/main`.
-  void seedMain(String version) {
+  void seedMain(String version, {String? pubspec}) {
     File('${clone.path}/pubspec.yaml').writeAsStringSync(
-      'name: mostro\nversion: $version+1\n',
+      'name: mostro\nversion: ${pubspec ?? version}+1\n',
     );
     File('${clone.path}/rust/Cargo.toml').writeAsStringSync(
       '[package]\nname = "rust"\nversion = "$version"\n\n'
@@ -63,6 +63,13 @@ void main() {
       gitOut(['show', '$ref:$path'], dir: origin);
 
   String remoteBranches() => gitOut(['branch', '--list'], dir: origin);
+
+  /// The clone is back where it started: on main, clean, no release branch.
+  void expectRestored() {
+    expect(gitOut(['rev-parse', '--abbrev-ref', 'HEAD']), 'main');
+    expect(gitOut(['status', '--porcelain']), isEmpty);
+    expect(gitOut(['branch', '--list', 'chore/*']), isEmpty);
+  }
 
   setUp(() {
     sandbox = Directory.systemTemp.createTempSync('release_script_test');
@@ -85,6 +92,7 @@ void main() {
         'PATH': '${bin.path}:${Platform.environment['PATH']}',
         'GH_LOG': ghLog.path,
         'GH_OPEN_PR': ghOpenPr.path,
+        'GH_FAIL_CREATE': '${sandbox.path}/gh_fail_create',
       });
 
     // `gh pr list` answers with the stub's open PR, if any; every call is
@@ -93,7 +101,9 @@ void main() {
 echo "$*" >> "$GH_LOG"
 case "$1 $2" in
   "pr list") [ -f "$GH_OPEN_PR" ] && cat "$GH_OPEN_PR"; exit 0 ;;
-  "pr create") echo "https://github.com/example/app/pull/99"; exit 0 ;;
+  "pr create")
+    [ -f "$GH_FAIL_CREATE" ] && { echo "boom" >&2; exit 1; }
+    echo "https://github.com/example/app/pull/99"; exit 0 ;;
 esac
 exit 0
 ''');
@@ -155,6 +165,56 @@ exit 0
       expect(run.exitCode, isNot(0));
       expect(run.stderr, contains('2.0.0'));
       expect(remoteBranches(), isNot(contains('chore/')));
+    });
+
+    test('refuses a stale bump PR once main has moved past it', () {
+      // Arrange
+      seedMain('2.0.2');
+      ghOpenPr.writeAsStringSync('https://github.com/example/app/pull/7\n');
+
+      // Act
+      final run = release('2.0.1');
+
+      // Assert
+      expect(run.exitCode, isNot(0));
+      expect(run.stderr, contains('2.0.2'));
+      expect(run.stdout, isNot(contains('pull/7')));
+    });
+
+    test('refuses a main whose manifests disagree', () {
+      // Arrange
+      seedMain('2.0.0', pubspec: '2.0.1');
+
+      // Act
+      final run = release('2.0.2');
+
+      // Assert
+      expect(run.exitCode, isNot(0));
+      expect(run.stderr, contains('disagrees'));
+      expect(remoteBranches(), isNot(contains('chore/')));
+    });
+
+    test('a failed bump returns to the starting branch and leaves no trace', () {
+      // Act — PATCH 100 passes the script's own check; bump-version.sh refuses it.
+      final run = release('2.0.100');
+
+      // Assert
+      expect(run.exitCode, isNot(0));
+      expectRestored();
+      expect(remoteBranches(), isNot(contains('chore/')));
+    });
+
+    test('a failed PR creation returns to the starting branch', () {
+      // Arrange
+      File('${sandbox.path}/gh_fail_create').writeAsStringSync('');
+
+      // Act
+      final run = release('2.0.1');
+
+      // Assert
+      expect(run.exitCode, isNot(0));
+      expectRestored();
+      expect(run.stderr, contains('gh pr create'));
     });
 
     test('refuses to start with uncommitted changes', () {

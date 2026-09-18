@@ -69,7 +69,7 @@ jobs:
           # The crate's own lockfile entry, which scripts/bump-version.sh moves too.
           cargo_lock=$(sed -n '/^name = "rust"$/ { n; s/^version = "\(.*\)"/\1/p; }' rust/Cargo.lock)
           if [ "$pubspec" != "$version" ] || [ "$cargo" != "$version" ] || [ "$cargo_lock" != "$version" ]; then
-            echo "::error::Tag says $version but pubspec.yaml says '$pubspec', rust/Cargo.toml says '$cargo' and rust/Cargo.lock says '$cargo_lock'. Run scripts/bump-version.sh $version, merge that PR, then tag the merge commit."
+            echo "::error::Tag says $version but pubspec.yaml says '$pubspec', rust/Cargo.toml says '$cargo' and rust/Cargo.lock says '$cargo_lock'. Delete this tag (git push origin :v$version), then run scripts/release.sh $version once to open the version PR and again after merging it to tag the merge."
             exit 1
           fi
 

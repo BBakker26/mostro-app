@@ -952,62 +952,6 @@ mod tests {
 
     const RATES: &str = r#"{"BTC":{"USD":50000.0}}"#;
 
-    /// Runs the watcher until the channel closes; returns how often it rang.
-    async fn online_calls(current: ConnectionState, sent: &[ConnectionState]) -> usize {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        let (tx, rx) = tokio::sync::broadcast::channel(16);
-        for state in sent {
-            tx.send(state.clone()).unwrap();
-        }
-        drop(tx);
-        let calls = Arc::new(AtomicUsize::new(0));
-        let sink = calls.clone();
-        watch_connection_state(rx, current, move || {
-            sink.fetch_add(1, Ordering::SeqCst);
-        })
-        .await;
-        calls.load(Ordering::SeqCst)
-    }
-
-    #[tokio::test]
-    async fn a_pool_already_online_when_the_watcher_starts_still_runs_the_sequence() {
-        // Arrange: the monitor reported `Online` before anyone subscribed, and
-        // with the state unchanged it never reports it again.
-        let current = ConnectionState::Online;
-
-        // Act
-        let calls = online_calls(current, &[]).await;
-
-        // Assert
-        assert_eq!(calls, 1);
-    }
-
-    #[tokio::test]
-    async fn an_online_transition_after_the_watcher_starts_runs_the_sequence() {
-        // Arrange
-        let current = ConnectionState::Reconnecting;
-
-        // Act
-        let calls = online_calls(current, &[ConnectionState::Online]).await;
-
-        // Assert
-        assert_eq!(calls, 1);
-    }
-
-    #[tokio::test]
-    async fn states_other_than_online_run_nothing() {
-        // Arrange
-        let current = ConnectionState::Reconnecting;
-        let sent = [ConnectionState::Offline, ConnectionState::Reconnecting];
-
-        // Act
-        let calls = online_calls(current, &sent).await;
-
-        // Assert
-        assert_eq!(calls, 0);
-    }
-
     fn rates_event(keys: &Keys, content: &str, created_at: u64) -> Event {
         EventBuilder::new(Kind::from(rates::RATES_KIND), content)
             .tag(Tag::parse(["d", rates::RATES_D_TAG]).unwrap())
@@ -1090,6 +1034,62 @@ mod tests {
             .finalize(&node)
             .unwrap();
         assert!(select_rates_event([wrong_d_tag], &node.public_key()).is_none());
+    }
+
+    /// Runs the watcher until the channel closes; returns how often it rang.
+    async fn online_calls(current: ConnectionState, sent: &[ConnectionState]) -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (tx, rx) = tokio::sync::broadcast::channel(16);
+        for state in sent {
+            tx.send(state.clone()).unwrap();
+        }
+        drop(tx);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sink = calls.clone();
+        watch_connection_state(rx, current, move || {
+            sink.fetch_add(1, Ordering::SeqCst);
+        })
+        .await;
+        calls.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn a_pool_already_online_when_the_watcher_starts_still_runs_the_sequence() {
+        // Arrange: the monitor reported `Online` before anyone subscribed, and
+        // with the state unchanged it never reports it again.
+        let current = ConnectionState::Online;
+
+        // Act
+        let calls = online_calls(current, &[]).await;
+
+        // Assert
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn an_online_transition_after_the_watcher_starts_runs_the_sequence() {
+        // Arrange
+        let current = ConnectionState::Reconnecting;
+
+        // Act
+        let calls = online_calls(current, &[ConnectionState::Online]).await;
+
+        // Assert
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn states_other_than_online_run_nothing() {
+        // Arrange
+        let current = ConnectionState::Reconnecting;
+        let sent = [ConnectionState::Offline, ConnectionState::Reconnecting];
+
+        // Act
+        let calls = online_calls(current, &sent).await;
+
+        // Assert
+        assert_eq!(calls, 0);
     }
 }
 

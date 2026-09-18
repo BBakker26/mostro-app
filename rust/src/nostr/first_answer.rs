@@ -17,24 +17,37 @@ use crate::rt::time::{timeout, Duration};
 /// `grace` exists for the relay holding a stale copy that answers first; it
 /// is counted from the first answer, so a source with nothing to say is
 /// bounded by the stream's own timeout, not by this.
-/// Two answers with the same stamp are copies of one event as far as a caller
-/// here can tell, so the first to arrive stays.
-pub(crate) async fn newest_answer<T>(
+/// `rank` orders two answers, greater winning; equal ranks are copies of one
+/// event and the first to arrive stays. For a replaceable event that rank is
+/// NIP-01's — `created_at`, then the **lowest** id ([`replaceable_rank`]) — so
+/// which relay answers first never decides between two revisions of a second.
+pub(crate) async fn newest_answer<T, K: Ord>(
     mut answers: impl Stream<Item = T> + Unpin,
     grace: Duration,
-    stamp: impl Fn(&T) -> u64,
+    rank: impl Fn(&T) -> K,
 ) -> Option<T> {
     let mut newest = answers.next().await?;
     // Elapsing is the expected way out: it means a relay is still silent.
     let _ = timeout(grace, async {
         while let Some(answer) = answers.next().await {
-            if stamp(&answer) > stamp(&newest) {
+            if rank(&answer) > rank(&newest) {
                 newest = answer;
             }
         }
     })
     .await;
     Some(newest)
+}
+
+/// The rank of a replaceable event among its revisions: newer first, and
+/// within one second the lowest id, which is the one relays retain (NIP-01).
+pub(crate) fn replaceable_rank(
+    event: &nostr_sdk::prelude::Event,
+) -> (u64, std::cmp::Reverse<[u8; 32]>) {
+    (
+        event.created_at.as_secs(),
+        std::cmp::Reverse(event.id.to_bytes()),
+    )
 }
 
 #[cfg(test)]
@@ -137,5 +150,30 @@ mod tests {
 
         // Assert
         assert_eq!(got, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn two_revisions_of_one_second_resolve_to_the_lowest_id_in_either_order() {
+        use nostr_sdk::prelude::*;
+
+        // Arrange: same author, same second, different content → different ids.
+        let keys = Keys::generate();
+        let revision = |content: &str| -> Event {
+            EventBuilder::new(Kind::from(38385u16), content)
+                .custom_created_at(Timestamp::from_secs(100))
+                .finalize(&keys)
+                .unwrap()
+        };
+        let (a, b) = (revision("a"), revision("b"));
+        let lowest = if a.id.to_bytes() < b.id.to_bytes() { a.id } else { b.id };
+
+        for arrival in [[a.clone(), b.clone()], [b, a]] {
+            // Act
+            let answers = Box::pin(futures_util::stream::iter(arrival));
+            let got = newest_answer(answers, GRACE, replaceable_rank).await;
+
+            // Assert
+            assert_eq!(got.map(|event| event.id), Some(lowest));
+        }
     }
 }

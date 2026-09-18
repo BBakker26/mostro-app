@@ -346,7 +346,8 @@ Each PR stands alone; none requires Phase 3's redesign.
 - **Fix:** `subscribe_orders()` runs first — it only spawns, and the public book needs nothing
   the fetch returns; capabilities then flush keep their order (the flush wraps with the
   node's PoW). The Kind 38385 read goes through `nostr::first_answer::newest_answer` over
-  `stream_events`: the first copy, a 750 ms grace for a newer one, newest `created_at` wins;
+  `stream_events`: the first copy, a 750 ms grace for a newer one by NIP-01's order (newer
+  `created_at`, then lowest id — never whichever relay answered first);
   dropping the stream closes the REQ on the relays still silent. The About screen's fetch is
   the same function and gains the same bound.
 - **What the new order costs:** the node's kind-14 history can now replay before the

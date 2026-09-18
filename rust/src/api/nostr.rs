@@ -598,8 +598,8 @@ pub async fn fetch_mostro_instance_tags(
     // Streamed, not `fetch_events`: that returns once *every* relay has sent
     // EOSE, so one relay sitting on the REQ cost the whole 10 s — at startup,
     // with the answer already in hand from the others. The event is
-    // replaceable, so the first copy plus a short grace for a newer one is
-    // enough. Dropping the stream closes the REQ on the relays still silent.
+    // replaceable, so the first copy plus a short grace for a newer one (by
+    // NIP-01's order) is enough. Dropping the stream closes the REQ on the relays still silent.
     let stream = client
         .stream_events(filter)
         .timeout(Duration::from_secs(10))
@@ -612,7 +612,7 @@ pub async fn fetch_mostro_instance_tags(
     let event = crate::nostr::first_answer::newest_answer(
         Box::pin(copies),
         INSTANCE_INFO_GRACE,
-        |event: &Event| event.created_at.as_secs(),
+        crate::nostr::first_answer::replaceable_rank,
     )
     .await;
 

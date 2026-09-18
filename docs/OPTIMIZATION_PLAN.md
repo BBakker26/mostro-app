@@ -357,6 +357,10 @@ Each PR stands alone; none requires Phase 3's redesign.
   `bond_policy::fetch_pending()` is a counted RAII guard (the `Online` sequence can overlap
   itself on a flapping pool) taken before the subscriptions open. The node switch opened its
   subscriptions ahead of the re-fetch all along and had the same race; it holds the guard too.
+  From its first line: the previous subscriptions stay live through its awaits. And a fetch
+  outlived by a node switch is now dropped whole (`apply_node_capabilities`) — every capability
+  store is one slot for "the active node", and the slower fetch of the node left behind used to
+  overwrite the new node's answer (the escrow mode carries no node tag at all).
 - **Not done:** `fetch_and_set_node_capabilities` still has no retry (the gap PR 2.5 notes).
   And the relay's 10 s answers are a server-side matter this does not explain.
 - **Verify:** `newest_answer` under paused time (returns at the grace bound with a source

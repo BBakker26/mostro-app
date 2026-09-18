@@ -766,10 +766,28 @@ fn tag_value(event: &nostr_sdk::prelude::Event, name: &str) -> Option<String> {
 /// from the same event, and a second relay query for the escrow tags would
 /// double the traffic for no new information.
 pub(crate) async fn fetch_and_set_node_capabilities() {
+    let mostro_pubkey_hex = crate::config::active_mostro_pubkey();
+    let fetched = fetch_mostro_instance_tags(mostro_pubkey_hex.clone()).await;
+    apply_node_capabilities(&mostro_pubkey_hex, fetched);
+}
+
+/// Store what `node`'s info event said — or, for a failed or empty fetch,
+/// forget what was known.
+///
+/// A fetch outlived by a node switch is dropped whole, success or failure.
+/// Every store here is a single slot for "the active node": the slower fetch
+/// of the node left behind used to land after the new node's and overwrite
+/// it — the bond policy then answered `None` for the active node, and the
+/// escrow mode, which carries no node tag at all, was simply the wrong node's.
+fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>) {
     use crate::mostro::escrow_mode;
 
-    let mostro_pubkey_hex = crate::config::active_mostro_pubkey();
-    match fetch_mostro_instance_tags(mostro_pubkey_hex.clone()).await {
+    if !node.eq_ignore_ascii_case(&crate::config::active_mostro_pubkey()) {
+        log::info!("[nostr] capabilities of a node no longer active — dropped");
+        return;
+    }
+    let mostro_pubkey_hex = node.to_string();
+    match fetched {
         Ok(Some(tags)) => {
             // Both difficulties: `pow` for every event, `pow_first_contact`
             // for the first event of a trade. An absent first-contact tag is
@@ -951,6 +969,28 @@ mod tests {
     use nostr_sdk::prelude::*;
 
     const RATES: &str = r#"{"BTC":{"USD":50000.0}}"#;
+
+    fn bond_enabled_tags() -> Vec<Vec<String>> {
+        [("bond_enabled", "true"), ("bond_payout_claim_window_days", "30")]
+            .iter()
+            .map(|(k, v)| vec![k.to_string(), v.to_string()])
+            .collect()
+    }
+
+    #[test]
+    fn a_capability_fetch_for_a_node_no_longer_active_writes_nothing() {
+        // Arrange: the user switched nodes while this fetch was in flight. Its
+        // answer is about a node nobody is talking to any more.
+        let left_behind = "a".repeat(64);
+        assert_ne!(left_behind, crate::config::active_mostro_pubkey());
+
+        // Act
+        apply_node_capabilities(&left_behind, Ok(Some(bond_enabled_tags())));
+
+        // Assert: had it been written, the single policy slot would now hold
+        // this node's answer in place of the active node's.
+        assert_eq!(crate::mostro::bond_policy::get_for(&left_behind), None);
+    }
 
     /// The body of `on_pool_online`, up to the next top-level item.
     fn on_pool_online_body() -> &'static str {

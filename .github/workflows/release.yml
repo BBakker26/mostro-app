@@ -212,6 +212,21 @@ jobs:
             echo "keyAlias=$ANDROID_KEY_ALIAS"
           } > android/key.properties
 
+          # Fail here, in seconds, rather than at :app:packageRelease after
+          # fifteen minutes of compiling: the store password must open the
+          # keystore and the alias must name a private key in it (a
+          # certificate-only entry cannot sign). The password goes in through
+          # the environment, not argv, where other processes could read it.
+          if ! listing=$(keytool -list -keystore "$keystore" -storepass:env ANDROID_KEYSTORE_PASSWORD 2>/dev/null); then
+            echo "::error::ANDROID_KEYSTORE_PASSWORD does not open the keystore."
+            exit 1
+          fi
+          keys=$(sed -n 's/^\([^,]*\),.*PrivateKeyEntry.*/\1/p' <<< "$listing")
+          if ! grep -qix -- "$ANDROID_KEY_ALIAS" <<< "$keys"; then
+            echo "::error::ANDROID_KEY_ALIAS names no private key in the keystore. Private keys in it: $(paste -sd ' ' <<< "$keys")"
+            exit 1
+          fi
+
       # v7 + v8 only: x86_64 is an emulator ABI nobody installs from a release.
       - name: Build APKs
         env:

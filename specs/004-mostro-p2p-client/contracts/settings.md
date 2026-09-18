@@ -193,6 +193,10 @@ Startup warm-up, fired in the background by `app_bootstrap.dart` once the relay
 pool exists. Waits up to 5 s for the relay handshakes it races with, fetches
 the kind 38385 event of every registry node (trusted and user-added) in one
 query (10 s), and persists the newest valid one per node (`d` tag = author).
+"Newest" is NIP-01's order for a replaceable event: the greater `created_at`,
+and within one second the **lowest event id** — so which relay answers first
+never decides what is cached. The id is persisted with the entry; an entry
+written before it was kept yields a same-second tie to any event with an id.
 Nodes that did not answer keep their cached event; entries of nodes no longer
 in the registry are dropped. Node settings rarely change, which is why a cached
 copy is good enough to paint first. **Errors**: a failed relay query (the

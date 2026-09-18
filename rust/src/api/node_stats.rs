@@ -236,7 +236,36 @@ fn apply_order_counts(stats: &mut MostroNodeStats, liquidity: NodeLiquidity) {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CachedNodeInfo {
     pub created_at: i64,
+    /// Hex id of the event, which orders two revisions of the same second
+    /// (see [`CachedNodeInfo::supersedes`]). `None` for an entry cached before
+    /// the id was kept.
+    #[serde(default)]
+    pub event_id: Option<String>,
     pub tags: Vec<Vec<String>>,
+}
+
+impl CachedNodeInfo {
+    /// Whether this revision replaces `held`, the way NIP-01 orders revisions
+    /// of a replaceable event: the newer `created_at` wins, and within one
+    /// second the **lowest** id — the one relays retain. Without the id a tie
+    /// went to whichever relay answered first, so two devices could cache
+    /// different settings for the same node. Same rule as the relay list's
+    /// `generation_is_newer`.
+    ///
+    /// An entry without an id cannot claim to be the lowest: it yields a tie
+    /// to a known id and never wins one.
+    fn supersedes(&self, held: &Self) -> bool {
+        match self.created_at.cmp(&held.created_at) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            // Ids are lowercase hex of equal length: string order is byte order.
+            std::cmp::Ordering::Equal => match (&self.event_id, &held.event_id) {
+                (Some(id), Some(held_id)) => id < held_id,
+                (Some(_), None) => true,
+                (None, _) => false,
+            },
+        }
+    }
 }
 
 /// Newest valid kind 38385 per requested author; the `d` tag must be the
@@ -252,20 +281,21 @@ fn newest_info(pubkeys: &[String], info_events: &[Event]) -> HashMap<String, Cac
         if tag_value(&tags, "d") != Some(author.as_str()) {
             continue;
         }
-        let created_at = event.created_at.as_secs() as i64;
-        if newest
-            .get(&author)
-            .is_some_and(|prev| prev.created_at >= created_at)
-        {
+        let info = CachedNodeInfo {
+            created_at: event.created_at.as_secs() as i64,
+            event_id: Some(event.id.to_hex()),
+            tags,
+        };
+        if newest.get(&author).is_some_and(|prev| !info.supersedes(prev)) {
             continue;
         }
-        newest.insert(author, CachedNodeInfo { created_at, tags });
+        newest.insert(author, info);
     }
     newest
 }
 
-/// Fold `fresh` into `cache`, newest `created_at` per node winning, and say
-/// whether anything changed — an unchanged cache is not rewritten.
+/// Fold `fresh` into `cache`, the newest revision per node winning
+/// ([`CachedNodeInfo::supersedes`]), and say whether anything changed — an unchanged cache is not rewritten.
 fn merge_info(
     cache: &mut HashMap<String, CachedNodeInfo>,
     fresh: HashMap<String, CachedNodeInfo>,
@@ -273,7 +303,7 @@ fn merge_info(
     let mut changed = false;
     for (pubkey, info) in fresh {
         match cache.get(&pubkey) {
-            Some(prev) if prev.created_at >= info.created_at => {}
+            Some(prev) if !info.supersedes(prev) => {}
             _ => {
                 cache.insert(pubkey, info);
                 changed = true;
@@ -758,7 +788,15 @@ mod tests {
     fn cached(created_at: i64, fee: &str) -> CachedNodeInfo {
         CachedNodeInfo {
             created_at,
+            event_id: None,
             tags: tags(&[("fee", fee)]),
+        }
+    }
+
+    fn cached_with_id(created_at: i64, event_id: &str, fee: &str) -> CachedNodeInfo {
+        CachedNodeInfo {
+            event_id: Some(event_id.to_string()),
+            ..cached(created_at, fee)
         }
     }
 
@@ -788,6 +826,88 @@ mod tests {
         assert_eq!(newest.len(), 1);
         assert_eq!(newest[&pk].created_at, 200);
         assert_eq!(tag_value(&newest[&pk].tags, "fee"), Some("0.006"));
+    }
+
+    /// NIP-01: of two revisions of a replaceable event created in the same
+    /// second, the one with the lowest id is the one relays retain. Which of
+    /// them a relay answers with first must not decide what is cached.
+    #[test]
+    fn newest_info_breaks_a_same_second_tie_by_lowest_id_in_either_order() {
+        // Arrange: same second, different fee → different ids.
+        let node = nostr_sdk::prelude::Keys::generate();
+        let pk = node.public_key().to_hex();
+        let (a, b) = (
+            info_event(&node, &pk, "0.006", 100),
+            info_event(&node, &pk, "0.01", 100),
+        );
+        let lowest = if a.id.to_hex() < b.id.to_hex() { &a } else { &b };
+        let expected_fee = tag_value(
+            &lowest.tags.iter().map(|t| t.as_slice().to_vec()).collect::<Vec<_>>(),
+            "fee",
+        )
+        .map(str::to_string);
+
+        // Act
+        let forward = newest_info(std::slice::from_ref(&pk), &[a.clone(), b.clone()]);
+        let reversed = newest_info(std::slice::from_ref(&pk), &[b.clone(), a.clone()]);
+
+        // Assert
+        assert_eq!(forward[&pk].event_id, Some(lowest.id.to_hex()));
+        assert_eq!(forward[&pk], reversed[&pk]);
+        assert_eq!(
+            tag_value(&forward[&pk].tags, "fee").map(str::to_string),
+            expected_fee
+        );
+    }
+
+    #[test]
+    fn merge_info_replaces_a_same_second_entry_only_with_a_lower_id() {
+        // Arrange
+        let mut cache = HashMap::from([(NODE_A.to_string(), cached_with_id(100, "bb", "0.006"))]);
+
+        // Act + Assert: a higher id of the same second loses…
+        let higher = HashMap::from([(NODE_A.to_string(), cached_with_id(100, "cc", "0.5"))]);
+        assert!(!merge_info(&mut cache, higher));
+        assert_eq!(cache[NODE_A], cached_with_id(100, "bb", "0.006"));
+
+        // …a lower one wins…
+        let lower = HashMap::from([(NODE_A.to_string(), cached_with_id(100, "aa", "0.01"))]);
+        assert!(merge_info(&mut cache, lower));
+        assert_eq!(cache[NODE_A], cached_with_id(100, "aa", "0.01"));
+
+        // …and the very same event is not a change.
+        let same = HashMap::from([(NODE_A.to_string(), cached_with_id(100, "aa", "0.01"))]);
+        assert!(!merge_info(&mut cache, same));
+    }
+
+    #[test]
+    fn an_entry_cached_without_an_id_yields_a_same_second_tie_to_a_known_id() {
+        // Arrange: written before the id was kept.
+        let mut cache = HashMap::from([(NODE_A.to_string(), cached(100, "0.006"))]);
+
+        // Act
+        let live = HashMap::from([(NODE_A.to_string(), cached_with_id(100, "ff", "0.01"))]);
+        let changed = merge_info(&mut cache, live);
+
+        // Assert: the id-less entry cannot claim to be the lowest.
+        assert!(changed);
+        assert_eq!(cache[NODE_A], cached_with_id(100, "ff", "0.01"));
+
+        // And it never wins one itself.
+        let legacy = HashMap::from([(NODE_A.to_string(), cached(100, "0.5"))]);
+        assert!(!merge_info(&mut cache, legacy));
+    }
+
+    #[test]
+    fn a_cache_written_before_the_id_was_kept_still_loads() {
+        // Arrange
+        let json = r#"{"created_at":100,"tags":[["fee","0.006"]]}"#;
+
+        // Act
+        let info: CachedNodeInfo = serde_json::from_str(json).unwrap();
+
+        // Assert
+        assert_eq!(info, cached(100, "0.006"));
     }
 
     #[test]

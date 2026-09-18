@@ -58,23 +58,32 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   WidgetsFlutterBinding.ensureInitialized();
   registerFontLicenses();
 
-  // Initialize Firebase (no-op if firebase_options.dart is the placeholder).
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } on UnsupportedError catch (e) {
-    debugPrint(
-      '[main] Firebase not configured: $e — push notifications disabled.',
-    );
-  }
-
-  await RustLib.init();
-
-  // Pre-read SharedPreferences so providers start with synchronous initial
+  // Three independent platform round trips, started together rather than
+  // one after the other: all of this runs before the first frame. The record
+  // `wait` listens to every future from the start, so a failure in one is
+  // never an unhandled error while another is still being awaited.
+  //
+  // SharedPreferences is pre-read so providers start with synchronous initial
   // values — eliminates the AsyncValue.loading() race that caused the router
   // to show the home screen before redirecting to /walkthrough on first launch.
-  final prefs = await SharedPreferences.getInstance();
+  final SharedPreferences prefs;
+  try {
+    (_, _, prefs) =
+        await (
+          _initFirebase(),
+          RustLib.init(),
+          SharedPreferences.getInstance(),
+        ).wait;
+  } on ParallelWaitError<
+    Object?,
+    (AsyncError?, AsyncError?, AsyncError?)
+  > catch (e) {
+    // Startup still dies on any of these, as it did when they ran in turn —
+    // but with the failure itself, not a wrapper around three slots, so a
+    // crash report names the bridge panic or the platform error directly.
+    final first = e.errors.$1 ?? e.errors.$2 ?? e.errors.$3!;
+    Error.throwWithStackTrace(first.error, first.stackTrace);
+  }
   final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
   final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
   final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
@@ -245,6 +254,19 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   runApp(
     UncontrolledProviderScope(container: container, child: const MostroApp()),
   );
+}
+
+/// Initialize Firebase (no-op if firebase_options.dart is the placeholder).
+Future<void> _initFirebase() async {
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } on UnsupportedError catch (e) {
+    debugPrint(
+      '[main] Firebase not configured: $e — push notifications disabled.',
+    );
+  }
 }
 
 /// Persists every consumed trade-key index reported by Rust.

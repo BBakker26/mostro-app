@@ -1097,6 +1097,32 @@ fn active_chats() -> &'static tokio::sync::Mutex<std::collections::HashSet<Strin
     ACTIVE_CHATS.get_or_init(|| tokio::sync::Mutex::new(std::collections::HashSet::new()))
 }
 
+/// Stop the chat subscriptions of a trade that is over (#523): release both
+/// channels' ownership and close their REQs, which otherwise stayed open for
+/// the rest of the session and counted against the relays' caps. A running
+/// task sees its ownership gone and exits at its next wake. Returns the
+/// channels that were running.
+pub(crate) async fn stop_chat_subscriptions(order_id: &str) -> Vec<ChatChannel> {
+    let stopped: Vec<ChatChannel> = {
+        let mut active = active_chats().lock().await;
+        [ChatChannel::Peer, ChatChannel::Dispute]
+            .into_iter()
+            .filter(|channel| active.remove(&channel.guard_key(order_id)))
+            .collect()
+    };
+    if !stopped.is_empty() {
+        if let Ok(pool) = crate::api::nostr::get_pool() {
+            let client = pool.client();
+            for channel in &stopped {
+                crate::nostr::live_subs::live_subs()
+                    .close(&client, &chat_subscription_id(*channel, order_id))
+                    .await;
+            }
+        }
+    }
+    stopped
+}
+
 /// Bounded insert-only id set with FIFO eviction (outer-id LRU, step 5).
 struct BoundedIdSet {
     set: std::collections::HashSet<String>,
@@ -1403,6 +1429,14 @@ async fn run_chat_subscription(
     let mut state = ChatRxState::new(channel, cursor);
 
     loop {
+        // The trade ended and `stop_chat_subscriptions` took the chat back.
+        if !active_chats()
+            .lock()
+            .await
+            .contains(&channel.guard_key(order_id))
+        {
+            return;
+        }
         match rx.next().await {
             Some(ClientNotification::Event {
                 subscription_id,
@@ -2293,6 +2327,28 @@ mod tests {
         // An untouched trade has room.
         let other = uuid::Uuid::new_v4().to_string();
         assert!(!store.quota_exceeded(&other, 1024).await);
+    }
+
+    /// #523: a finished trade gives its chat REQs back. Stopping releases
+    /// both channels' ownership — the running tasks exit at their next wake —
+    /// and reports which were running; an order with no chat is a no-op.
+    #[tokio::test]
+    async fn stopping_a_finished_trades_chats_releases_both_channels() {
+        let order = format!("stop-{}", uuid::Uuid::new_v4());
+        {
+            let mut active = active_chats().lock().await;
+            active.insert(ChatChannel::Peer.guard_key(&order));
+            active.insert(ChatChannel::Dispute.guard_key(&order));
+        }
+
+        let stopped = stop_chat_subscriptions(&order).await;
+
+        assert_eq!(stopped, vec![ChatChannel::Peer, ChatChannel::Dispute]);
+        let active = active_chats().lock().await;
+        assert!(!active.contains(&ChatChannel::Peer.guard_key(&order)));
+        assert!(!active.contains(&ChatChannel::Dispute.guard_key(&order)));
+        drop(active);
+        assert!(stop_chat_subscriptions(&order).await.is_empty());
     }
 
     #[test]

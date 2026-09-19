@@ -5538,6 +5538,7 @@ async fn wipe_trade_row(
             format!("wipe tombstone not persisted for order={order_id}: {e}"),
         );
     }
+    release_finished_trade_subscriptions(order_id, Some(wiped_index));
     Ok(())
 }
 
@@ -7680,6 +7681,10 @@ async fn _run_order_subscription() {
                                 crate::api::logging::sanitize_relay_text(&message),
                             ),
                         );
+                        // The SDK forgot it on that relay; get it back (#523).
+                        crate::nostr::live_subs::live_subs()
+                            .on_closed(&client, &relay_url.to_string(), &subscription_id)
+                            .await;
                     }
                     RelayMessage::Notice(msg) => {
                         crate::api::logging::blog_warn(
@@ -7791,6 +7796,9 @@ pub(crate) fn emit_trade_update_at(
     reason: Option<crate::api::types::TradeUpdateReason>,
     occurred_at: i64,
 ) {
+    if crate::mostro::status::is_hard_terminal(&status) {
+        release_finished_trade_subscriptions(order_id, None);
+    }
     let _ = trade_updates_tx().send(crate::api::types::TradeUpdate {
         order_id: order_id.to_string(),
         status,
@@ -7801,6 +7809,73 @@ pub(crate) fn emit_trade_update_at(
     // Every status a trade can take changes what the push server should
     // hold for its key (a wipe, a terminal outcome, a new bond window).
     crate::api::push::request_reconcile();
+}
+
+/// True when `row` — the trade's current row, `None` once wiped — says the
+/// trade is over, so nothing more will arrive on its own subscriptions.
+fn trade_is_over(row: Option<&crate::api::types::TradeInfo>) -> bool {
+    row.is_none_or(|trade| crate::mostro::status::is_hard_terminal(&trade.order.status))
+}
+
+/// Give back the per-trade relay subscriptions of a trade that ended (#523):
+/// its `mostro-order-<id>` d-tag watcher, its daemon-message watcher and its
+/// chat REQs. They used to linger until a 30-minute idle, or the whole
+/// session for chats, and relays cap concurrent REQs (nos.lol, and
+/// relay.mostro.network's `CLOSED: exceeds limit`). The bulk kind-14 feed
+/// still covers the key, so a late `rate` or bond notice arrives anyway.
+///
+/// Decided on the row, re-read here: a terminal update replayed for an
+/// order that has since been re-taken must not tear down live coverage.
+/// `known_index` is the trade key index when the row is already gone.
+fn release_finished_trade_subscriptions(order_id: &str, known_index: Option<u32>) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    let order_id = order_id.to_string();
+    crate::rt::spawn(async move {
+        let Some(db) = crate::db::app_db::db() else {
+            return;
+        };
+        let Ok(row) = db.get_trade_by_order_id(&order_id).await else {
+            return;
+        };
+        if !trade_is_over(row.as_ref()) {
+            return;
+        }
+        let Ok(pool) = crate::api::nostr::get_pool() else {
+            return;
+        };
+        let client = pool.client();
+        let owned_d_tag = single_order_tasks()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&order_id)
+            .is_some();
+        if owned_d_tag {
+            // Its task sees the claim gone at its next wake and leaves the
+            // (already closed) subscription alone.
+            crate::nostr::live_subs::live_subs()
+                .close(&client, &single_order_subscription_id(&order_id))
+                .await;
+        }
+        let index = row.as_ref().map(|t| t.trade_key_index).or(known_index);
+        if let Some(index) = index {
+            if let Ok(keys) = crate::api::identity::get_active_trade_keys(index).await {
+                crate::nostr::subscriptions::teardown(&client, &keys.public_key().to_hex())
+                    .await;
+            }
+        }
+        let chats = crate::api::messages::stop_chat_subscriptions(&order_id).await;
+        crate::api::logging::blog_debug(
+            "orders",
+            format!(
+                "released subscriptions of finished order={} d-tag={owned_d_tag} chats={}",
+                crate::api::logging::short_id(&order_id),
+                chats.len()
+            ),
+        );
+    });
 }
 
 /// Stream of trade lifecycle changes pushed by the daemon-message ingest.
@@ -10447,6 +10522,19 @@ mod tests {
         )
         .expect("row");
         assert_eq!(row.started_at, 1_700_000_000);
+    }
+
+    /// #523: a trade's relay subscriptions are released once its row says it
+    /// is over — or is gone (a wipe). A terminal update replayed for a row
+    /// that has since moved on (a re-take) must not tear down live coverage.
+    #[test]
+    fn subscriptions_are_released_only_for_a_finished_or_wiped_trade() {
+        use crate::api::types::OrderStatus as S;
+        assert!(trade_is_over(None));
+        assert!(trade_is_over(Some(&seam_trade_row("o", S::Success))));
+        assert!(trade_is_over(Some(&seam_trade_row("o", S::Canceled))));
+        assert!(!trade_is_over(Some(&seam_trade_row("o", S::Active))));
+        assert!(!trade_is_over(Some(&seam_trade_row("o", S::Dispute))));
     }
 
     /// A stale trade index must reach the waiting request as the bare marker,

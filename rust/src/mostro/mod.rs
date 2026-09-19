@@ -8,6 +8,7 @@ pub mod pow;
 pub mod protocol_version;
 pub mod push;
 pub mod rates;
+pub mod restore_history;
 pub mod session;
 pub mod trade_index;
 pub(crate) mod status;

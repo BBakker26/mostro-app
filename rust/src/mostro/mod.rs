@@ -9,6 +9,7 @@ pub mod protocol_version;
 pub mod push;
 pub mod rates;
 pub mod session;
+pub mod trade_index;
 pub(crate) mod status;
 
 #[cfg(test)]

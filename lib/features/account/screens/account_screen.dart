@@ -342,6 +342,24 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       return;
     }
     if (!context.mounted) return;
+    // A seed that already traded must learn its trades and trade index from
+    // the daemon before its first new order (InvalidTradeIndex otherwise).
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(content: Text(l10n.recoveringTradesMessage)),
+    );
+    final outcome = await IdentityService.recoverAfterImport();
+    messenger.hideCurrentSnackBar();
+    if (outcome.isRecovered) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.recoveredTradesMessage(outcome.count!))),
+      );
+    } else if (outcome.isFailed) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.recoverTradesFailedMessage)),
+      );
+    }
+    if (!context.mounted) return;
     await _finishIdentitySwap(context);
   }
 

@@ -42,6 +42,11 @@ String localizedDaemonError(
   if (raw.contains('MaintenanceMode')) {
     return l10n.mostroMaintenanceMode;
   }
+  // The local trade-key counter is behind the node's. Create and take resync
+  // it and retry once (mostro::trade_index), so this is a second refusal.
+  if (raw.contains('InvalidTradeIndex')) {
+    return l10n.invalidTradeIndexError;
+  }
   // The daemon refused the buyer invoice: wrong amount, too short an expiry
   // for its payout window, or not an invoice at all. The Rust core words the
   // CantDo as "invalid Lightning invoice"; the marker is matched either way.

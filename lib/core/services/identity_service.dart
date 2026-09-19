@@ -3,6 +3,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/identity.dart' as identity_api;
+import 'package:mostro/src/rust/api/orders.dart' as orders_api;
+import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
 
 /// Secure-storage keys.
 const _kMnemonic = 'mostro_identity_mnemonic';
@@ -43,6 +45,32 @@ class StoredIdentity {
 /// Manages identity lifecycle: creation on first launch and reload on
 /// subsequent launches. Mnemonic persists in [FlutterSecureStorage]
 /// (iOS Keychain / Android Keystore). Rust holds keys only in memory.
+/// What the daemon-side recovery after a seed import came to.
+@immutable
+class RecoveryOutcome {
+  const RecoveryOutcome.recovered(int this.count) : _kind = 0;
+  const RecoveryOutcome.skipped() : count = null, _kind = 1;
+  const RecoveryOutcome.failed() : count = null, _kind = 2;
+
+  /// Orders and disputes the daemon returned; null unless [isRecovered].
+  final int? count;
+  final int _kind;
+
+  bool get isRecovered => _kind == 0;
+  bool get isSkipped => _kind == 1;
+  bool get isFailed => _kind == 2;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RecoveryOutcome && other._kind == _kind && other.count == count;
+
+  @override
+  int get hashCode => Object.hash(_kind, count);
+
+  @override
+  String toString() => 'RecoveryOutcome($_kind, $count)';
+}
+
 class IdentityService {
   IdentityService._();
 
@@ -159,6 +187,27 @@ class IdentityService {
     ]);
 
     debugPrint('[identity] identity imported — ${words.length} words');
+  }
+
+  /// Ask the daemon for this identity's trades after [importAndStore].
+  ///
+  /// A seed that already traded left the daemon's trade index ahead of the
+  /// fresh local counter, and the first order would be refused with
+  /// `InvalidTradeIndex`; the Rust restore also resyncs that counter
+  /// (`recover_trades`). Privacy mode has no account to recover, so it is
+  /// skipped. A failure is reported, never thrown: the import itself stands,
+  /// and a later order still resyncs the counter on its own.
+  static Future<RecoveryOutcome> recoverAfterImport({
+    Future<bool> Function() isPrivacyMode = reputation_api.getPrivacyMode,
+    Future<int> Function() recover = orders_api.recoverTrades,
+  }) async {
+    try {
+      if (await isPrivacyMode()) return const RecoveryOutcome.skipped();
+      return RecoveryOutcome.recovered(await recover());
+    } catch (e) {
+      debugPrint('[identity] recoverAfterImport error: $e');
+      return const RecoveryOutcome.failed();
+    }
   }
 
   /// Generate a new identity and atomically replace the stored one.

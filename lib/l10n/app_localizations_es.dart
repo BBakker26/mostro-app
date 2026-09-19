@@ -3556,4 +3556,28 @@ class AppLocalizationsEs extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get invalidTradeIndexError =>
+      'Tu cuenta no está sincronizada con este nodo Mostro, así que rechazó la orden. Inténtalo de nuevo en un momento';
+
+  @override
+  String get recoveringTradesMessage =>
+      'Cuenta importada. Recuperando tus operaciones desde Mostro…';
+
+  @override
+  String recoveredTradesMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Cuenta importada. Se recuperaron $count operaciones',
+      one: 'Cuenta importada. Se recuperó 1 operación',
+      zero: 'Cuenta importada. No tenías operaciones en curso',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recoverTradesFailedMessage =>
+      'Cuenta importada, pero Mostro no respondió, así que no se recuperaron tus operaciones en curso';
 }

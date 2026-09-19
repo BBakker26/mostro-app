@@ -4,6 +4,16 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.2] - 2026-09-19
+
+### ✨ Features
+
+- **order-book:** swipe between Buy and Sell ([#518](https://github.com/MostroP2P/app/pull/518)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **restore:** recover after a seed import and resync a stale trade index ([#519](https://github.com/MostroP2P/app/pull/519)) by @grunch
+
 ## [2.0.1] - 2026-09-18
 
 ### ✨ Features

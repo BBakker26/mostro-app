@@ -171,8 +171,9 @@ bridged by flutter_rust_bridge.
 - **A pushed tag `vX.Y.Z` is the release.** `.github/workflows/release.yml` builds two signed
   APKs (`armeabi-v7a`, `arm64-v8a`), publishes the GitHub release and opens the `CHANGELOG.md`
   PR. It refuses a tag that is not on `main` or whose version `pubspec.yaml` **and**
-  `rust/Cargo.toml` do not already carry — the About screen shows `CARGO_PKG_VERSION`. Bump
-  both with `./scripts/bump-version.sh X.Y.Z`, never one by hand.
+  `rust/Cargo.toml` do not already carry — the About screen shows `CARGO_PKG_VERSION`. Cut a
+  release with `./scripts/release.sh X.Y.Z`, run twice: it opens the bump PR
+  (`scripts/bump-version.sh`, never one file by hand), then — once merged — tags `origin/main`.
 - **Desktop and iOS release builds live in `release-builds.yml`**, a reusable workflow that
   `release.yml` and `release-dry-run.yml` both call — edit a build there, never in a caller.
   The dry run is the only place a Windows, macOS or iOS build is compiled before a release

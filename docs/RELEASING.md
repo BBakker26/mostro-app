@@ -11,17 +11,26 @@ Versions start at **2.0.0** (v1 was the pure-Flutter `MostroP2P/mobile`) and fol
 ## Cutting a release
 
 ```bash
-# 1. Only when the version changes (2.0.0 is already in the tree): bump it through a PR.
-./scripts/bump-version.sh 2.0.1        # pubspec.yaml, rust/Cargo.toml, rust/Cargo.lock
-#    → commit as `chore(release): v2.0.1`, open the PR, merge it.
-
-# 2. Tag the commit on main you want to ship, and push the tag.
-git checkout main && git pull
-git tag -a v2.0.1 -m "Mostro v2.0.1"
-git push origin v2.0.1
-
-# 3. When the run finishes: review and merge the `chore(release): changelog for v2.0.1` PR.
+./scripts/release.sh 2.0.1   # opens the `chore(release): v2.0.1` PR → merge it
+./scripts/release.sh 2.0.1   # tags origin/main as v2.0.1 and pushes it → the release runs
+# When the run finishes: review and merge the `chore(release): changelog for v2.0.1` PR.
 ```
+
+`scripts/release.sh` looks at where the release stands and takes the next step, so the same
+command serves both runs:
+
+1. **`origin/main` does not carry the version yet** — it branches `chore/release-v2.0.1` off
+   `origin/main`, runs `scripts/bump-version.sh` (`pubspec.yaml`, `rust/Cargo.toml`,
+   `rust/Cargo.lock`), commits, pushes, opens the PR and returns to the branch you were on.
+   It refuses a version that does not move past `main`'s, or a dirty working tree; if a step
+   fails midway it returns to your branch and drops the local release branch.
+2. **That PR is still open** — it prints the link and does nothing else.
+3. **`origin/main` carries the version** — it tags `origin/main` (not your checkout, whatever
+   branch you are on) with an annotated `v2.0.1` and pushes the tag.
+
+It never merges a PR and never deletes a tag: a tag that already exists on `origin` is refused
+with the commands to remove it. To re-cut a release at a version `main` already carries (e.g.
+re-releasing `2.0.0`), step 3 applies directly.
 
 The workflow refuses the tag — before building anything — when:
 
@@ -144,8 +153,8 @@ limit of 99 on `MINOR` and `PATCH`.
 
 Nothing is published until the `publish` job, so a failure before it leaves no trace: fix the
 cause on `main` and **re-run the workflow** from the Actions tab (same tag, same commit). If
-the fix needs a new commit, delete the tag (`git push origin :v2.0.1`), tag the new commit and
-push again. Re-running after a release exists updates its notes and replaces its assets in
+the fix needs a new commit, merge it, delete the tag (`git push origin :v2.0.1 && git tag -d
+v2.0.1`) and run `./scripts/release.sh 2.0.1` again: it tags the new `main`. Re-running after a release exists updates its notes and replaces its assets in
 place, and the changelog job rewrites that version's section instead of adding a second one.
 
 A PR opened by `GITHUB_TOKEN` does not trigger workflows: **close and reopen** the changelog

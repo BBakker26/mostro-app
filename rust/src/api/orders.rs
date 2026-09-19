@@ -6434,17 +6434,18 @@ async fn apply_payout_completed(order_id: &str) {
 
 /// Settle the rows a restore's history replay rebuilt for trades the daemon
 /// no longer counts as in progress (`mostro::restore_history`). Uses the
-/// snapshot the last restore stored; does nothing without one.
-async fn reconcile_restored_history() {
+/// snapshot the last restore stored; does nothing without one. Returns the
+/// order ids it looked up on the relays.
+async fn reconcile_restored_history() -> std::collections::HashSet<String> {
     let Some(db) = crate::db::app_db::db() else {
-        return;
+        return Default::default();
     };
     let json = match db
         .get_setting(crate::mostro::restore_history::SNAPSHOT_KEY)
         .await
     {
         Ok(Some(json)) => json,
-        _ => return,
+        _ => return Default::default(),
     };
     let snapshot: crate::mostro::restore_history::RestoreSnapshot =
         match serde_json::from_str(&json) {
@@ -6454,13 +6455,13 @@ async fn reconcile_restored_history() {
                     "restore",
                     format!("restore snapshot unreadable, history not settled: {e}"),
                 );
-                return;
+                        return Default::default();
             }
         };
     reconcile_history_with(&snapshot, |oid: String| async move {
         fetch_public_order_status(&oid).await
     })
-    .await;
+    .await
 }
 
 /// [`reconcile_restored_history`] with the public-status lookup injected.
@@ -6469,24 +6470,26 @@ async fn reconcile_restored_history() {
 /// completed trade; any other ending wipes it, leaving the tombstone that
 /// keeps the next replay from rebuilding it; no answer leaves it for the next
 /// pass. Rows are only rung (`touch_trade`), never announced: this is history
-/// being filed, not a trade moving, so it must not raise notices.
+/// being filed, not a trade moving, so it must not raise notices. Returns the
+/// order ids it looked up, whatever their outcome.
 async fn reconcile_history_with<F, Fut>(
     snapshot: &crate::mostro::restore_history::RestoreSnapshot,
     public_status: F,
-) -> usize
+) -> std::collections::HashSet<String>
 where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Option<crate::api::types::OrderStatus>>,
 {
     use crate::mostro::restore_history::{history_action, reads_in_progress, HistoryAction};
+    let mut looked_up = std::collections::HashSet::new();
     let Some(db) = crate::db::app_db::db() else {
-        return 0;
+        return looked_up;
     };
     let trades = match db.list_trades().await {
         Ok(trades) => trades,
         Err(e) => {
             log::warn!("[orders] history pass: list_trades failed: {e}");
-            return 0;
+            return looked_up;
         }
     };
     let (mut completed, mut wiped) = (0usize, 0usize);
@@ -6497,6 +6500,7 @@ where
         {
             continue;
         }
+        looked_up.insert(oid.clone());
         match history_action(public_status(oid.clone()).await.as_ref()) {
             HistoryAction::MarkSuccess => {
                 let _order = lock_order(&oid).await;
@@ -6535,7 +6539,7 @@ where
             format!("history settled: {completed} completed, {wiped} dropped"),
         );
     }
-    completed + wiped
+    looked_up
 }
 
 /// Store what a restore reported as in progress, then settle the history
@@ -6685,8 +6689,9 @@ fn newest_book_status(
 /// *triggers* the check — every decision needs a positive daemon signal
 /// (see [`sweep_action`]); the daemon stays the authority on order state.
 async fn run_stale_sweep_once() {
-    // History a restore replayed and a pass has not settled yet.
-    reconcile_restored_history().await;
+    // History a restore replayed and a pass has not settled yet. The orders
+    // it just looked up are not looked up again below (PR #524 review).
+    let looked_up = reconcile_restored_history().await;
     let Some(db) = crate::db::app_db::db() else {
         return;
     };
@@ -6712,6 +6717,10 @@ async fn run_stale_sweep_once() {
             if close_expired_bond_trade(&trade, now).await {
                 wiped += 1;
             }
+            continue;
+        }
+        // Its public status was just asked for by the history pass above.
+        if looked_up.contains(&trade.order.id) {
             continue;
         }
         let payout_pending =
@@ -10380,7 +10389,7 @@ mod tests {
         };
         let asked = std::sync::Mutex::new(Vec::<String>::new());
 
-        reconcile_history_with(&snapshot, |oid: String| {
+        let looked_up = reconcile_history_with(&snapshot, |oid: String| {
             asked.lock().unwrap().push(oid.clone());
             let public = if oid == done {
                 Some(S::Success)
@@ -10409,6 +10418,13 @@ mod tests {
         assert_eq!(status(&fresh).await, Some(S::Pending));
         let asked = asked.into_inner().unwrap();
         assert!(!asked.contains(&live) && !asked.contains(&fresh));
+        // What it looked up is reported, so the sweep that runs the pass does
+        // not query the same orders again (PR #524 review). The store is
+        // shared with other tests, so only this test's rows are checked.
+        for oid in [&done, &dead, &silent] {
+            assert!(looked_up.contains(oid), "{oid} looked up");
+        }
+        assert!(!looked_up.contains(&live) && !looked_up.contains(&fresh));
     }
 
     /// A rebuilt row is dated by its order, not by the moment of the replay

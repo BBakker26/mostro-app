@@ -3564,4 +3564,28 @@ class AppLocalizationsIt extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get invalidTradeIndexError =>
+      'Il tuo account non è sincronizzato con questo nodo Mostro, che ha quindi rifiutato l\'ordine. Riprova tra un momento';
+
+  @override
+  String get recoveringTradesMessage =>
+      'Account importato. Recupero dei tuoi scambi da Mostro…';
+
+  @override
+  String recoveredTradesMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Account importato. $count scambi recuperati',
+      one: 'Account importato. 1 scambio recuperato',
+      zero: 'Account importato. Non avevi scambi in corso',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recoverTradesFailedMessage =>
+      'Account importato, ma Mostro non ha risposto: i tuoi scambi in corso non sono stati recuperati';
 }

@@ -3572,4 +3572,28 @@ class AppLocalizationsDe extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get invalidTradeIndexError =>
+      'Dein Konto ist nicht mit diesem Mostro-Knoten synchronisiert, daher wurde die Order abgelehnt. Versuche es gleich noch einmal';
+
+  @override
+  String get recoveringTradesMessage =>
+      'Konto importiert. Deine Trades werden von Mostro wiederhergestellt…';
+
+  @override
+  String recoveredTradesMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Konto importiert. $count Trades wiederhergestellt',
+      one: 'Konto importiert. 1 Trade wiederhergestellt',
+      zero: 'Konto importiert. Du hattest keine laufenden Trades',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recoverTradesFailedMessage =>
+      'Konto importiert, aber Mostro hat nicht geantwortet, daher wurden deine laufenden Trades nicht wiederhergestellt';
 }

@@ -3527,4 +3527,28 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get invalidTradeIndexError =>
+      'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment';
+
+  @override
+  String get recoveringTradesMessage =>
+      'Account imported. Recovering your trades from Mostro…';
+
+  @override
+  String recoveredTradesMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Account imported. $count trades recovered',
+      one: 'Account imported. 1 trade recovered',
+      zero: 'Account imported. You had no trades in progress',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recoverTradesFailedMessage =>
+      'Account imported, but Mostro did not answer, so your trades in progress were not recovered';
 }

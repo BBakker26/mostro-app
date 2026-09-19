@@ -3570,4 +3570,28 @@ class AppLocalizationsFr extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get invalidTradeIndexError =>
+      'Votre compte n\'est pas synchronisé avec ce nœud Mostro, qui a donc refusé l\'ordre. Réessayez dans un instant';
+
+  @override
+  String get recoveringTradesMessage =>
+      'Compte importé. Récupération de vos échanges depuis Mostro…';
+
+  @override
+  String recoveredTradesMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Compte importé. $count échanges récupérés',
+      one: 'Compte importé. 1 échange récupéré',
+      zero: 'Compte importé. Vous n\'aviez aucun échange en cours',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recoverTradesFailedMessage =>
+      'Compte importé, mais Mostro n\'a pas répondu : vos échanges en cours n\'ont pas été récupérés';
 }

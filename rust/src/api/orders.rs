@@ -867,6 +867,15 @@ fn with_bond_window(
 /// publishes to relays. Queues if offline.
 ///
 pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
+    crate::mostro::trade_index::retry_after_resync(
+        || create_order_once(params.clone()),
+        resync_trade_key_index,
+    )
+    .await
+}
+
+/// One `create_order` attempt on a freshly derived trade key.
+async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
     // Validate: fiat_amount XOR range
     let has_fixed = params.fiat_amount.is_some();
     let has_range = params.fiat_amount_min.is_some() && params.fiat_amount_max.is_some();
@@ -1164,6 +1173,19 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
 /// Address in the payload when taking a sell order (take-sell-ln-address flow).
 /// Returns a `TradeInfo` with the initial trade state.
 pub async fn take_order(
+    order_id: String,
+    role: crate::api::types::TradeRole,
+    fiat_amount: Option<f64>,
+) -> Result<crate::api::types::TradeInfo> {
+    crate::mostro::trade_index::retry_after_resync(
+        || take_order_once(order_id.clone(), role.clone(), fiat_amount),
+        resync_trade_key_index,
+    )
+    .await
+}
+
+/// One `take_order` attempt on a freshly derived trade key.
+async fn take_order_once(
     order_id: String,
     role: crate::api::types::TradeRole,
     fiat_amount: Option<f64>,
@@ -3927,6 +3949,13 @@ async fn dispatch_mostro_message(
                 // actions on existing orders keep working. Marker only, no
                 // prose: Dart maps `MaintenanceMode` to a localized message.
                 "MaintenanceMode" => "MaintenanceMode".to_string(),
+                // The local trade-key counter is behind the daemon's (the seed
+                // traded elsewhere, or was imported without a restore). Marker
+                // only: create/take resync and retry once on it
+                // (mostro::trade_index), and Dart localizes it if that fails.
+                crate::mostro::trade_index::INVALID_TRADE_INDEX => {
+                    crate::mostro::trade_index::INVALID_TRADE_INDEX.to_string()
+                }
                 other => format!("Order rejected by Mostro: {other}"),
             };
 
@@ -8116,6 +8145,36 @@ async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Opti
     Ok(None)
 }
 
+/// Raise the local trade-key counter to the daemon's `LastTradeIndex` (#328).
+///
+/// The request needs a trade key as its reply address, so it spends one fresh
+/// index, as `restore_session` does. Returns the daemon's counter, or `None`
+/// when the daemon gave none (unknown account, privacy mode, no answer).
+async fn resync_trade_key_index() -> Result<Option<u32>> {
+    let trade_key_info = crate::api::identity::derive_trade_key().await?;
+    let sender_keys = crate::api::identity::get_active_trade_keys(trade_key_info.index).await?;
+    let Some(counter) = last_trade_index(&sender_keys).await? else {
+        return Ok(None);
+    };
+    crate::api::identity::ensure_trade_key_index_at_least(counter).await?;
+    // The raised counter owns keys the kind-14 coverage was seeded without.
+    seed_global_dm_coverage().await;
+    resubscribe_global_dm_filter().await;
+    Ok(Some(counter))
+}
+
+/// Recover this identity's trades from the daemon and resync its trade-key
+/// counter — the step a seed import needs before the first new order.
+///
+/// Wraps `restore_session` (whose `RestoreSessionInfo` is not bridgeable) and
+/// returns how many orders and disputes came back. Fails with the restore's
+/// own error (e.g. `NoDaemonResponse`); the imported identity is untouched
+/// either way, and a later order still resyncs on `InvalidTradeIndex`.
+pub async fn recover_trades() -> Result<u32> {
+    let info = restore_session().await?;
+    Ok((info.restore_orders.len() + info.restore_disputes.len()) as u32)
+}
+
 /// Send a `RestoreSession` to the active daemon and return the user's active
 /// trades/disputes. Mirrors create_order's send/await, minus the order payload.
 ///
@@ -10135,6 +10194,45 @@ mod tests {
             _ => panic!("the rejection must reach the waiting open_dispute"),
         }
         assert!(!pending_requests().lock().unwrap().contains_key(key));
+    }
+
+    /// A stale trade index must reach the waiting request as the bare marker,
+    /// not as prose: `create_order` / `take_order` retry only on an exact
+    /// `InvalidTradeIndex` (mostro::trade_index), and Dart localizes it.
+    #[tokio::test]
+    async fn an_invalid_trade_index_rejection_carries_the_bare_marker() {
+        use mostro_core::error::CantDoReason;
+        use mostro_core::message::{Action, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let key = "test-invalid-trade-index-pubkey";
+        let mut rx = register_dispute_request(key.to_string(), 74, 6);
+
+        dispatch_mostro_message(
+            dispute_reply_message(
+                order_uuid,
+                74,
+                6,
+                Action::CantDo,
+                Some(Payload::CantDo(Some(CantDoReason::InvalidTradeIndex))),
+            ),
+            "test-invalid-trade-index",
+            key,
+            6,
+        )
+        .await;
+
+        match rx.try_recv() {
+            Ok(Wake {
+                reply: DaemonReply::Rejected { message, .. },
+                ..
+            }) => {
+                assert!(crate::mostro::trade_index::is_invalid_trade_index(
+                    &anyhow::anyhow!("{message}")
+                ));
+            }
+            _ => panic!("the rejection must reach the waiting request"),
+        }
     }
 
     /// Same-key overlap (send_invoice reuses the take's trade key): a newer

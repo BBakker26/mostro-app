@@ -5965,6 +5965,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 new message from the dispute resolver} other{{count} new messages from the dispute resolver}}'**
   String chatCardSolverMessage(int count);
+
+  /// Error shown when the Mostro node refuses a new order or take with CantDo(InvalidTradeIndex) even after the app resynced its trade-key counter and retried once
+  ///
+  /// In en, this message translates to:
+  /// **'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment'**
+  String get invalidTradeIndexError;
+
+  /// Snackbar shown on the Account screen right after a mnemonic import, while the app asks Mostro for the identity's trades in progress
+  ///
+  /// In en, this message translates to:
+  /// **'Account imported. Recovering your trades from Mostro…'**
+  String get recoveringTradesMessage;
+
+  /// Snackbar shown after a mnemonic import once Mostro returned the identity's trades in progress; count is how many orders and disputes came back
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Account imported. You had no trades in progress} =1{Account imported. 1 trade recovered} other{Account imported. {count} trades recovered}}'**
+  String recoveredTradesMessage(int count);
+
+  /// Snackbar shown after a mnemonic import when Mostro did not answer the recovery request; the import itself succeeded
+  ///
+  /// In en, this message translates to:
+  /// **'Account imported, but Mostro did not answer, so your trades in progress were not recovered'**
+  String get recoverTradesFailedMessage;
 }
 
 class _AppLocalizationsDelegate

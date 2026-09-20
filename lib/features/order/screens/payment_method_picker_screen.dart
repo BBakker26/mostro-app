@@ -216,8 +216,14 @@ class _PaymentMethodPickerScreenState
               _ChosenSummary(methods: chosen, onRemove: _remove),
             ],
             const SizedBox(height: 14),
+            // Keyed, or the list reconciles by position: filtering the row
+            // above away would hand a method's 120ms tint animation to a
+            // different one. The prefix keeps a custom method apart from a
+            // catalogue entry of the same name — a currency switch can put
+            // both in the list, and two equal keys throw.
             for (final method in visible)
               Padding(
+                key: ValueKey(method),
                 padding: const EdgeInsets.only(bottom: 6),
                 child: _MethodRow(
                   label: method,
@@ -229,6 +235,7 @@ class _PaymentMethodPickerScreenState
               ),
             for (final method in visibleCustom)
               Padding(
+                key: ValueKey('custom-$method'),
                 padding: const EdgeInsets.only(bottom: 6),
                 child: _MethodRow(
                   label: method,

@@ -12,10 +12,18 @@ import '../../../support/provider_harness.dart';
 
 /// Pumps the picker on top of a host screen, so a cancel or a confirm has
 /// somewhere to pop back to — as it does in the create-order flow.
-Future<ProviderContainer> _pump(WidgetTester tester) async {
+Future<ProviderContainer> _pump(
+  WidgetTester tester, {
+  List<String> selected = const [],
+  List<String> custom = const [],
+}) async {
   final container = createContainer(
     overrides: [
       selectedFiatCodeProvider.overrideWith((ref) => 'USD'),
+      // Seeded before the screen opens: it copies the form's methods into
+      // its draft in initState.
+      selectedPaymentMethodsProvider.overrideWith((ref) => selected),
+      customPaymentMethodsProvider.overrideWith((ref) => custom),
       paymentMethodsDataProvider.overrideWith(
         (ref) async => {
           'USD': ['Zelle', 'Cash App', 'Wire'],
@@ -116,8 +124,7 @@ void main() {
     testWidgets('back with changes asks, and discarding keeps the form', (
       tester,
     ) async {
-      final container = await _pump(tester);
-      container.read(selectedPaymentMethodsProvider.notifier).state = ['Wire'];
+      final container = await _pump(tester, selected: ['Wire']);
       await tester.tap(find.text('Zelle'));
       await tester.pumpAndSettle();
 
@@ -211,6 +218,32 @@ void main() {
       await tester.tap(_confirm);
       await tester.pumpAndSettle();
       expect(container.read(customPaymentMethodsProvider), ['Pix']);
+    });
+
+    testWidgets('every row carries its own key', (tester) async {
+      // The list is rebuilt on every keystroke of the search. Unkeyed, its
+      // children reconcile by position and a row's 120ms tint animation
+      // lands on whichever method took its place. The `custom-` prefix
+      // keeps a custom method apart from a catalogue entry of the same
+      // name — a currency switch can put both in the list, and two equal
+      // keys throw.
+      await _pump(tester, custom: ['Zelle']);
+
+      final keys =
+          tester
+              .widgetList<Padding>(
+                find.descendant(
+                  of: find.byType(ListView),
+                  matching: find.byType(Padding),
+                ),
+              )
+              .map((p) => p.key)
+              .whereType<ValueKey<String>>()
+              .map((k) => k.value)
+              .toList();
+
+      expect(keys, containsAll(['Zelle', 'Cash App', 'Wire', 'custom-Zelle']));
+      expect(keys.toSet(), hasLength(keys.length));
     });
 
     testWidgets('a summary chip removes its method', (tester) async {

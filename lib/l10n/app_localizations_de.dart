@@ -3596,4 +3596,34 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get recoverTradesFailedMessage =>
       'Konto importiert, aber Mostro hat nicht geantwortet, daher wurden deine laufenden Trades nicht wiederhergestellt';
+
+  @override
+  String get paymentMethodsChosenLabel => 'Ausgewählt';
+
+  @override
+  String paymentMethodsSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Methoden ausgewählt',
+      one: '1 Methode ausgewählt',
+      zero: 'Wähle mindestens eine Methode',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get paymentMethodsConfirm => 'Methoden bestätigen';
+
+  @override
+  String get paymentMethodAddCustom => 'Eigene Zahlungsmethode hinzufügen';
+
+  @override
+  String get paymentMethodsDiscardTitle => 'Änderungen verwerfen?';
+
+  @override
+  String get paymentMethodsDiscardConfirm => 'Verwerfen';
+
+  @override
+  String get paymentMethodsKeepEditing => 'Weiter bearbeiten';
 }

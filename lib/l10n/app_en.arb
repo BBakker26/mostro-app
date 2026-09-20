@@ -4006,5 +4006,19 @@
   "recoveredTradesMessage": "{count, plural, =0{Account imported. You had no trades in progress} =1{Account imported. 1 trade recovered} other{Account imported. {count} trades recovered}}",
   "@recoveredTradesMessage": {"description": "Snackbar shown after a mnemonic import once Mostro returned the identity's trades in progress; count is how many orders and disputes came back", "placeholders": {"count": {"type": "int"}}},
   "recoverTradesFailedMessage": "Account imported, but Mostro did not answer, so your trades in progress were not recovered",
-  "@recoverTradesFailedMessage": {"description": "Snackbar shown after a mnemonic import when Mostro did not answer the recovery request; the import itself succeeded"}
+  "@recoverTradesFailedMessage": {"description": "Snackbar shown after a mnemonic import when Mostro did not answer the recovery request; the import itself succeeded"},
+  "paymentMethodsChosenLabel": "Chosen",
+  "@paymentMethodsChosenLabel": {"description": "Label in front of the chips summarising the methods chosen so far on the payment-method picker screen"},
+  "paymentMethodsSelectedCount": "{count, plural, =0{Choose at least one method} =1{1 method selected} other{{count} methods selected}}",
+  "@paymentMethodsSelectedCount": {"description": "Count line above the confirm button of the payment-method picker screen", "placeholders": {"count": {"type": "int"}}},
+  "paymentMethodsConfirm": "Confirm methods",
+  "@paymentMethodsConfirm": {"description": "Button that saves the payment-method selection and closes the picker screen"},
+  "paymentMethodAddCustom": "Add custom payment method",
+  "@paymentMethodAddCustom": {"description": "Dashed row at the end of the payment-method list that opens the custom-method sheet"},
+  "paymentMethodsDiscardTitle": "Discard the changes?",
+  "@paymentMethodsDiscardTitle": {"description": "Title of the dialog shown when leaving the payment-method picker with unconfirmed changes"},
+  "paymentMethodsDiscardConfirm": "Discard",
+  "@paymentMethodsDiscardConfirm": {"description": "Dialog action that leaves the payment-method picker without saving"},
+  "paymentMethodsKeepEditing": "Keep editing",
+  "@paymentMethodsKeepEditing": {"description": "Dialog action that stays on the payment-method picker screen"}
 }

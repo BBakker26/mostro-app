@@ -142,6 +142,12 @@ class AutomationIds {
   static const String orderCreatePaymentMethod = 'order.create.payment_method';
   static const String orderCreatePaymentMethodCustomAdd =
       'order.create.payment_method.custom_add';
+  // Dashed row at the end of the list that opens the free-text sheet, and
+  // the bottom bar's button, the only way the selection reaches the form.
+  static const String orderCreatePaymentMethodCustomOpen =
+      'order.create.payment_method.custom_open';
+  static const String orderCreatePaymentMethodsConfirm =
+      'order.create.payment_methods.confirm';
   // `Market | Fixed` control, as a whole and per segment. Fixed is disabled
   // while a range order is being written.
   static const String orderCreatePriceType = 'order.create.price_type';

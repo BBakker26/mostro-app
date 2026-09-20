@@ -3580,4 +3580,34 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get recoverTradesFailedMessage =>
       'Cuenta importada, pero Mostro no respondió, así que no se recuperaron tus operaciones en curso';
+
+  @override
+  String get paymentMethodsChosenLabel => 'Elegidos';
+
+  @override
+  String paymentMethodsSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count métodos seleccionados',
+      one: '1 método seleccionado',
+      zero: 'Elige al menos un método',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get paymentMethodsConfirm => 'Confirmar métodos';
+
+  @override
+  String get paymentMethodAddCustom => 'Agregar método personalizado';
+
+  @override
+  String get paymentMethodsDiscardTitle => '¿Descartar los cambios?';
+
+  @override
+  String get paymentMethodsDiscardConfirm => 'Descartar';
+
+  @override
+  String get paymentMethodsKeepEditing => 'Seguir editando';
 }

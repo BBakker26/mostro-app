@@ -5989,6 +5989,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Account imported, but Mostro did not answer, so your trades in progress were not recovered'**
   String get recoverTradesFailedMessage;
+
+  /// Label in front of the chips summarising the methods chosen so far on the payment-method picker screen
+  ///
+  /// In en, this message translates to:
+  /// **'Chosen'**
+  String get paymentMethodsChosenLabel;
+
+  /// Count line above the confirm button of the payment-method picker screen
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{Choose at least one method} =1{1 method selected} other{{count} methods selected}}'**
+  String paymentMethodsSelectedCount(int count);
+
+  /// Button that saves the payment-method selection and closes the picker screen
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm methods'**
+  String get paymentMethodsConfirm;
+
+  /// Dashed row at the end of the payment-method list that opens the custom-method sheet
+  ///
+  /// In en, this message translates to:
+  /// **'Add custom payment method'**
+  String get paymentMethodAddCustom;
+
+  /// Title of the dialog shown when leaving the payment-method picker with unconfirmed changes
+  ///
+  /// In en, this message translates to:
+  /// **'Discard the changes?'**
+  String get paymentMethodsDiscardTitle;
+
+  /// Dialog action that leaves the payment-method picker without saving
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get paymentMethodsDiscardConfirm;
+
+  /// Dialog action that stays on the payment-method picker screen
+  ///
+  /// In en, this message translates to:
+  /// **'Keep editing'**
+  String get paymentMethodsKeepEditing;
 }
 
 class _AppLocalizationsDelegate

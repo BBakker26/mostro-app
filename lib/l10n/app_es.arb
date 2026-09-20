@@ -1112,5 +1112,12 @@
   "invalidTradeIndexError": "Tu cuenta no está sincronizada con este nodo Mostro, así que rechazó la orden. Inténtalo de nuevo en un momento",
   "recoveringTradesMessage": "Cuenta importada. Recuperando tus operaciones desde Mostro…",
   "recoveredTradesMessage": "{count, plural, =0{Cuenta importada. No tenías operaciones en curso} =1{Cuenta importada. Se recuperó 1 operación} other{Cuenta importada. Se recuperaron {count} operaciones}}",
-  "recoverTradesFailedMessage": "Cuenta importada, pero Mostro no respondió, así que no se recuperaron tus operaciones en curso"
+  "recoverTradesFailedMessage": "Cuenta importada, pero Mostro no respondió, así que no se recuperaron tus operaciones en curso",
+  "paymentMethodsChosenLabel": "Elegidos",
+  "paymentMethodsSelectedCount": "{count, plural, =0{Elige al menos un método} =1{1 método seleccionado} other{{count} métodos seleccionados}}",
+  "paymentMethodsConfirm": "Confirmar métodos",
+  "paymentMethodAddCustom": "Agregar método personalizado",
+  "paymentMethodsDiscardTitle": "¿Descartar los cambios?",
+  "paymentMethodsDiscardConfirm": "Descartar",
+  "paymentMethodsKeepEditing": "Seguir editando"
 }

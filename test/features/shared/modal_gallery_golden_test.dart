@@ -32,7 +32,8 @@ Widget _gallery(Brightness brightness) {
 
   return Container(
     key: const ValueKey('modal-gallery'),
-    width: 380,
+    // 360 for the phone, plus this container's own padding.
+    width: 392,
     color: book.bg,
     padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
     child: Column(
@@ -102,6 +103,10 @@ Widget _gallery(Brightness brightness) {
 
 /// Gives a modal the width it has on a 360 px phone, so the gallery shows the
 /// real line breaks and the real footer layout.
+///
+/// That is the width of the *phone*, not of the card: `Dialog` takes its own
+/// 24 px inset off each side, so framing it at the card's 312 would render a
+/// 264 px card and break its lines earlier than the app does.
 class _Framed extends StatelessWidget {
   const _Framed(this.child);
 
@@ -109,7 +114,7 @@ class _Framed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      Center(child: SizedBox(width: 312, child: child));
+      Center(child: SizedBox(width: 360, child: child));
 }
 
 void main() {

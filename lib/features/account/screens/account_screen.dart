@@ -35,6 +35,9 @@ class AccountScreen extends ConsumerStatefulWidget {
     super.key,
     @visibleForTesting this.debugWords,
     @visibleForTesting this.debugPublicKey,
+    @visibleForTesting this.debugRegenerate,
+    @visibleForTesting this.debugImport,
+    @visibleForTesting this.debugRecover,
   });
 
   /// Test-only word source for `Show words`, so widget tests do not reach the
@@ -43,6 +46,12 @@ class AccountScreen extends ConsumerStatefulWidget {
 
   /// Test seam: the public key the readout shows, instead of the bridge's.
   final Future<String?> Function()? debugPublicKey;
+
+  /// Test seam: the identity swaps, instead of [IdentityService]'s
+  /// bridge-backed ones. Never set in production.
+  final Future<void> Function()? debugRegenerate;
+  final Future<void> Function(List<String> words)? debugImport;
+  final Future<RecoveryOutcome> Function()? debugRecover;
 
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
@@ -234,12 +243,23 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     );
   }
 
-  /// A new or imported identity is, by definition, not backed up: mask the
-  /// old words, re-arm the reminder and clear the backed-up flag, then go
-  /// home. The identity has already been replaced when this runs, so a reset
-  /// that fails is reported as a backup-status failure, not as a failed
-  /// generation or import, and never keeps the other reset from running.
-  Future<void> _finishIdentitySwap(BuildContext context) async {
+  /// Mask the old words, move the backup state to what the new identity
+  /// deserves, then go home.
+  ///
+  /// A generated mnemonic is, by definition, not backed up: the reminder
+  /// re-arms and the backed-up flag clears. An imported one came from words
+  /// the user already holds ([alreadyBackedUp]) — there is nothing to ask
+  /// them to write down, so the reminder is cleared instead, and cleared
+  /// actively: the walkthrough or the replaced identity may have armed it
+  /// already (#530).
+  ///
+  /// The identity has already been replaced when this runs, so a write that
+  /// fails is reported as a backup-status failure, not as a failed generation
+  /// or import, and never keeps the other write from running.
+  Future<void> _finishIdentitySwap(
+    BuildContext context, {
+    required bool alreadyBackedUp,
+  }) async {
     final l10n = AppLocalizations.of(context);
     _copiedTimer?.cancel();
     setState(() {
@@ -250,12 +270,17 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     final reminder = ref.read(backupReminderProvider.notifier);
     final completed = ref.read(backupCompletedProvider.notifier);
 
+    final writes =
+        alreadyBackedUp
+            ? [reminder.markAlreadyBackedUp, completed.markCompleted]
+            : [reminder.showBackupReminder, completed.reset];
+
     var resetFailed = false;
-    for (final reset in [reminder.showBackupReminder, completed.reset]) {
+    for (final write in writes) {
       try {
-        await reset();
+        await write();
       } catch (e) {
-        debugPrint('[account] backup state reset error: $e');
+        debugPrint('[account] backup state write error: $e');
         resetFailed = true;
       }
     }
@@ -289,7 +314,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     // Atomically replaces the stored identity: new mnemonic is
                     // written before old data is cleared, so there is no window
                     // where the user is left without a valid identity.
-                    await IdentityService.regenerate();
+                    await (widget.debugRegenerate?.call() ??
+                        IdentityService.regenerate());
                   } catch (e) {
                     debugPrint('[account] generateNewUser error: $e');
                     if (!context.mounted) return;
@@ -306,7 +332,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                   }
                   // Only reset and navigate once the new identity exists.
                   if (!context.mounted) return;
-                  await _finishIdentitySwap(context);
+                  await _finishIdentitySwap(context, alreadyBackedUp: false);
                 },
                 child: Text(l10n.continueButtonLabel),
               ).withAutomationId(AutomationIds.keysGenerateConfirm),
@@ -328,7 +354,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   Future<void> _importIdentity(BuildContext context, List<String> words) async {
     final l10n = AppLocalizations.of(context);
     try {
-      await IdentityService.importAndStore(words);
+      await (widget.debugImport?.call(words) ??
+          IdentityService.importAndStore(words));
     } catch (e) {
       debugPrint('[account] importIdentity error: $e');
       if (!context.mounted) return;
@@ -348,7 +375,9 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     messenger.showSnackBar(
       SnackBar(content: Text(l10n.recoveringTradesMessage)),
     );
-    final outcome = await IdentityService.recoverAfterImport();
+    final outcome =
+        await (widget.debugRecover?.call() ??
+            IdentityService.recoverAfterImport());
     messenger.hideCurrentSnackBar();
     if (outcome.isRecovered) {
       messenger.showSnackBar(
@@ -360,7 +389,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       );
     }
     if (!context.mounted) return;
-    await _finishIdentitySwap(context);
+    // The user restored from words they already had: nothing to back up.
+    await _finishIdentitySwap(context, alreadyBackedUp: true);
   }
 
   void _confirmRefresh(BuildContext context) {

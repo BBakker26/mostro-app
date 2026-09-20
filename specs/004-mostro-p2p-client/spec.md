@@ -47,7 +47,8 @@ The user taps the backup reminder or navigates to the Account screen. Until the 
 3. **Given** the verification step, **When** fewer than the 3 words are answered correctly, **Then** "Confirm" stays disabled; "View words" returns to the words keeping the answered slots; a second wrong pick on the same word returns to the words and starts a new round.
 4. **Given** the 3 words are answered correctly, **When** the user taps "Confirm", **Then** the backup is marked as confirmed in persistent storage, the backup reminder notification is permanently removed from the Notifications screen, and the red dot on the notification bell permanently disappears.
 5. **Given** the backup is confirmed, **When** the user navigates to the Account screen, **Then** it shows the Secret Words card fully masked with a "Backed up" chip and no banner; "Show words" reveals all 12 words in order with only "Hide" and "Copy" (no confirmation is asked again), and leaving the screen masks them again.
-6. **Given** the user generates or imports a new identity (User Story 15), **When** the new mnemonic is stored, **Then** the backup confirmation is reset: the backup reminder notification is re-pinned, the red dot reappears, and Account shows the banner again.
+6. **Given** the user generates a new identity (User Story 15), **When** the new mnemonic is stored, **Then** the backup confirmation is reset: the backup reminder notification is re-pinned, the red dot reappears, and Account shows the banner again.
+7. **Given** the user imports an identity from a mnemonic they typed in (User Story 15), **When** the mnemonic is stored, **Then** the backup counts as confirmed: no backup reminder notification is pinned, the bell shows no red dot, and Account shows the Secret Words card — the words came from the user's own backup, so the app MUST NOT ask them to write them down again. A reminder armed earlier (first run, or the replaced identity) is cleared.
 
 ---
 
@@ -282,6 +283,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 1. **Given** the user opens Account, **When** the screen loads, **Then** they see the masked mnemonic, a privacy mode toggle, and a "Generate New User" option.
 2. **Given** the user is in Reputation mode, **When** they switch to Full Privacy mode, **Then** a new identity is used for trades and no reputation data is accumulated.
 3. **Given** the user generates a new identity, **When** confirmed, **Then** a new 12-word mnemonic is created and the backup reminder reactivates.
+4. **Given** the user imports an identity from a mnemonic, **When** the import succeeds, **Then** the backup reminder does not activate and is cleared if it was already active.
 
 ---
 
@@ -308,16 +310,17 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - **FR-002**: The generated mnemonic MUST be persisted to platform secure storage (iOS Keychain / Android Keystore) immediately after generation, before any UI transition occurs.
 - **FR-002a**: If secure storage persistence fails during first launch, the system MUST: (a) halt onboarding and display a blocking error message instructing the user to check device settings and restart the app; (b) NOT proceed to the walkthrough or any other UI; (c) NOT proceed to the order book in any state where the mnemonic is not durably persisted. Recovery path: the user restarts the app and the system retries persistence on the next launch.
 - **FR-003**: The system MUST display a 6-page illustrated walkthrough on first launch only; it MUST NOT appear on subsequent launches.
-- **FR-004**: Upon successful identity generation on first launch, the system MUST create a backup reminder notification and pin it as the first item in the Notifications screen. This notification MUST NOT be dismissible by swipe-to-dismiss or "Mark all as read" — it can only be removed by the user confirming their backup through the 3-step backup's word verification.
+- **FR-004**: Upon successful identity generation on first launch, the system MUST create a backup reminder notification and pin it as the first item in the Notifications screen. This notification MUST NOT be dismissible by swipe-to-dismiss or "Mark all as read" — it can only be removed by the user confirming their backup through the 3-step backup's word verification, or by an identity import (FR-013a), which pins no such notification in the first place.
 - **FR-005**: The notification bell icon in the app bar MUST display a red dot indicator (no number) whenever the backup has not yet been confirmed by the user. Once backup is confirmed, the red dot MUST disappear permanently and MUST NOT reappear unless a new identity is generated.
 - **FR-006**: The notification bell MUST display a numbered badge (pill shape, dark gold) showing the count of unread non-backup notifications once the backup is confirmed. The red dot and the numbered badge are mutually exclusive: the red dot takes priority while backup is pending.
 - **FR-007**: The notification bell MUST play a left-right shake animation (two oscillations, approximately 300 ms, ease-in-out) whenever any indicator becomes active (red dot appears, or unread badge count increases). The animation MUST NOT loop continuously — it fires once per state change.
 - **FR-008**: Tapping the backup reminder notification MUST navigate the user directly to the Account screen.
 - **FR-009**: The Account screen MUST render exactly one of: the "Secure your reputation" banner while the backup is unconfirmed, or the Secret Words card once it is confirmed. The card MUST display the mnemonic fully masked by default; none of the words are visible until the user taps "Show words", and they MUST be masked again when the screen is left. The Account screen does not show the user's public key.
 - **FR-010**: When the user taps "Show words" on the Secret Words card, the system MUST reveal all 12 mnemonic words in order and offer only "Hide" and "Copy" — no confirmation checkbox.
-- **FR-011**: The backup MUST only be marked as confirmed when the user answers correctly the 3 words the backup flow asks at random. Viewing the words MUST NOT confirm the backup.
+- **FR-011**: For a generated mnemonic, the backup MUST only be marked as confirmed when the user answers correctly the 3 words the backup flow asks at random. Viewing the words MUST NOT confirm the backup. An imported mnemonic is the one exception (FR-013a).
 - **FR-012**: When the verification is confirmed, the system MUST: (a) persist the confirmed state to local storage, (b) permanently remove the backup reminder notification from the Notifications screen, and (c) permanently remove the red dot from the notification bell. These changes MUST survive app restart.
 - **FR-013**: If the user generates a new identity (via Account screen), the backup confirmation state MUST be reset to unconfirmed, re-triggering the backup reminder notification and the red dot on the bell.
+- **FR-013a**: If the user imports an identity from a mnemonic (via Account screen), the backup confirmation state MUST be set to confirmed instead: no backup reminder notification is pinned, no red dot appears, and any reminder already armed MUST be cleared. An imported mnemonic is one the user already holds, so the app MUST NOT ask for it to be backed up or verified. This is an explicit exception to FR-004 and FR-011. This MUST survive app restart.
 
 **Order Book**
 

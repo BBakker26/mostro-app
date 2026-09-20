@@ -1112,7 +1112,7 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
                     order.id
                 ),
             );
-            return Err(anyhow::anyhow!("NoDaemonResponse"));
+            return Err(anyhow::anyhow!(crate::mostro::pending::NO_DAEMON_RESPONSE));
         }
     };
 
@@ -1374,7 +1374,7 @@ async fn take_order_once(
                 "orders",
                 format!("take_order: no daemon response within 10s for order={order_id}"),
             );
-            return Err(anyhow::anyhow!("NoDaemonResponse"));
+            return Err(anyhow::anyhow!(crate::mostro::pending::NO_DAEMON_RESPONSE));
         }
     };
 
@@ -1685,7 +1685,7 @@ pub async fn send_invoice(
                 "orders",
                 format!("add_invoice: no daemon response within 10s for order={order_id}"),
             );
-            Err(anyhow::anyhow!("NoDaemonResponse"))
+            Err(anyhow::anyhow!(crate::mostro::pending::NO_DAEMON_RESPONSE))
         }
     }
 }
@@ -5090,7 +5090,7 @@ pub async fn request_bond_invoice_again(
             reply: DaemonReply::Rejected { message, .. },
             ..
         })) => return Err(anyhow::anyhow!("{message}")),
-        _ => return Err(anyhow::anyhow!("NoDaemonResponse")),
+        _ => return Err(anyhow::anyhow!(crate::mostro::pending::NO_DAEMON_RESPONSE)),
     };
     // Under the guard: the row as it is now, not as it was before the
     // round trip. A message handled before the reply may have moved it on
@@ -8302,7 +8302,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             Err(anyhow::anyhow!("{message}"))
         }
         Ok(Ok(_other)) => Err(anyhow::anyhow!("unexpected restore reply")),
-        _ => Err(anyhow::anyhow!("NoDaemonResponse")),
+        _ => Err(anyhow::anyhow!(crate::mostro::pending::NO_DAEMON_RESPONSE)),
     }
 }
 

@@ -843,6 +843,40 @@ mod tests {
         let _ = take_matching_request(order_key, Some(7));
     }
 
+    /// The retry matches the marker by exact equality, so a second spelling
+    /// of it anywhere would silently stop it firing (PR #525 review).
+    #[test]
+    fn nothing_spells_the_marker_out_a_second_time() {
+        fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("read src").flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rust_files(&path, out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        let needle = format!("{:?}", NO_DAEMON_RESPONSE);
+        for file in files {
+            let name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
+            // Where it is defined, and the retry's own tests.
+            if name == "pending.rs" || name == "trade_index.rs" || name == "frb_generated.rs" {
+                continue;
+            }
+            let body = std::fs::read_to_string(&file).expect("read file");
+            assert!(
+                !body.contains(&needle),
+                "{}: use crate::mostro::pending::NO_DAEMON_RESPONSE, not the literal",
+                file.display(),
+            );
+        }
+    }
+
     /// A restore is correlated by trade pubkey alone, and after a re-import
     /// that pubkey is one earlier imports already restored with: the global
     /// feed replays their replies. Only a reply no older than the request

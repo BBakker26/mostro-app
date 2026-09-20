@@ -7834,48 +7834,79 @@ fn release_finished_trade_subscriptions(order_id: &str, known_index: Option<u32>
     }
     let order_id = order_id.to_string();
     crate::rt::spawn(async move {
-        let Some(db) = crate::db::app_db::db() else {
+        let Some(release) = claim_finished_trade_release(&order_id, known_index).await else {
             return;
         };
-        let Ok(row) = db.get_trade_by_order_id(&order_id).await else {
-            return;
-        };
-        if !trade_is_over(row.as_ref()) {
-            return;
-        }
         let Ok(pool) = crate::api::nostr::get_pool() else {
             return;
         };
         let client = pool.client();
-        let owned_d_tag = single_order_tasks()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&order_id)
-            .is_some();
-        if owned_d_tag {
-            // Its task sees the claim gone at its next wake and leaves the
-            // (already closed) subscription alone.
+        // Still under the order lock: these REQs are keyed by the order id,
+        // and a retake re-opens them under the same ids. A CLOSE sent after
+        // the lock would land on the retake's subscriptions. It only sends
+        // frames — no daemon reply is awaited, as `lock_order` requires.
+        if release.owned_d_tag {
             crate::nostr::live_subs::live_subs()
                 .close(&client, &single_order_subscription_id(&order_id))
                 .await;
         }
-        let index = row.as_ref().map(|t| t.trade_key_index).or(known_index);
-        if let Some(index) = index {
+        let chats = crate::api::messages::stop_chat_subscriptions(&order_id).await;
+        drop(release.order_lock);
+        // Keyed by the finished trade's own key, which no retake reuses.
+        if let Some(index) = release.trade_index {
             if let Ok(keys) = crate::api::identity::get_active_trade_keys(index).await {
                 crate::nostr::subscriptions::teardown(&client, &keys.public_key().to_hex())
                     .await;
             }
         }
-        let chats = crate::api::messages::stop_chat_subscriptions(&order_id).await;
         crate::api::logging::blog_debug(
             "orders",
             format!(
-                "released subscriptions of finished order={} d-tag={owned_d_tag} chats={}",
+                "released subscriptions of finished order={} d-tag={} chats={}",
                 crate::api::logging::short_id(&order_id),
+                release.owned_d_tag,
                 chats.len()
             ),
         );
     });
+}
+
+/// What [`claim_finished_trade_release`] decided, with the order lock it
+/// decided under.
+struct FinishedTradeRelease {
+    order_lock: tokio::sync::OwnedMutexGuard<()>,
+    /// The d-tag task's claim was taken: its REQ is ours to close.
+    owned_d_tag: bool,
+    trade_index: Option<u32>,
+}
+
+/// Decide, under the order lock, whether `order_id`'s subscriptions may be
+/// released, and take the d-tag task's claim if so. A retake holds the same
+/// lock while it persists its row and claims that task (`take_order_once`),
+/// so this runs wholly before it or wholly after — and after, the row is
+/// live and nothing is released (PR #527 review). `None` means stand down.
+async fn claim_finished_trade_release(
+    order_id: &str,
+    known_index: Option<u32>,
+) -> Option<FinishedTradeRelease> {
+    let order_lock = lock_order(order_id).await;
+    let db = crate::db::app_db::db()?;
+    let row = db.get_trade_by_order_id(order_id).await.ok()?;
+    if !trade_is_over(row.as_ref()) {
+        return None;
+    }
+    // Its task sees the claim gone at its next wake and leaves the
+    // subscription to whoever holds it then.
+    let owned_d_tag = single_order_tasks()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(order_id)
+        .is_some();
+    Some(FinishedTradeRelease {
+        order_lock,
+        owned_d_tag,
+        trade_index: row.as_ref().map(|t| t.trade_key_index).or(known_index),
+    })
 }
 
 /// Stream of trade lifecycle changes pushed by the daemon-message ingest.
@@ -10535,6 +10566,41 @@ mod tests {
         assert!(trade_is_over(Some(&seam_trade_row("o", S::Canceled))));
         assert!(!trade_is_over(Some(&seam_trade_row("o", S::Active))));
         assert!(!trade_is_over(Some(&seam_trade_row("o", S::Dispute))));
+    }
+
+    /// PR #527 review: the release decision runs under the order lock. A
+    /// retake holds that lock while it persists its row and claims the d-tag
+    /// task, so the release either runs before it (and the retake re-opens
+    /// everything) or after it — and then sees a live row and touches
+    /// nothing. It can never remove the retake's fresh claim.
+    #[tokio::test]
+    async fn releasing_a_finished_trade_waits_for_a_retake_and_then_stands_down() {
+        use crate::api::types::OrderStatus as S;
+        let db = bond_test_db().await;
+        let oid = format!("retake-{}", uuid::Uuid::new_v4());
+        db.save_trade(&seam_trade_row(&oid, S::Canceled)).await.unwrap();
+        let (old_generation, _) = claim_single_order_task(&oid);
+
+        // The retake is in flight: it holds the order lock.
+        let retake = lock_order(&oid).await;
+        let release = tokio::spawn({
+            let oid = oid.clone();
+            async move { claim_finished_trade_release(&oid, None).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            single_order_task_is_current(&oid, old_generation),
+            "the release must wait for the order lock",
+        );
+
+        // The retake lands: a live row and a fresh d-tag claim, then unlocks.
+        db.save_trade(&seam_trade_row(&oid, S::WaitingPayment)).await.unwrap();
+        let (new_generation, _) = claim_single_order_task(&oid);
+        drop(retake);
+
+        assert!(release.await.unwrap().is_none(), "a live row stands the release down");
+        assert!(single_order_task_is_current(&oid, new_generation));
+        release_single_order_task(&oid, new_generation);
     }
 
     /// A stale trade index must reach the waiting request as the bare marker,

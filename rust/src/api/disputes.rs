@@ -345,7 +345,7 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
         // so silence is a real outcome here and not only a lost event.
         _ => {
             log::warn!("[disputes] open_dispute: no daemon response within 10s for trade={trade_id}");
-            bail!("NoDaemonResponse");
+            bail!(crate::mostro::pending::NO_DAEMON_RESPONSE);
         }
     };
 

@@ -324,8 +324,11 @@ class ModalFooter extends StatelessWidget {
   final ModalAction? secondary;
   final List<ModalLink> links;
 
-  /// Horizontal room a button spends on padding before its label starts.
-  static const double _labelInset = 28;
+  /// Horizontal room a button spends before its label starts — twice
+  /// [_actionPadding], the value both buttons below are built with. It has to
+  /// be the real number: guessing it low makes the footer keep a pair on one
+  /// row whose labels then wrap inside the buttons.
+  static const double _labelInset = _actionPadding * 2;
 
   @override
   Widget build(BuildContext context) {
@@ -410,6 +413,12 @@ class ModalFooter extends StatelessWidget {
 /// sheet's footer are the same shape.
 const double _actionHeight = 48;
 
+/// Horizontal padding inside an action. Material's default for these buttons
+/// is 24, which costs 48 of a 131 px half-row on a 360 px phone and wraps
+/// ordinary labels like "Yes, cancel"; the footer already guarantees the
+/// height, so the padding only has to keep the label off the edge.
+const double _actionPadding = 12;
+
 const _primaryTextStyle = TextStyle(
   fontFamily: AppFonts.ui,
   fontSize: 15,
@@ -453,6 +462,7 @@ class _PrimaryButton extends StatelessWidget {
           disabledBackgroundColor: fill.withValues(alpha: 0.35),
           disabledForegroundColor: ink.withValues(alpha: 0.6),
           minimumSize: const Size.fromHeight(_actionHeight),
+          padding: const EdgeInsets.symmetric(horizontal: _actionPadding),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.cta),
           ),
@@ -488,6 +498,7 @@ class _SecondaryButton extends StatelessWidget {
           foregroundColor: book.textBody,
           side: BorderSide(color: book.border),
           minimumSize: const Size.fromHeight(_actionHeight),
+          padding: const EdgeInsets.symmetric(horizontal: _actionPadding),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.cta),
           ),

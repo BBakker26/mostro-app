@@ -34,4 +34,29 @@ Future<void> loadAppFonts() async {
     }
     await loader.load();
   }
+  await _loadMaterialIcons();
+}
+
+/// Loads Flutter's own icon font, which `flutter test` also leaves out: an
+/// `Icon` renders as an empty box without it, so a golden with an icon in it
+/// cannot catch the icon changing.
+///
+/// The file ships inside the SDK, not with the app, so it is looked for by
+/// walking up from the running executable rather than at a fixed path — which
+/// layer of `bin/cache` it sits under differs between SDK installs.
+Future<void> _loadMaterialIcons() async {
+  const relative = 'artifacts/material_fonts/MaterialIcons-Regular.otf';
+  var dir = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 6; i++) {
+    final font = File('${dir.path}/$relative');
+    if (font.existsSync()) {
+      final loader = FontLoader('MaterialIcons')
+        ..addFont(font.readAsBytes().then((b) => ByteData.sublistView(b)));
+      await loader.load();
+      return;
+    }
+    if (dir.parent.path == dir.path) break;
+    dir = dir.parent;
+  }
+  // Not fatal: the glyph falls back to a box, as it did before this existed.
 }

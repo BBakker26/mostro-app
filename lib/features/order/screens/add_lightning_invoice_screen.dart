@@ -24,6 +24,7 @@ import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/nwc_invoice_widget.dart';
 import 'package:mostro/shared/widgets/peer_reputation_card.dart';
 import 'package:mostro/shared/widgets/platform_aware_qr_scanner.dart';
@@ -342,24 +343,24 @@ class _AddLightningInvoiceScreenState
     // cancel is in flight (review round 1).
     if (_submitting || _canceling) return;
     final l10n = AppLocalizations.of(context);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showMostroDialog<bool>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
-            title: Text(l10n.cancelTradeDialogTitle),
+          (ctx) => MostroDialog(
+            title: l10n.cancelTradeDialogTitle,
             // This screen only exists before the trade goes active, where
             // mostrod cancels at once — no cooperative request.
-            content: Text(l10n.cancelTradeDialogContentNotStarted),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(l10n.noButtonLabel),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text(l10n.yesCancelButtonLabel),
-              ).withAutomationId(AutomationIds.tradeCancelConfirm),
-            ],
+            body: l10n.cancelTradeDialogContentNotStarted,
+            secondary: ModalAction(
+              label: l10n.noButtonLabel,
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            primary: ModalAction(
+              label: l10n.yesCancelButtonLabel,
+              onPressed: () => Navigator.pop(ctx, true),
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.tradeCancelConfirm,
+            ),
           ),
     );
     if (!mounted || confirmed != true) return;

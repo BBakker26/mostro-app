@@ -34,6 +34,7 @@ import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/shared/widgets/counterpart_reputation_row.dart';
 import 'package:mostro/shared/widgets/mostro_reactive_button.dart';
@@ -233,11 +234,11 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
         return;
       }
     }
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showMostroDialog<bool>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
-            title: Text(l10n.cancelTradeDialogTitle),
+          (ctx) => MostroDialog(
+            title: l10n.cancelTradeDialogTitle,
             // Follows the live status, so the copy the user confirms is the
             // cancel the daemon will apply.
             content: Consumer(
@@ -258,19 +259,20 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
                     CooperativeCancelState.requestedByPeer;
                 return Text(
                   _cancelDialogContent(l10n, now, peerAsked: peerAsked),
+                  style: Theme.of(context).dialogTheme.contentTextStyle,
                 );
               },
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(l10n.noButtonLabel),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: Text(l10n.yesCancelButtonLabel),
-              ).withAutomationId(AutomationIds.tradeCancelConfirm),
-            ],
+            secondary: ModalAction(
+              label: l10n.noButtonLabel,
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            primary: ModalAction(
+              label: l10n.yesCancelButtonLabel,
+              onPressed: () => Navigator.pop(ctx, true),
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.tradeCancelConfirm,
+            ),
           ),
     );
     if (!mounted) return;

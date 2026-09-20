@@ -18,6 +18,7 @@ import 'package:mostro/features/account/widgets/backup_trigger_sheet.dart';
 import 'package:mostro/features/account/widgets/backup_widgets.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/session_provider.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
@@ -227,18 +228,16 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   }
 
   void _showInfoDialog(BuildContext context, String title, String content) {
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            title: Text(title),
-            content: Text(content),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(AppLocalizations.of(context).okButtonLabel),
-              ),
-            ],
+          (dialogContext) => MostroDialog(
+            title: title,
+            body: content,
+            primary: ModalAction(
+              label: AppLocalizations.of(context).okButtonLabel,
+              onPressed: () => Navigator.pop(dialogContext),
+            ),
           ),
     );
   }
@@ -296,19 +295,22 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
   void _confirmGenerateNewUser(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            title: Text(l10n.generateNewUserDialogTitle),
-            content: Text(l10n.generateNewUserDialogContent),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(l10n.cancel),
-              ).withAutomationId(AutomationIds.keysGenerateCancel),
-              FilledButton(
-                onPressed: () async {
+          (dialogContext) => MostroDialog(
+            title: l10n.generateNewUserDialogTitle,
+            body: l10n.generateNewUserDialogContent,
+            secondary: ModalAction(
+              label: l10n.cancel,
+              onPressed: () => Navigator.pop(dialogContext),
+              automationId: AutomationIds.keysGenerateCancel,
+            ),
+            primary: ModalAction(
+              label: l10n.continueButtonLabel,
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.keysGenerateConfirm,
+              onPressed: () async {
                   Navigator.pop(dialogContext);
                   try {
                     // Atomically replaces the stored identity: new mnemonic is
@@ -333,16 +335,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                   // Only reset and navigate once the new identity exists.
                   if (!context.mounted) return;
                   await _finishIdentitySwap(context, alreadyBackedUp: false);
-                },
-                child: Text(l10n.continueButtonLabel),
-              ).withAutomationId(AutomationIds.keysGenerateConfirm),
-            ],
+              },
+            ),
           ),
     );
   }
 
   void _showImportDialog(BuildContext context) {
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
           (dialogContext) => _ImportMnemonicDialog(
@@ -395,19 +395,19 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
   void _confirmRefresh(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            title: Text(l10n.refreshUserDialogTitle),
-            content: Text(l10n.refreshUserDialogContent),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () async {
+          (dialogContext) => MostroDialog(
+            title: l10n.refreshUserDialogTitle,
+            body: l10n.refreshUserDialogContent,
+            secondary: ModalAction(
+              label: l10n.cancel,
+              onPressed: () => Navigator.pop(dialogContext),
+            ),
+            primary: ModalAction(
+              label: l10n.refreshButtonLabel,
+              onPressed: () async {
                   Navigator.pop(dialogContext);
                   try {
                     await orders_api.restartOrdersSubscription();
@@ -428,10 +428,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                       ),
                     );
                   }
-                },
-                child: Text(l10n.refreshButtonLabel),
-              ),
-            ],
+              },
+            ),
           ),
     );
   }
@@ -1002,8 +1000,8 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
-      title: Text(l10n.importMnemonicDialogTitle),
+    return MostroDialog(
+      title: l10n.importMnemonicDialogTitle,
       content: TextField(
         controller: _controller,
         maxLines: 3,
@@ -1018,13 +1016,11 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
           if (_error != null) setState(() => _error = null);
         },
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(l10n.cancel),
-        ),
-        FilledButton(onPressed: _submit, child: Text(l10n.importButtonLabel)),
-      ],
+      secondary: ModalAction(
+        label: l10n.cancel,
+        onPressed: () => Navigator.pop(context),
+      ),
+      primary: ModalAction(label: l10n.importButtonLabel, onPressed: _submit),
     );
   }
 }

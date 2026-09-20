@@ -1112,5 +1112,12 @@
   "invalidTradeIndexError": "Votre compte n'est pas synchronisé avec ce nœud Mostro, qui a donc refusé l'ordre. Réessayez dans un instant",
   "recoveringTradesMessage": "Compte importé. Récupération de vos échanges depuis Mostro…",
   "recoveredTradesMessage": "{count, plural, =0{Compte importé. Vous n'aviez aucun échange en cours} =1{Compte importé. 1 échange récupéré} other{Compte importé. {count} échanges récupérés}}",
-  "recoverTradesFailedMessage": "Compte importé, mais Mostro n'a pas répondu : vos échanges en cours n'ont pas été récupérés"
+  "recoverTradesFailedMessage": "Compte importé, mais Mostro n'a pas répondu : vos échanges en cours n'ont pas été récupérés",
+  "paymentMethodsChosenLabel": "Choisis",
+  "paymentMethodsSelectedCount": "{count, plural, =0{Choisis au moins une méthode} =1{1 méthode sélectionnée} other{{count} méthodes sélectionnées}}",
+  "paymentMethodsConfirm": "Confirmer les méthodes",
+  "paymentMethodAddCustom": "Ajouter une méthode personnalisée",
+  "paymentMethodsDiscardTitle": "Abandonner les modifications ?",
+  "paymentMethodsDiscardConfirm": "Abandonner",
+  "paymentMethodsKeepEditing": "Continuer à modifier"
 }

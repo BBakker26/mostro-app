@@ -1112,5 +1112,12 @@
   "invalidTradeIndexError": "Il tuo account non è sincronizzato con questo nodo Mostro, che ha quindi rifiutato l'ordine. Riprova tra un momento",
   "recoveringTradesMessage": "Account importato. Recupero dei tuoi scambi da Mostro…",
   "recoveredTradesMessage": "{count, plural, =0{Account importato. Non avevi scambi in corso} =1{Account importato. 1 scambio recuperato} other{Account importato. {count} scambi recuperati}}",
-  "recoverTradesFailedMessage": "Account importato, ma Mostro non ha risposto: i tuoi scambi in corso non sono stati recuperati"
+  "recoverTradesFailedMessage": "Account importato, ma Mostro non ha risposto: i tuoi scambi in corso non sono stati recuperati",
+  "paymentMethodsChosenLabel": "Scelti",
+  "paymentMethodsSelectedCount": "{count, plural, =0{Scegli almeno un metodo} =1{1 metodo selezionato} other{{count} metodi selezionati}}",
+  "paymentMethodsConfirm": "Conferma metodi",
+  "paymentMethodAddCustom": "Aggiungi metodo personalizzato",
+  "paymentMethodsDiscardTitle": "Vuoi annullare le modifiche?",
+  "paymentMethodsDiscardConfirm": "Annulla modifiche",
+  "paymentMethodsKeepEditing": "Continua a modificare"
 }

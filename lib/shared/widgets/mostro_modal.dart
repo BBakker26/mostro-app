@@ -152,37 +152,54 @@ class MostroDialog extends StatelessWidget {
           crossAxisAlignment:
               centred ? CrossAxisAlignment.center : CrossAxisAlignment.stretch,
           children: [
-            if (icon case final glyph?) ...[
-              Icon(glyph, size: 44, color: _fillOf(book, iconTone)),
-              const SizedBox(height: 14),
-            ],
-            Text(
-              title,
-              textAlign: centred ? TextAlign.center : TextAlign.start,
-              style: TextStyle(
-                fontFamily: AppFonts.ui,
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: book.textPrimary,
-              ),
-            ),
-            if (body case final prose?) ...[
-              const SizedBox(height: 10),
-              Text(
-                prose,
-                textAlign: centred ? TextAlign.center : TextAlign.start,
-                style: TextStyle(
-                  fontFamily: AppFonts.ui,
-                  fontSize: 14,
-                  height: 1.5,
-                  color: book.textSecondary,
+            // The content scrolls and the footer does not: long localized
+            // prose, a large text scale or an open keyboard must never push
+            // the answer off the screen (#534).
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment:
+                      centred
+                          ? CrossAxisAlignment.center
+                          : CrossAxisAlignment.stretch,
+                  children: [
+                    if (icon case final glyph?) ...[
+                      Icon(glyph, size: 44, color: _fillOf(book, iconTone)),
+                      const SizedBox(height: 14),
+                    ],
+                    Text(
+                      title,
+                      textAlign: centred ? TextAlign.center : TextAlign.start,
+                      style: TextStyle(
+                        fontFamily: AppFonts.ui,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: book.textPrimary,
+                      ),
+                    ),
+                    if (body case final prose?) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        prose,
+                        textAlign:
+                            centred ? TextAlign.center : TextAlign.start,
+                        style: TextStyle(
+                          fontFamily: AppFonts.ui,
+                          fontSize: 14,
+                          height: 1.5,
+                          color: book.textSecondary,
+                        ),
+                      ),
+                    ],
+                    if (content case final child?) ...[
+                      const SizedBox(height: 14),
+                      child,
+                    ],
+                  ],
                 ),
               ),
-            ],
-            if (content case final child?) ...[
-              const SizedBox(height: 14),
-              child,
-            ],
+            ),
             const SizedBox(height: 20),
             ModalFooter(primary: primary, secondary: secondary, links: links),
           ],
@@ -221,7 +238,14 @@ class MostroSheet extends StatelessWidget {
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
+        // The sheet is scroll-controlled, so nothing lifts it off the
+        // keyboard but this inset.
+        padding: EdgeInsets.fromLTRB(
+          18,
+          10,
+          18,
+          14 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -237,31 +261,42 @@ class MostroSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            Text(
-              title,
-              style: TextStyle(
-                fontFamily: AppFonts.ui,
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: book.textPrimary,
-              ),
-            ),
-            if (body case final prose?) ...[
-              const SizedBox(height: 10),
-              Text(
-                prose,
-                style: TextStyle(
-                  fontFamily: AppFonts.ui,
-                  fontSize: 14,
-                  height: 1.5,
-                  color: book.textSecondary,
+            // As in the dialog: the content scrolls, the answer stays put.
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontFamily: AppFonts.ui,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: book.textPrimary,
+                      ),
+                    ),
+                    if (body case final prose?) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        prose,
+                        style: TextStyle(
+                          fontFamily: AppFonts.ui,
+                          fontSize: 14,
+                          height: 1.5,
+                          color: book.textSecondary,
+                        ),
+                      ),
+                    ],
+                    if (content case final child?) ...[
+                      const SizedBox(height: 14),
+                      child,
+                    ],
+                  ],
                 ),
               ),
-            ],
-            if (content case final child?) ...[
-              const SizedBox(height: 14),
-              child,
-            ],
+            ),
             const SizedBox(height: 20),
             ModalFooter(primary: primary, secondary: secondary, links: links),
           ],

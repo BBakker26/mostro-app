@@ -115,21 +115,15 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(
-        _app(
-          brightness,
-          const MostroSheet(
-            title: 'Release the sats?',
-            body: 'The buyer receives the payment. This cannot be undone.',
-            primary: ModalAction(label: 'Release', onPressed: _noop),
-            secondary: cancel,
-          ),
-        ),
-      );
+      // Opened through the route, not dropped on a Scaffold: the sheet's
+      // surface and its rounded top come from `bottomSheetTheme`, which only
+      // `showModalBottomSheet` applies.
+      await tester.pumpWidget(_app(brightness, const _OpenSheetButton()));
+      await tester.tap(find.byType(TextButton));
       await tester.pumpAndSettle();
 
       await expectLater(
-        find.byType(MostroSheet),
+        find.byType(BottomSheet),
         matchesGoldenFile('goldens/modal_sheet_pair_$mode.png'),
       );
     });
@@ -215,6 +209,71 @@ void main() {
     expect(primary.top, closeTo(secondary.top, 0.5));
   });
 
+  testWidgets('a long body at a large text scale keeps the answer on screen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildDarkTheme(),
+        home: const MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: Scaffold(
+            body: Center(
+              child: MostroDialog(
+                title: 'Cancel this trade?',
+                body:
+                    'The order goes back to the book and no sats change '
+                    'hands. If the counterparty already sent the fiat you '
+                    'must not cancel: open a dispute instead, so an admin '
+                    'can take the trade over. This cannot be undone once '
+                    'the daemon applies it.',
+                primary: confirm,
+                secondary: cancel,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    // Both buttons are inside the viewport, so the dialog can be answered.
+    final viewport = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    for (final finder in [
+      find.byType(FilledButton),
+      find.byType(OutlinedButton),
+    ]) {
+      expect(tester.getRect(finder).bottom, lessThanOrEqualTo(viewport));
+    }
+  });
+
+  testWidgets('an open keyboard does not cover the sheet actions', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // The sheet route sits above any MediaQuery this test could wrap the app
+    // in, so the keyboard has to come from the view itself.
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+
+    await tester.pumpWidget(_app(Brightness.dark, const _OpenSheetButton()));
+    await tester.tap(find.byType(TextButton));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getRect(find.byType(FilledButton)).bottom,
+      lessThanOrEqualTo(640 - 300),
+    );
+  });
+
   testWidgets('a busy action cannot be pressed', (tester) async {
     var pressed = 0;
     await tester.pumpWidget(
@@ -241,3 +300,27 @@ void main() {
 }
 
 void _noop() {}
+
+/// Opens the release sheet the way the app does.
+class _OpenSheetButton extends StatelessWidget {
+  const _OpenSheetButton();
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: TextButton(
+      onPressed:
+          () => showMostroSheet<bool>(
+            context: context,
+            builder:
+                (_) => const MostroSheet(
+                  title: 'Release the sats?',
+                  body:
+                      'The buyer receives the payment. This cannot be undone.',
+                  primary: ModalAction(label: 'Release', onPressed: _noop),
+                  secondary: ModalAction(label: 'Cancel', onPressed: _noop),
+                ),
+          ),
+      child: const Text('open'),
+    ),
+  );
+}

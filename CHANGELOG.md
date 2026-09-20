@@ -4,6 +4,14 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.3] - 2026-09-20
+
+### 🐛 Bug Fixes
+
+- **restore:** retry a silent restore once and ignore replayed replies ([#525](https://github.com/MostroP2P/app/pull/525)) by @grunch
+- **logging:** keep relay traffic in a ring of its own ([#526](https://github.com/MostroP2P/app/pull/526)) by @grunch
+- **restore:** settle replayed history instead of listing it as in progress ([#524](https://github.com/MostroP2P/app/pull/524)) by @grunch
+
 ## [2.0.2] - 2026-09-19
 
 ### ✨ Features

@@ -45,6 +45,49 @@ pub(crate) struct LiveSubs {
     /// in between a replace's CLOSE and REQ would make that REQ fail with
     /// "subscription ID already exists".
     desired: tokio::sync::Mutex<HashMap<SubscriptionId, Filter>>,
+    /// Repairs spent on subscriptions relays CLOSEd (#523).
+    closed_repairs: ClosedRepairs,
+}
+
+/// Waits before re-issuing a subscription a relay CLOSEd, one per attempt;
+/// past the last, it waits for the relay's next connect (#523).
+const CLOSED_REPAIR_DELAYS: [std::time::Duration; 3] = [
+    std::time::Duration::from_secs(30),
+    std::time::Duration::from_secs(120),
+    std::time::Duration::from_secs(600),
+];
+
+/// How many repairs each (relay, subscription) has had since the relay last
+/// connected. A relay over its subscription cap CLOSEs whatever it is sent,
+/// so the budget is what keeps a repair from turning into a REQ loop.
+#[derive(Default)]
+struct ClosedRepairs {
+    attempts: std::sync::Mutex<HashMap<(String, SubscriptionId), usize>>,
+}
+
+impl ClosedRepairs {
+    /// The wait before the next repair of `id` on `url`, or `None` once the
+    /// budget is spent. Counts the attempt.
+    fn next_delay(&self, url: &str, id: &SubscriptionId) -> Option<std::time::Duration> {
+        let mut attempts = self
+            .attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let spent = attempts.entry((url.to_string(), id.clone())).or_insert(0);
+        let delay = CLOSED_REPAIR_DELAYS.get(*spent).copied();
+        if delay.is_some() {
+            *spent += 1;
+        }
+        delay
+    }
+
+    /// A relay that (re)connected starts with a full budget.
+    fn reset_relay(&self, url: &str) {
+        self.attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(relay, _), _| relay != url);
+    }
 }
 
 /// The process-wide registry every production subscription uses.
@@ -183,6 +226,42 @@ impl LiveSubs {
         issued
     }
 
+    /// A relay CLOSEd `id` — "Number of subscriptions exceeds limit", say.
+    /// nostr-sdk drops such a subscription from that relay's registry, and
+    /// nothing re-issued it before the relay's next connect: a reply sent
+    /// there meanwhile was never seen (#523). If the registry holds `id`,
+    /// [`Self::repair_relay`] runs after a growing wait, a bounded number of
+    /// times; a subscription nobody records (closed on purpose, a one-shot
+    /// fetch) is left alone.
+    pub(crate) async fn on_closed(&'static self, client: &Client, url: &str, id: &SubscriptionId) {
+        if !self.desired.lock().await.contains_key(id) {
+            return;
+        }
+        let Some(delay) = self.closed_repairs.next_delay(url, id) else {
+            crate::api::logging::blog_warn(
+                "relay",
+                format!(
+                    "sub {id} closed again relay={} — no more repairs until it reconnects",
+                    crate::api::logging::display_relay(url)
+                ),
+            );
+            return;
+        };
+        crate::api::logging::blog_info(
+            "relay",
+            format!(
+                "sub {id} closed by relay={} — repair in {}s",
+                crate::api::logging::display_relay(url),
+                delay.as_secs()
+            ),
+        );
+        let (client, url) = (client.clone(), url.to_string());
+        crate::rt::spawn(async move {
+            crate::rt::time::sleep(delay).await;
+            self.repair_relay(&client, &url).await;
+        });
+    }
+
     /// [`Self::repair_relay`] for every relay of the pool.
     pub(crate) async fn repair_all(&self, client: &Client) -> usize {
         let urls: Vec<String> = client
@@ -251,6 +330,7 @@ pub(crate) fn spawn_repair(pool: &Arc<super::relay_pool::RelayPool>) {
         loop {
             match rx.recv().await {
                 Ok(info) if info.status == crate::api::types::RelayStatus::Connected => {
+                    live_subs().closed_repairs.reset_relay(&info.url);
                     live_subs().repair_relay(&client, &info.url).await;
                 }
                 Ok(_) => {}
@@ -274,6 +354,43 @@ mod tests {
         Filter::new()
             .kind(Kind::PrivateDirectMessage)
             .pubkey(Keys::generate().public_key())
+    }
+
+    /// #523: a relay that CLOSEs one of our subscriptions (e.g. "Number of
+    /// subscriptions exceeds limit") gets it back after a growing wait, a
+    /// bounded number of times — a relay still over its cap must not be
+    /// hammered in a loop.
+    #[test]
+    fn a_closed_subscription_is_retried_with_a_growing_wait_then_given_up() {
+        let tracker = ClosedRepairs::default();
+        let id = SubscriptionId::new("mostro-dm");
+        let delays: Vec<_> = (0..4).map(|_| tracker.next_delay("wss://a", &id)).collect();
+        assert_eq!(
+            delays,
+            vec![
+                Some(Duration::from_secs(30)),
+                Some(Duration::from_secs(120)),
+                Some(Duration::from_secs(600)),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn closed_retries_are_counted_per_relay_and_subscription_and_reset_on_connect() {
+        let tracker = ClosedRepairs::default();
+        let dm = SubscriptionId::new("mostro-dm");
+        let book = SubscriptionId::new("mostro-orders");
+        for _ in 0..3 {
+            tracker.next_delay("wss://a", &dm);
+        }
+        assert_eq!(tracker.next_delay("wss://a", &dm), None);
+        // Another subscription, another relay: their own budgets.
+        assert!(tracker.next_delay("wss://a", &book).is_some());
+        assert!(tracker.next_delay("wss://b", &dm).is_some());
+        // A reconnect starts that relay over.
+        tracker.reset_relay("wss://a");
+        assert_eq!(tracker.next_delay("wss://a", &dm), Some(Duration::from_secs(30)));
     }
 
     /// The rule that keeps this fix in place (docs/RELAYS.md): a long-lived

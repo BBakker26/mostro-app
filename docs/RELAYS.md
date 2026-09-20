@@ -35,6 +35,11 @@ daemon's `add-invoice`, because the feed that would have replayed it existed on 
 2. **Every unsubscribe of one goes through `live_subs().close`.** The registry remembers what
    should exist; an id closed behind its back is resurrected on the next reconnect, and relays
    cap concurrent REQs — past the cap they answer `CLOSED`, which can take the order book down.
+   nostr-sdk drops a `CLOSED` subscription from that relay's registry; `live_subs().on_closed`
+   re-issues a recorded one after 30 s, 2 min and 10 min, then waits for the relay's next
+   `Connected` (#523). A trade that ends gives its own REQs back at once — its d-tag watcher,
+   daemon-message watcher and chats (`release_finished_trade_subscriptions`) — instead of
+   holding them until an idle timeout.
 3. **Never treat "issued" as "live".** The repair task (`spawn_repair`) attempts to re-issue
    what a relay lacks when the status monitor reports it `Connected` (it can fail or time out,
    and says so in the log); `resync()` runs the same repair for the relays that are already up.
@@ -70,6 +75,7 @@ In the app log (`/logs`, or `adb logcat -s mostro flutter`):
 |---|---|
 | `sub <id> failed relay=… err=relay not connected` | The REQ did not reach that relay. Expected offline. `Connected` triggers a repair *attempt*, not a guarantee: look for its outcome, `sub <id> repaired relay=…` or `sub <id> repair failed relay=… err=…`. A failed one is retried on that relay's next `Connected` and on the next `resync()`. |
 | `sub <id> deferred: no relay connected` | A `replace` ran fully offline. Same expectation, per relay. |
+| `closed sub=<id> relay=… msg=…` then `sub <id> closed by relay=… — repair in Ns` | The relay ended a subscription we still want (often its REQ cap). The repair outcome follows as above. `closed again … no more repairs until it reconnects` means the relay kept refusing: too many REQs are open. |
 | `eose sub=mostro-dm relay=…` after a reconnect | The feed exists on that relay. **Its absence after `Connected` is this bug.** |
 | `Kind 14 received (global\|per-trade) … age=Ns` | `age` ≈ 0 is live delivery; minutes or more is a replay. |
 | `drop ev=… reason=duplicate` | Normal: the global and per-trade loops saw the same event. |

@@ -141,7 +141,7 @@ bridged by flutter_rust_bridge.
 - Wire status strings are **kebab-case** (`waiting-buyer-invoice`, `fiat-sent`).
 
 ## Translations
-- **All user-facing strings are Dart-level** (Flutter l10n): `lib/l10n/app_{en,es,fr,de,it}.arb`,
+- **All user-facing strings are Dart-level** (Flutter l10n): `lib/l10n/app_{en,es,fr,de,it,nl}.arb`,
   config `l10n.yaml`, generated `AppLocalizations` via `flutter gen-l10n`, used with
   `AppLocalizations.of(context)`.
 - **Rust does not translate.** Rust returns data or a stable marker/code (e.g. `NoDaemonResponse`);

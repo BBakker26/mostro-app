@@ -16,6 +16,7 @@ const List<_LangEntry> _languages = [
   (code: 'it', name: 'Italian', native: 'Italiano'),
   (code: 'fr', name: 'French', native: 'Français'),
   (code: 'de', name: 'German', native: 'Deutsch'),
+  (code: 'nl', name: 'Dutch', native: 'Nederlands'),
 ];
 
 // ── Widget ────────────────────────────────────────────────────────────────────

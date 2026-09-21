@@ -20,6 +20,7 @@ import 'package:mostro/features/settings/widgets/node_card.dart';
 import 'package:mostro/features/settings/widgets/node_switch_confirm_sheet.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/dashed_border.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/src/rust/api/node_stats.dart' show MostroNodeStats;
@@ -158,22 +159,21 @@ class _MostroNodeSelectorState extends ConsumerState<MostroNodeSelector> {
     if (entry.isTrusted || entry.isActive) return;
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showMostroDialog<bool>(
       context: context,
       builder:
-          (ctx) => AlertDialog(
-            title: Text(l10n.deleteCustomNodeTitle),
-            content: Text(l10n.deleteCustomNodeMessage),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: Text(l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: Text(l10n.deleteCustomNodeConfirm),
-              ),
-            ],
+          (ctx) => MostroDialog(
+            title: l10n.deleteCustomNodeTitle,
+            body: l10n.deleteCustomNodeMessage,
+            secondary: ModalAction(
+              label: l10n.cancel,
+              onPressed: () => Navigator.of(ctx).pop(false),
+            ),
+            primary: ModalAction(
+              label: l10n.deleteCustomNodeConfirm,
+              onPressed: () => Navigator.of(ctx).pop(true),
+              tone: ModalTone.destructive,
+            ),
           ),
     );
     if (confirmed != true || !mounted) return;

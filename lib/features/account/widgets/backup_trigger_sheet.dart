@@ -43,7 +43,9 @@ class BackupTriggerSheet extends ConsumerWidget {
       decoration: BoxDecoration(
         color: book.surface,
         border: Border.all(color: pal.sheetBorder),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppRadius.modal),
+        ),
       ),
       padding: EdgeInsets.fromLTRB(
         18,

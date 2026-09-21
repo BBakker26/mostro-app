@@ -20,6 +20,7 @@ import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 
 /// Detail screen for an order created by the current user (handoff 6a/6b).
@@ -433,84 +434,22 @@ class _CancelButton extends StatelessWidget {
 
 /// The confirmation sheet: never cancel in a single tap.
 Future<bool?> _confirmCancel(BuildContext context) {
-  final book = OrderBookPalette.of(context);
-  final pal = OrderDetailPalette.of(context);
-  return showModalBottomSheet<bool>(
+  return showMostroSheet<bool>(
     context: context,
-    backgroundColor: book.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
     builder: (ctx) {
       final l10n = AppLocalizations.of(ctx);
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 10, 24, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: pal.sheetHandle,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                l10n.cancelOrderSheetTitle,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                  color: book.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                l10n.cancelOrderSheetBody,
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: book.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                style: FilledButton.styleFrom(
-                  backgroundColor: book.sell,
-                  foregroundColor: book.onSell,
-                  minimumSize: const Size.fromHeight(52),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  textStyle: const TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                child: Text(l10n.yesCancelButtonLabel),
-              ).withAutomationId(AutomationIds.tradeCancelConfirm),
-              const SizedBox(height: 4),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                style: TextButton.styleFrom(
-                  foregroundColor: book.textSecondary,
-                  textStyle: const TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                child: Text(l10n.goBackButtonLabel),
-              ),
-            ],
-          ),
+      return MostroSheet(
+        title: l10n.cancelOrderSheetTitle,
+        body: l10n.cancelOrderSheetBody,
+        secondary: ModalAction(
+          label: l10n.goBackButtonLabel,
+          onPressed: () => Navigator.of(ctx).pop(false),
+        ),
+        primary: ModalAction(
+          label: l10n.yesCancelButtonLabel,
+          onPressed: () => Navigator.of(ctx).pop(true),
+          tone: ModalTone.destructive,
+          automationId: AutomationIds.tradeCancelConfirm,
         ),
       );
     },

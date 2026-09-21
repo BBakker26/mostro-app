@@ -274,6 +274,39 @@ void main() {
     );
   });
 
+  testWidgets('a picker spends no room on a footer it has no actions for', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 760);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // A picker answers by tapping one of its rows (sort, language, theme),
+    // so it passes no action at all.
+    await tester.pumpWidget(
+      _app(
+        Brightness.dark,
+        const MostroDialog(
+          title: 'Sort orders by',
+          content: SizedBox(key: ValueKey('rows'), height: 120),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(FilledButton), findsNothing);
+    expect(find.byType(OutlinedButton), findsNothing);
+    // Only the card's own 16 px bottom padding is left under the rows: an
+    // empty footer must not leave a 20 px hole where the buttons would be.
+    final rows = tester.getRect(find.byKey(const ValueKey('rows')));
+    final card = tester.getRect(
+      find
+          .descendant(of: find.byType(Dialog), matching: find.byType(Material))
+          .first,
+    );
+    expect(card.bottom - rows.bottom, closeTo(16, 0.5));
+  });
+
   testWidgets('a busy action cannot be pressed', (tester) async {
     var pressed = 0;
     await tester.pumpWidget(

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -75,5 +76,15 @@ void main() {
       RegExp(r'must contain \*\*exactly\*\* ([^.]*)\.'),
     );
     expect(_quoted(line), arb);
+  });
+
+  test('announcement spec 006 example carries exactly the ARB languages', () {
+    final example = _one(
+      'specs/006-announcement-channel/spec.md',
+      RegExp(r'```json\n(\{.*?\})\n```', dotAll: true),
+    );
+    final locales = (jsonDecode(example) as Map<String, dynamic>)['locales']
+        as Map<String, dynamic>;
+    expect(locales.keys.toSet(), arb);
   });
 }

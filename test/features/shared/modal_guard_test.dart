@@ -48,13 +48,20 @@ void main() {
     }
   }
 
-  Iterable<File> appSources() => Directory(
-    'lib',
-  ).listSync(recursive: true).whereType<File>().where((f) {
-    if (!f.path.endsWith('.dart')) return false;
-    if (f.path == owner) return false;
-    return !generated.any(f.path.contains);
-  });
+  /// `File.path` separates with `\` on Windows, so every path here is read
+  /// through this: comparing a raw path against `owner` would miss on
+  /// Windows, the owner file would be scanned, and its own — permitted —
+  /// calls would fail this test.
+  String pathOf(File file) =>
+      file.path.replaceAll(Platform.pathSeparator, '/');
+
+  Iterable<File> appSources() =>
+      Directory('lib').listSync(recursive: true).whereType<File>().where((f) {
+        final path = pathOf(f);
+        if (!path.endsWith('.dart')) return false;
+        if (path == owner) return false;
+        return !generated.any(path.contains);
+      });
 
   test('no screen opens a modal behind the standard ones', () {
     // Arrange
@@ -65,7 +72,7 @@ void main() {
       for (final (number, line) in codeLines(file)) {
         for (final entry in banned.entries) {
           if (entry.value.hasMatch(line)) {
-            offenders.add('${file.path}:$number  ${entry.key}');
+            offenders.add('${pathOf(file)}:$number  ${entry.key}');
           }
         }
       }

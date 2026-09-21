@@ -86,10 +86,8 @@ class _PaymentMethodPickerScreenState
   }
 
   Future<void> _openCustomSheet() async {
-    final added = await showModalBottomSheet<String>(
+    final added = await showMostroSheet<String>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (_) => const _CustomMethodSheet(),
     );
     if (added == null || !mounted) return;
@@ -562,79 +560,39 @@ class _CustomMethodSheetState extends State<_CustomMethodSheet> {
       borderSide: BorderSide(color: palette.border),
     );
 
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
-        decoration: BoxDecoration(
-          color: palette.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-          border: Border(top: BorderSide(color: palette.border)),
+    return MostroSheet(
+      title: l10n.customPaymentMethodLabel,
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        textInputAction: TextInputAction.done,
+        style: TextStyle(fontSize: 15, color: palette.textPrimary),
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: create.inset,
+          border: border,
+          enabledBorder: border,
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: palette.lime),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 13,
+            vertical: 13,
+          ),
+          hintText: l10n.customPaymentMethodHint,
+          hintStyle: TextStyle(fontSize: 14, color: palette.textFaint),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              l10n.customPaymentMethodLabel,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: palette.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              textInputAction: TextInputAction.done,
-              style: TextStyle(fontSize: 15, color: palette.textPrimary),
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: create.inset,
-                border: border,
-                enabledBorder: border,
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: palette.lime),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 13,
-                  vertical: 13,
-                ),
-                hintText: l10n.customPaymentMethodHint,
-                hintStyle: TextStyle(fontSize: 14, color: palette.textFaint),
-              ),
-              onChanged: (v) => setState(() => _draft = v),
-              onSubmitted: (_) => _submit(),
-            ).withAutomationId(AutomationIds.orderCreatePaymentMethod),
-            const SizedBox(height: 14),
-            FilledButton(
-              onPressed: canAdd ? _submit : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: palette.lime,
-                foregroundColor: palette.onLime,
-                disabledBackgroundColor: create.ctaDisabledBg,
-                disabledForegroundColor: create.ctaDisabledInk,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                textStyle: const TextStyle(
-                  fontFamily: AppFonts.ui,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              child: Text(l10n.paymentMethodAdd),
-            ).withAutomationId(AutomationIds.orderCreatePaymentMethodCustomAdd),
-          ],
-        ),
+        onChanged: (v) => setState(() => _draft = v),
+        onSubmitted: (_) => _submit(),
+      ).withAutomationId(AutomationIds.orderCreatePaymentMethod),
+      primary: ModalAction(
+        label: l10n.paymentMethodAdd,
+        onPressed: canAdd ? _submit : null,
+        automationId: AutomationIds.orderCreatePaymentMethodCustomAdd,
       ),
     );
   }

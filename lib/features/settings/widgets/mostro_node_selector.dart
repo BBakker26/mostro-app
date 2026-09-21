@@ -485,13 +485,11 @@ class _AddOwnNodeButton extends StatelessWidget {
 
 /// Open the node selector as a modal sheet over Settings.
 Future<void> showMostroNodeSelector(BuildContext context) {
-  final book = OrderBookPalette.of(context);
-  return showModalBottomSheet<void>(
+  // A screen, not a question: it paints its own page backdrop and its own
+  // footer, so it opens `bare` rather than inside a [MostroSheet].
+  return showMostroSheet<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    backgroundColor: Colors.transparent,
-    barrierColor: book.scrim,
+    bare: true,
     builder: (_) => const MostroNodeSelector(),
   );
 }

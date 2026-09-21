@@ -34,7 +34,10 @@ palette and components are the specification and this document defers to them:
 Nothing below is licence to hardcode: §1.2 holds everywhere, redesign or not.
 
 ### 1.2 Single Source of Truth
-ALL colors must be defined in a central theme file. Zero hardcoded colors in widgets.
+ALL colors must be defined in the theme layer — `AppColors`, the per-feature palettes in
+`lib/core/*_palette.dart`, and the modal tokens the two surfaces read. Zero hardcoded colors
+in widgets. Which of those a widget reads is decided by its area (§1.1); that it reads one of
+them is not optional.
 
 ### 1.3 Semantic Naming
 Use names that describe purpose, not appearance:
@@ -83,7 +86,7 @@ write white on it: the readable pair is `lime` on `onLime` `#12161F` (10.6:1). W
 | textSecondary | `#B0B3C6` | 100% | Labels, supporting text |
 | textSubtle | `#9A9A9C` | 100% | Timestamps, hints, placeholders |
 | textDisabled | `#6C757D` | 100% | Disabled states |
-| textLink | `#92D64F` | 100% | Links, interactive text (light mode: `#6A9E00`, for contrast on white) |
+| textLink | `#92D64F` | 100% | Links, interactive text (light mode: `#6A9E00` — 3.23:1 on white, under the 4.5:1 §11 asks for: #539) |
 
 ### 2.4 Chat Colors
 
@@ -280,7 +283,8 @@ Specs:
 - Height: 64px
 - Icon size: 24px
 - Label: bodySmall
-- Active color: mostroGreen (#92D64F)
+- Active color: mostroGreen (#92D64F) — dark mode only; on a light surface this is 1.76:1
+  (#539). `BottomNavigationBar` is unused in `lib/`: the redesign shell has its own nav.
 - Inactive color: textDisabled (#6C757D)
 - Border top: 1px solid backgroundCard
 

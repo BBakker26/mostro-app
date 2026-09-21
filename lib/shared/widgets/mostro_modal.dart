@@ -86,15 +86,26 @@ Future<T?> showMostroDialog<T>({
 
 /// Opens [MostroSheet] and resolves to what the action passed to
 /// `Navigator.pop`.
+///
+/// Every bottom sheet in the app opens through here, so the scrim, the safe
+/// area and the surface are decided once (#534).
+///
+/// [bare] is for the two sheets that are screens rather than questions — the
+/// node selector and the backup invitation. They paint their own backdrop,
+/// so the route gives them a transparent one; they still take this scrim and
+/// this safe area.
 Future<T?> showMostroSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool isScrollControlled = true,
+  bool bare = false,
 }) {
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
     useSafeArea: true,
+    backgroundColor: bare ? Colors.transparent : null,
+    elevation: bare ? 0 : null,
     builder: builder,
   );
 }
@@ -142,6 +153,11 @@ class MostroDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
     final centred = icon != null;
+    final footer = ModalFooter(
+      primary: primary,
+      secondary: secondary,
+      links: links,
+    );
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -200,8 +216,7 @@ class MostroDialog extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            ModalFooter(primary: primary, secondary: secondary, links: links),
+            if (!footer._isEmpty) ...[const SizedBox(height: 20), footer],
           ],
         ),
       ),
@@ -235,6 +250,11 @@ class MostroSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
+    final footer = ModalFooter(
+      primary: primary,
+      secondary: secondary,
+      links: links,
+    );
 
     return SafeArea(
       child: Padding(
@@ -297,8 +317,7 @@ class MostroSheet extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            ModalFooter(primary: primary, secondary: secondary, links: links),
+            if (!footer._isEmpty) ...[const SizedBox(height: 20), footer],
           ],
         ),
       ),
@@ -329,6 +348,10 @@ class ModalFooter extends StatelessWidget {
   /// be the real number: guessing it low makes the footer keep a pair on one
   /// row whose labels then wrap inside the buttons.
   static const double _labelInset = _actionPadding * 2;
+
+  /// Nothing to render: a picker answers by tapping one of its rows, so it
+  /// passes no action at all and the gap above the footer is not spent.
+  bool get _isEmpty => primary == null && secondary == null && links.isEmpty;
 
   @override
   Widget build(BuildContext context) {

@@ -79,6 +79,22 @@ Widget _gallery(Brightness brightness) {
           ),
         ),
         const SizedBox(height: 18),
+        caption('PICKER — the answer is the row, so there is no footer'),
+        _Framed(
+          MostroDialog(
+            title: 'Sort orders by',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _PickerRow('Newest first', book, selected: true),
+                _PickerRow('Best premium', book),
+                _PickerRow('Best reputation', book),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
         caption('SHEET — the same footer, from the bottom edge'),
         _Framed(
           Container(
@@ -96,6 +112,38 @@ Widget _gallery(Brightness brightness) {
             ),
           ),
         ),
+      ],
+    ),
+  );
+}
+
+/// One row of the picker above: the shape the sort, language, theme and
+/// currency pickers take inside a standard modal.
+class _PickerRow extends StatelessWidget {
+  const _PickerRow(this.label, this.book, {this.selected = false});
+
+  final String label;
+  final OrderBookPalette book;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: AppFonts.ui,
+              fontSize: 15,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected ? book.limeInk : book.textBody,
+            ),
+          ),
+        ),
+        if (selected)
+          Icon(Icons.check_rounded, size: 20, color: book.limeText),
       ],
     ),
   );
@@ -125,7 +173,7 @@ void main() {
     ('light', Brightness.light),
   ]) {
     testWidgets('modal gallery · $mode', (tester) async {
-      tester.view.physicalSize = const Size(420, 1400);
+      tester.view.physicalSize = const Size(420, 1760);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 

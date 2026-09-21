@@ -4,6 +4,23 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.4] - 2026-09-21
+
+### ✨ Features
+
+- **ui:** standardize the modals — phases 4-6 ([#536](https://github.com/MostroP2P/app/pull/536)) by @grunch
+- **ui:** standardize the modals — phases 1-3 ([#535](https://github.com/MostroP2P/app/pull/535)) by @grunch
+- **order:** payment-method picker per handoff 18a ([#532](https://github.com/MostroP2P/app/pull/532)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **account:** an imported seed is already backed up ([#531](https://github.com/MostroP2P/app/pull/531)) by @grunch
+- **relays:** repair CLOSEd subscriptions and release a finished trade's REQs ([#527](https://github.com/MostroP2P/app/pull/527)) by @grunch
+
+### 📚 Documentation
+
+- **design-system:** v2 is a redesign, not a copy of v1 ([#538](https://github.com/MostroP2P/app/pull/538)) by @grunch
+
 ## [2.0.3] - 2026-09-20
 
 ### 🐛 Bug Fixes

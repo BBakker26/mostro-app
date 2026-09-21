@@ -265,29 +265,38 @@ class SettingsScreen extends ConsumerWidget {
 
   Future<void> _showThemeDialog(BuildContext context, WidgetRef ref) async {
     final current = ref.read(settingsProvider).themeMode;
-    await showDialog<void>(
+    await showMostroDialog<void>(
       context: context,
       builder:
-          (ctx) => SimpleDialog(
-            title: Text(AppLocalizations.of(ctx).appearanceDialogTitle),
-            children:
-                ThemeMode.values
-                    .map(
-                      (mode) => ListTile(
-                        title: Text(
-                          _themeLabel(AppLocalizations.of(ctx), mode),
+          (ctx) => MostroDialog(
+            title: AppLocalizations.of(ctx).appearanceDialogTitle,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children:
+                  ThemeMode.values
+                      .map(
+                        (mode) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            _themeLabel(AppLocalizations.of(ctx), mode),
+                          ),
+                          trailing:
+                              mode == current
+                                  ? Icon(
+                                    Icons.check,
+                                    color: OrderBookPalette.of(ctx).lime,
+                                  )
+                                  : null,
+                          onTap: () {
+                            ref
+                                .read(settingsProvider.notifier)
+                                .setThemeMode(mode);
+                            Navigator.of(ctx).pop();
+                          },
                         ),
-                        trailing:
-                            mode == current ? const Icon(Icons.check) : null,
-                        onTap: () {
-                          ref
-                              .read(settingsProvider.notifier)
-                              .setThemeMode(mode);
-                          Navigator.of(ctx).pop();
-                        },
-                      ),
-                    )
-                    .toList(),
+                      )
+                      .toList(),
+            ),
           ),
     );
   }

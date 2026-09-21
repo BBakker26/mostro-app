@@ -11,6 +11,7 @@ import 'package:mostro/features/order/providers/payment_methods_provider.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/dashed_border.dart';
 
 /// Full-screen payment-method picker for the create-order form (handoff 18a).
@@ -121,32 +122,19 @@ class _PaymentMethodPickerScreenState
   Future<bool> _confirmDiscard() async {
     if (!_isDirty) return true;
     final l10n = AppLocalizations.of(context);
-    final palette = OrderBookPalette.of(context);
-    final discard = await showDialog<bool>(
+    final discard = await showMostroDialog<bool>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            backgroundColor: palette.surface,
-            title: Text(
-              l10n.paymentMethodsDiscardTitle,
-              style: TextStyle(fontSize: 16, color: palette.textPrimary),
+          (dialogContext) => MostroDialog(
+            title: l10n.paymentMethodsDiscardTitle,
+            secondary: ModalAction(
+              label: l10n.paymentMethodsKeepEditing,
+              onPressed: () => Navigator.of(dialogContext).pop(false),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: Text(
-                  l10n.paymentMethodsKeepEditing,
-                  style: TextStyle(color: palette.textBody),
-                ),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: Text(
-                  l10n.paymentMethodsDiscardConfirm,
-                  style: TextStyle(color: palette.limeText),
-                ),
-              ),
-            ],
+            primary: ModalAction(
+              label: l10n.paymentMethodsDiscardConfirm,
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+            ),
           ),
     );
     return discard ?? false;

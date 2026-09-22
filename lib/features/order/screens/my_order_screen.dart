@@ -438,7 +438,12 @@ class _CancelButton extends StatelessWidget {
                   color: pal.danger,
                 ),
               )
-              : Text(l10n.cancel),
+              // One line, shrunk to fit at large text sizes, rather than
+              // breaking the word ("Annulere/n").
+              : FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(l10n.cancel, maxLines: 1),
+              ),
     ).withAutomationId(AutomationIds.tradeCancel);
   }
 }

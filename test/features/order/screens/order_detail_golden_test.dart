@@ -1,5 +1,6 @@
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
@@ -107,6 +108,14 @@ void main() {
           textScale: 2.0,
         );
         expect(tester.takeException(), isNull);
+        // The action bar labels stay on one line instead of breaking the
+        // word ("Annulere/n").
+        final l10n = lookupAppLocalizations(locale);
+        for (final label in [l10n.closeButtonLabel, l10n.cancel]) {
+          final text = tester.renderObject<RenderParagraph>(find.text(label));
+          final line = text.getFullHeightForCaret(const TextPosition(offset: 0));
+          expect(text.size.height, lessThan(line * 1.5), reason: label);
+        }
       });
     });
   }

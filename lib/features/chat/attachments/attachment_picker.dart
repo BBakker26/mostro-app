@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -100,20 +102,36 @@ class AttachmentPicker {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['pdf'],
-      // Read later, and only if the size passes.
+      // Read later, and only if the size passes. The web has no path to
+      // read from later: it hands over a stream of the browser's File, read
+      // in slices only when it is listened to.
       withData: false,
+      withReadStream: kIsWeb,
     );
     final file = result?.files.singleOrNull;
     if (file == null) return const PickCancelled();
-    final xfile = file.xFile;
+    final stream = file.readStream;
     return checkPicked(
       PickedAttachment(
         name: file.name,
         size: file.size,
-        read: xfile.readAsBytes,
+        read:
+            stream != null
+                ? () => collectBytes(stream)
+                : file.xFile.readAsBytes,
       ),
     );
   }
+}
+
+/// Every chunk of [stream] in one buffer.
+@visibleForTesting
+Future<Uint8List> collectBytes(Stream<List<int>> stream) async {
+  final builder = BytesBuilder(copy: false);
+  await for (final chunk in stream) {
+    builder.add(chunk);
+  }
+  return builder.takeBytes();
 }
 
 final attachmentPickerProvider = Provider<AttachmentPicker>(

@@ -3755,10 +3755,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get attachmentDecryptFailed => 'This file could not be decrypted.';
 
   @override
-  String get attachmentWebUnavailable =>
-      'Files are not available on the web yet.';
-
-  @override
   String get attachmentUploading => 'Sending…';
 
   @override

@@ -8,7 +8,6 @@ import 'package:mostro/l10n/app_localizations.dart';
 /// in context of its own.
 String attachmentErrorMessage(AppLocalizations l10n, Object error) {
   final raw = error.toString();
-  if (raw.contains('NotImplemented')) return l10n.attachmentWebUnavailable;
   if (raw.contains('FileTooLarge')) return l10n.attachmentTooLarge;
   if (raw.contains('UnsupportedFileType')) return l10n.attachmentUnsupported;
   if (raw.contains('InvalidImage')) return l10n.attachmentInvalidImage;
@@ -29,8 +28,7 @@ String attachmentErrorMessage(AppLocalizations l10n, Object error) {
 /// fails the same way every time; a network or relay failure may not.
 bool isRetryableAttachmentError(Object error) {
   final raw = error.toString();
-  return !raw.contains('NotImplemented') &&
-      !raw.contains('FileTooLarge') &&
+  return !raw.contains('FileTooLarge') &&
       !raw.contains('UnsupportedFileType') &&
       !raw.contains('InvalidImage') &&
       !raw.contains('DecryptionFailed') &&

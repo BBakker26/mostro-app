@@ -82,6 +82,15 @@ Future<AttachmentData> downloadAttachment({required String messageId}) =>
       messageId: messageId,
     );
 
+/// The web smoke test's attachment round trip (#589 phase 4): encrypt random
+/// bytes, upload them to `server`, download them back, cache and decrypt
+/// them. Only `test/web/smoke` calls it, against its own Blossom endpoint —
+/// the app's uploads always go to the fixed server list.
+///
+/// Errors: `StorageUnavailable` before `init_db`, else the first step's.
+Future<void> attachmentWebProbe({required String server}) =>
+    RustLib.instance.api.crateApiMessagesAttachmentWebProbe(server: server);
+
 /// Get the attachment download status for a message.
 Future<DownloadStatus?> getAttachmentStatus({required String messageId}) =>
     RustLib.instance.api.crateApiMessagesGetAttachmentStatus(

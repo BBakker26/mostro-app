@@ -909,6 +909,18 @@ async fn set_download_status(message_id: &str, status: DownloadStatus) {
     }
 }
 
+/// The web smoke test's attachment round trip (#589 phase 4): encrypt random
+/// bytes, upload them to `server`, download them back, cache and decrypt
+/// them. Only `test/web/smoke` calls it, against its own Blossom endpoint —
+/// the app's uploads always go to the fixed server list.
+///
+/// Errors: `StorageUnavailable` before `init_db`, else the first step's.
+pub async fn attachment_web_probe(server: String) -> Result<()> {
+    let db = crate::db::app_db::db()
+        .ok_or_else(|| anyhow!("StorageUnavailable: the store is not open"))?;
+    crate::attachments::probe::roundtrip(db, &server).await
+}
+
 /// Get the attachment download status for a message.
 pub async fn get_attachment_status(message_id: String) -> Result<Option<DownloadStatus>> {
     let store = message_store().messages.read().await;

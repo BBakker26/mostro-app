@@ -4104,8 +4104,6 @@
   "@attachmentDownloadFailed": {"description": "Error: the attachment could not be downloaded"},
   "attachmentDecryptFailed": "This file could not be decrypted.",
   "@attachmentDecryptFailed": {"description": "Error: the attachment was downloaded but does not decrypt"},
-  "attachmentWebUnavailable": "Files are not available on the web yet.",
-  "@attachmentWebUnavailable": {"description": "Shown on the web build, where attachments are not supported yet"},
   "attachmentUploading": "Sending…",
   "@attachmentUploading": {"description": "Status of a file bubble while it is being encrypted and uploaded"},
   "attachmentDiscard": "Discard",

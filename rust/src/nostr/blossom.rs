@@ -32,8 +32,7 @@ pub const BLOSSOM_SERVERS: &[&str] = &[
 ];
 
 /// How long one upload or download may take: 25 MB on a slow mobile link.
-#[cfg(not(target_arch = "wasm32"))]
-const TRANSFER_TIMEOUT_SECS: u64 = 300;
+const TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 /// Lifetime of the upload authorisation. v1 uses one hour.
 const AUTH_TTL_SECS: u64 = 3600;
 
@@ -67,7 +66,7 @@ pub async fn upload_blob(bytes: Vec<u8>) -> Result<UploadedBlob> {
     upload_to(BLOSSOM_SERVERS, bytes).await
 }
 
-async fn upload_to(servers: &[&str], bytes: Vec<u8>) -> Result<UploadedBlob> {
+pub(crate) async fn upload_to(servers: &[&str], bytes: Vec<u8>) -> Result<UploadedBlob> {
     if bytes.len() > MAX_BLOB_BYTES {
         bail!("FileTooLarge: {} bytes exceeds the 25 MB limit", bytes.len());
     }
@@ -115,10 +114,17 @@ fn upload_auth(sha256: &str) -> Result<String> {
     Ok(format!("Nostr {}", STANDARD.encode(event.as_json())))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/// The same client on both targets: reqwest runs on hyper natively and on
+/// the browser's `fetch` in wasm (#589 phase 4). The timeout is set per
+/// request because the wasm builder has none.
+///
+/// On the web every request is a CORS request from a cross-origin isolated
+/// page. That works because each server answers with
+/// `Access-Control-Allow-Origin: *` and CORS responses satisfy COEP. A server
+/// whose preflight does not name `Authorization` refuses the upload, and the
+/// next server in the list is tried.
 fn http_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(TRANSFER_TIMEOUT_SECS))
         .build()
         .map_err(|e| anyhow!("HTTP client build failed: {e}"))
 }
@@ -127,104 +133,108 @@ fn http_client() -> Result<reqwest::Client> {
 /// hash, it must be ours — a server that stored something else would hand the
 /// recipient a URL that fails verification.
 async fn try_upload(server: &str, sha256: &str, bytes: &[u8]) -> Result<()> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let response = http_client()?
-            .put(format!("{server}/upload"))
-            .header("Content-Type", "application/octet-stream")
-            .header("Authorization", upload_auth(sha256)?)
-            .body(bytes.to_vec())
-            .send()
-            .await
-            .map_err(|e| anyhow!("PUT /upload failed: {e}"))?;
-        let status = response.status();
-        if !status.is_success() {
-            let reason = response.text().await.unwrap_or_default();
-            bail!("server returned {status}: {}", reason.chars().take(200).collect::<String>());
-        }
-        let body = response.text().await.unwrap_or_default();
-        if let Ok(descriptor) = serde_json::from_str::<serde_json::Value>(&body) {
-            if let Some(stored) = descriptor.get("sha256").and_then(|v| v.as_str()) {
-                if !stored.eq_ignore_ascii_case(sha256) {
-                    bail!("server stored a different blob ({stored})");
-                }
+    let response = http_client()?
+        .put(format!("{server}/upload"))
+        .timeout(TRANSFER_TIMEOUT)
+        .header("Content-Type", "application/octet-stream")
+        .header("Authorization", upload_auth(sha256)?)
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .map_err(|e| anyhow!("PUT /upload failed: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let reason = response.text().await.unwrap_or_default();
+        bail!("server returned {status}: {}", reason.chars().take(200).collect::<String>());
+    }
+    let body = response.text().await.unwrap_or_default();
+    if let Ok(descriptor) = serde_json::from_str::<serde_json::Value>(&body) {
+        if let Some(stored) = descriptor.get("sha256").and_then(|v| v.as_str()) {
+            if !stored.eq_ignore_ascii_case(sha256) {
+                bail!("server stored a different blob ({stored})");
             }
         }
-        Ok(())
     }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Web: #589 phase 4.
-        let _ = (server, sha256, bytes, upload_auth);
-        Err(anyhow!("NotImplemented: Blossom upload on the web"))
-    }
+    Ok(())
 }
 
-async fn fetch_verified(url: &str, on_progress: impl Fn(f64)) -> Result<Vec<u8>> {
+pub(crate) async fn fetch_verified(url: &str, on_progress: impl Fn(f64)) -> Result<Vec<u8>> {
+    use futures_util::StreamExt;
+
     let expected = sha256_from_url(url)
         .ok_or_else(|| anyhow!("DownloadFailed: the URL does not name a blob hash"))?;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let mut response = http_client()?
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| anyhow!("DownloadFailed: {e}"))?;
-        if !response.status().is_success() {
-            bail!("DownloadFailed: server returned {}", response.status());
+    let response = http_client()?
+        .get(url)
+        .timeout(TRANSFER_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| anyhow!("DownloadFailed: {e}"))?;
+    if !response.status().is_success() {
+        bail!("DownloadFailed: server returned {}", response.status());
+    }
+    let mut body = Received::new(response.content_length())?;
+    let mut chunks = response.bytes_stream();
+    while let Some(chunk) = chunks.next().await {
+        let chunk = chunk.map_err(|e| anyhow!("DownloadFailed: reading body: {e}"))?;
+        if let Some(fraction) = body.push(&chunk)? {
+            on_progress(fraction);
         }
-        let total = response.content_length();
+    }
+    let bytes = body.bytes;
+    if sha256_hex(&bytes) != expected {
+        bail!("DownloadFailed: the blob does not match its hash");
+    }
+    Ok(bytes)
+}
+
+/// A download body as it arrives, held to [`MAX_BLOB_BYTES`] by the declared
+/// length and by the bytes themselves: a server may omit the header or lie.
+struct Received {
+    bytes: Vec<u8>,
+    total: Option<u64>,
+}
+
+impl Received {
+    fn new(total: Option<u64>) -> Result<Self> {
         if total.is_some_and(|len| len > MAX_BLOB_BYTES as u64) {
             bail!("DownloadFailed: the blob exceeds the 25 MB limit");
         }
-        let mut bytes = Vec::with_capacity(total.unwrap_or(0) as usize);
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|e| anyhow!("DownloadFailed: reading body: {e}"))?
-        {
-            bytes.extend_from_slice(&chunk);
-            if bytes.len() > MAX_BLOB_BYTES {
-                bail!("DownloadFailed: the blob exceeds the 25 MB limit");
-            }
-            if let Some(total) = total.filter(|t| *t > 0) {
-                on_progress((bytes.len() as f64 / total as f64).min(1.0));
-            }
-        }
-        if sha256_hex(&bytes) != expected {
-            bail!("DownloadFailed: the blob does not match its hash");
-        }
-        Ok(bytes)
+        let capacity = total.unwrap_or(0) as usize;
+        Ok(Self { bytes: Vec::with_capacity(capacity), total })
     }
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Web: #589 phase 4.
-        let _ = (url, on_progress, expected);
-        Err(anyhow!("NotImplemented: Blossom download on the web"))
+    /// Append a chunk; the fraction received, when the length is known.
+    fn push(&mut self, chunk: &[u8]) -> Result<Option<f64>> {
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.len() > MAX_BLOB_BYTES {
+            bail!("DownloadFailed: the blob exceeds the 25 MB limit");
+        }
+        Ok(self
+            .total
+            .filter(|t| *t > 0)
+            .map(|t| (self.bytes.len() as f64 / t as f64).min(1.0)))
     }
 }
 
+/// A minimal HTTP/1.1 server for Blossom tests, here and in
+/// `attachments::probe`.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
+pub(crate) mod test_server {
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     /// One request as the test server saw it.
     #[derive(Debug, Clone, Default)]
-    struct Seen {
-        method: String,
-        path: String,
-        headers: Vec<(String, String)>,
-        body: Vec<u8>,
+    pub(crate) struct Seen {
+        pub method: String,
+        pub path: String,
+        pub headers: Vec<(String, String)>,
+        pub body: Vec<u8>,
     }
 
     impl Seen {
-        fn header(&self, name: &str) -> Option<&str> {
+        pub(crate) fn header(&self, name: &str) -> Option<&str> {
             self.headers
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -232,9 +242,16 @@ mod tests {
         }
     }
 
-    /// A minimal HTTP/1.1 server answering every request with `status` and
-    /// `body`, recording what it received. Returns its base URL.
-    async fn serve(status: u16, body: Vec<u8>) -> (String, Arc<Mutex<Vec<Seen>>>) {
+    /// A server answering every request with `status` and `body`, recording
+    /// what it received. Returns its base URL.
+    pub(crate) async fn serve(status: u16, body: Vec<u8>) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        serve_with(move |_| (status, body.clone())).await
+    }
+
+    /// A server answering each request with what `reply` makes of it.
+    pub(crate) async fn serve_with(
+        reply: impl Fn(&Seen) -> (u16, Vec<u8>) + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -275,6 +292,7 @@ mod tests {
                         .collect(),
                     body: raw[head_end..head_end + length].to_vec(),
                 };
+                let (status, body) = reply(&request);
                 log.lock().unwrap().push(request);
                 let reply = format!(
                     "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -287,6 +305,13 @@ mod tests {
         });
         (base, seen)
     }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::test_server::{serve, Seen};
+    use super::*;
+    use std::sync::Mutex;
 
     fn decoded_auth(seen: &Seen) -> nostr_sdk::prelude::Event {
         use base64::{engine::general_purpose::STANDARD, Engine};
@@ -368,6 +393,21 @@ mod tests {
         let hash = sha256_hex(b"x");
         assert!(download_blob(&format!("http://example.com/{hash}"), |_| {}).await.is_err());
         assert!(download_blob("https://example.com/not-a-hash", |_| {}).await.is_err());
+    }
+
+    #[test]
+    fn a_body_is_held_to_the_limit_whatever_its_header_says() {
+        assert!(Received::new(Some(MAX_BLOB_BYTES as u64 + 1)).is_err());
+
+        // Declared length: progress is reported and capped at 1.0.
+        let mut body = Received::new(Some(4)).unwrap();
+        assert_eq!(body.push(b"ab").unwrap(), Some(0.5));
+        assert_eq!(body.push(b"cdef").unwrap(), Some(1.0));
+
+        // No length: no progress, and the bytes alone enforce the cap.
+        let mut body = Received::new(None).unwrap();
+        assert_eq!(body.push(b"x").unwrap(), None);
+        assert!(body.push(&vec![0u8; MAX_BLOB_BYTES]).is_err());
     }
 
     #[test]

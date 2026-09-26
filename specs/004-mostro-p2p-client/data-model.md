@@ -343,7 +343,10 @@ key is stored — it is re-derived (raw ECDH with the counterpart) when needed.
 
 The encrypted blob itself is cached in `attachment_blobs` (keyed by
 `sha256`, still ciphertext, 300 MB cap, oldest evicted first,
-wiped with the identity).
+wiped with the identity). On the web it is the IndexedDB store of the same
+name, with an `attachment_blob_index` store of `{sha256, size, created_at}`
+entries the eviction reads instead of the blobs; the cap there is 100 MB,
+since the origin's quota is shared with the rest of the app's data.
 
 **Validation rules**:
 - `file_size` MUST not exceed 26,214,400 bytes (25MB).

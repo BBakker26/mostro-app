@@ -1,4 +1,8 @@
 pub mod app_db;
+/// The web attachment cache's eviction rule; compiled everywhere for the
+/// same reason as `trade_json`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub mod blob_cache;
 #[cfg(target_arch = "wasm32")]
 pub mod indexeddb;
 pub mod schema;
@@ -414,8 +418,8 @@ pub trait Storage: Send + Sync {
     /// is as unreadable as the copy on the Blossom server. Identity-scoped —
     /// [`Self::clear_identity_data`] empties it.
     ///
-    /// The default keeps nothing: the web backend has no cache yet (#589
-    /// phase 4), and a miss only costs a download.
+    /// The default keeps nothing, for stores that have no cache: a miss only
+    /// costs a download. SQLite and IndexedDB both implement it.
     async fn save_attachment_blob(&self, _sha256: &str, _blob: &[u8]) -> Result<()> {
         Ok(())
     }

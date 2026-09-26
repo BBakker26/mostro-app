@@ -1163,7 +1163,6 @@
   "attachmentSendFailed": "Die Datei konnte nicht gesendet werden.",
   "attachmentDownloadFailed": "Die Datei konnte nicht heruntergeladen werden.",
   "attachmentDecryptFailed": "Diese Datei konnte nicht entschlüsselt werden.",
-  "attachmentWebUnavailable": "Dateien sind im Web noch nicht verfügbar.",
   "attachmentUploading": "Wird gesendet…",
   "attachmentDiscard": "Verwerfen",
   "attachmentSave": "Speichern",

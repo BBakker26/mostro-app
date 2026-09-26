@@ -1163,7 +1163,6 @@
   "attachmentSendFailed": "Het bestand kon niet worden verstuurd.",
   "attachmentDownloadFailed": "Het bestand kon niet worden gedownload.",
   "attachmentDecryptFailed": "Dit bestand kon niet worden ontsleuteld.",
-  "attachmentWebUnavailable": "Bestanden zijn nog niet beschikbaar op het web.",
   "attachmentUploading": "Versturen…",
   "attachmentDiscard": "Verwijderen",
   "attachmentSave": "Opslaan",

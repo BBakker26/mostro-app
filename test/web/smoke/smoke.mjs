@@ -142,15 +142,37 @@ function serveBundle(misses) {
  * preflight that allows `Authorization`, BUD-02's `PUT /upload` with a blob
  * descriptor, and the blob at `/<sha256>`. Nothing leaves the machine.
  */
+/**
+ * Why a BUD-02 upload authorization is unacceptable for `sha256`, or null when
+ * it is fine: a base64 kind 24242 event, `t` = upload, `x` = the blob's hash,
+ * an expiration still ahead. What a real server checks, short of the Schnorr
+ * signature — Rust's blossom tests verify that one.
+ */
+function uploadAuthProblem(header, sha256) {
+  if (!header?.startsWith('Nostr ')) return 'no "Nostr" authorization';
+  let event;
+  try {
+    event = JSON.parse(Buffer.from(header.slice('Nostr '.length), 'base64').toString('utf8'));
+  } catch {
+    return 'the authorization is not a base64 JSON event';
+  }
+  const tag = (name) => event.tags?.find((t) => t[0] === name)?.[1];
+  if (event.kind !== 24242) return `kind ${event.kind}, not 24242`;
+  if (!/^[0-9a-f]{64}$/.test(event.pubkey ?? '') || !/^[0-9a-f]{128}$/.test(event.sig ?? '')) {
+    return 'the event is not signed';
+  }
+  if (tag('t') !== 'upload') return `t tag "${tag('t')}", not "upload"`;
+  if (tag('x') !== sha256) return `x tag "${tag('x')}" does not name the uploaded blob`;
+  if (!(Number(tag('expiration')) > Date.now() / 1000)) return 'no future expiration';
+  return null;
+}
+
 function serveBlossom(requests) {
   const blobs = new Map();
   const server = createServer((req, res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
-    requests.push({
-      method: req.method,
-      path: pathname,
-      authorization: req.headers.authorization ?? null,
-    });
+    const request = { method: req.method, path: pathname, authProblem: null };
+    requests.push(request);
     const send = (status, body, type) => {
       res.writeHead(status, {
         'Content-Type': type || 'text/plain; charset=utf-8',
@@ -169,6 +191,10 @@ function serveBlossom(requests) {
       req.on('end', () => {
         const blob = Buffer.concat(chunks);
         const sha256 = createHash('sha256').update(blob).digest('hex');
+        // Refused like a real server would, so a bad authorization fails
+        // the round trip rather than passing it.
+        request.authProblem = uploadAuthProblem(req.headers.authorization, sha256);
+        if (request.authProblem) return send(401, request.authProblem);
         blobs.set(sha256, blob);
         send(200, JSON.stringify({ sha256, size: blob.length }), 'application/json');
       });
@@ -550,16 +576,12 @@ async function main() {
           { timeout: TIMEOUT_MS },
         )
         .catch(() => fail('the attachment round trip never reported (mostroAttachmentProbe)'));
+      // The endpoint refuses an upload whose kind 24242 authorization is
+      // wrong (uploadAuthProblem), so a success here means it was right.
+      const authProblem = blossomRequests.find((r) => r.authProblem)?.authProblem;
+      if (authProblem) await fail(`the upload authorization was refused: ${authProblem}`);
       const probeError = await page.evaluate(() => globalThis.mostroAttachmentProbeError);
       if (probeError) await fail(`the attachment round trip failed: ${probeError}`);
-
-      // Signed like BUD-02 asks, by the throwaway key the app generates.
-      const upload = blossomRequests.find((r) => r.method === 'PUT' && r.path === '/upload');
-      if (!upload?.authorization?.startsWith('Nostr ')) {
-        await fail(
-          `the upload was not authorized with a kind 24242 event: ${JSON.stringify(blossomRequests)}`,
-        );
-      }
       console.log('✓ attachment uploaded, downloaded, cached and decrypted');
     }
 

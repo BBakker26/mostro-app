@@ -1302,7 +1302,7 @@
   },
   "noRelayAcceptedMessage": "No relay accepted your message. Check your relays in Settings and try again",
   "@noRelayAcceptedMessage": {
-    "description": "Snackbar shown when no relay accepted an outgoing message: every relay refused it, timed out or was unreachable, so the Mostro node never saw it — unlike sessionTimeoutMessage, where a relay took the message and no reply came back"
+    "description": "Snackbar shown when no relay accepted an outgoing message: every relay refused it, timed out or was unreachable, so it may not have reached the Mostro node (a relay that timed out may still have forwarded it) — unlike sessionTimeoutMessage, where a relay took the message and no reply came back"
   },
   "noIdentityFoundMessage": "No identity found — try restarting the app.",
   "@noIdentityFoundMessage": {

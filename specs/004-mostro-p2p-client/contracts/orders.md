@@ -20,8 +20,9 @@ Before that wait, the request has to be accepted by a relay. Publishing
 resolves on the first relay that answers `OK true`; when none does (every
 relay refused the event, timed out or was not connected), the call fails with
 `NoRelayAccepted` instead, rolls its pending record back and does not wait for
-the daemon, which never saw the request. The two are different failures and
-the UI tells them apart: `NoDaemonResponse` means the request went out and no
+the daemon. A relay that timed out may still have stored and forwarded the
+event, so the daemon can see the request anyway. The two are different
+failures and the UI tells them apart: `NoDaemonResponse` means the request went out and no
 reply came back, `NoRelayAccepted` points the user at their relay list.
 
 What happens to a genuine reply that arrives **after** that timeout depends on

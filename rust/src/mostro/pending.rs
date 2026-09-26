@@ -598,6 +598,94 @@ pub(crate) fn roll_back_dispute_request(trade_pubkey_hex: &str, request_id: u64)
     map.remove(trade_pubkey_hex);
 }
 
+// ── Maker's cancel of its bond window (mostro#996) ──────────────────────────
+
+/// How the daemon answered a maker's `cancel` during `WaitingMakerBond`.
+pub(crate) enum MakerCancelReply {
+    /// The daemon closed the unpublished order and released the bond.
+    Canceled,
+    /// `cant-do`: a daemon without mostro#996, the bond locked first, or
+    /// another refusal — the caller tells them apart.
+    Rejected { reason: String, message: String },
+}
+
+struct MakerCancel {
+    request_id: u64,
+    /// `None` once the caller stopped waiting: a late reply is still
+    /// recognized as the user's own cancel, never as the payment deadline.
+    tx: Option<tokio::sync::oneshot::Sender<MakerCancelReply>>,
+}
+
+/// Maker cancels in flight, keyed by trade pubkey. Apart from
+/// [`pending_requests`] because that key still holds the create's record,
+/// which waits for the `new-order` of a bond that may yet lock
+/// (docs/ANTI_ABUSE_BOND.md §6.2): the cancel must not take its place.
+/// Keys are per trade, so nothing here outlives the identity that made them.
+static MAKER_CANCELS: OnceLock<std::sync::Mutex<HashMap<String, MakerCancel>>> = OnceLock::new();
+
+fn maker_cancels() -> &'static std::sync::Mutex<HashMap<String, MakerCancel>> {
+    MAKER_CANCELS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Register a maker's cancel on `trade_pubkey_hex` before it is published,
+/// and hand back the channel its reply arrives on. A newer cancel replaces
+/// an older one: only the latest caller is waiting.
+pub(crate) fn register_maker_cancel(
+    trade_pubkey_hex: &str,
+    request_id: u64,
+) -> tokio::sync::oneshot::Receiver<MakerCancelReply> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if let Ok(mut map) = maker_cancels().lock() {
+        map.insert(
+            trade_pubkey_hex.to_string(),
+            MakerCancel {
+                request_id,
+                tx: Some(tx),
+            },
+        );
+    }
+    rx
+}
+
+/// The maker's cancel a reply echoing `got` answers, consumed. `None` when
+/// the reply is not one: no cancel on this key, or another nonce. The inner
+/// `Option` is the waiter, absent once the caller timed out.
+pub(crate) fn take_maker_cancel(
+    trade_pubkey_hex: &str,
+    got: Option<u64>,
+) -> Option<Option<tokio::sync::oneshot::Sender<MakerCancelReply>>> {
+    let mut map = maker_cancels().lock().ok()?;
+    match map.get(trade_pubkey_hex) {
+        Some(c) if request_id_matches(c.request_id, got) => {
+            map.remove(trade_pubkey_hex).map(|c| c.tx)
+        }
+        _ => None,
+    }
+}
+
+/// The caller stopped waiting (timeout): keep the record for a late reply.
+pub(crate) fn detach_maker_cancel(trade_pubkey_hex: &str, request_id: u64) {
+    if let Ok(mut map) = maker_cancels().lock() {
+        if let Some(c) = map.get_mut(trade_pubkey_hex) {
+            if c.request_id == request_id {
+                c.tx = None;
+            }
+        }
+    }
+}
+
+/// The cancel never left the device: nothing can answer it.
+pub(crate) fn remove_maker_cancel(trade_pubkey_hex: &str, request_id: u64) {
+    if let Ok(mut map) = maker_cancels().lock() {
+        if map
+            .get(trade_pubkey_hex)
+            .is_some_and(|c| c.request_id == request_id)
+        {
+            map.remove(trade_pubkey_hex);
+        }
+    }
+}
+
 /// Classify the daemon's first reply to a take into a [`DaemonReply`].
 ///
 /// A take's success reply varies by role, order shape and daemon config —

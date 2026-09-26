@@ -41,8 +41,8 @@ void main() {
 
   test('maps the maker bond cancel marker', () {
     expect(
-      localizedDaemonError(l10n, 'BondCancelNotAllowed', fallback: 'x'),
-      l10n.bondCancelNotAllowed,
+      localizedDaemonError(l10n, 'BondAlreadyLocked', fallback: 'x'),
+      l10n.bondAlreadyLocked,
     );
   });
 

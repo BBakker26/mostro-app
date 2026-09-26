@@ -66,12 +66,12 @@ final requestBondInvoiceAgainProvider = Provider<
   Future<TradeInfo> Function(String orderId)
 >((ref) => (orderId) => orders_api.requestBondInvoiceAgain(orderId: orderId));
 
-/// A maker's way out of the bond window behind a seam
-/// (docs/ANTI_ABUSE_BOND.md §6.2): the local wipe of an order the daemon
-/// never published.
-final abandonBondedOrderProvider =
+/// The way out of a bond window behind a seam: the daemon cancel, for a
+/// taker and — since mostro#996 — for a maker, whose cancel waits for the
+/// daemon's answer (docs/ANTI_ABUSE_BOND.md §6.2).
+final cancelBondWindowProvider =
     Provider<Future<void> Function(String orderId)>(
-      (ref) => (orderId) => bond_api.abandonBondedOrder(orderId: orderId),
+      (ref) => (orderId) => orders_api.cancelOrder(orderId: orderId),
     );
 
 /// The core's on-demand expiry of one bond window (what its periodic sweep

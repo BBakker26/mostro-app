@@ -972,7 +972,7 @@
   "bondExpiredBodyMaker": "Sie wurde nicht rechtzeitig bezahlt: die Order wurde nie veröffentlicht und keine Sats haben deine Wallet verlassen.",
   "bondExpiredNoticeMaker": "Die Einlage-Rechnung ist abgelaufen; die Order wurde nicht veröffentlicht",
   "orderStatusWaitingBond": "Warte auf deine Einlage — noch nicht veröffentlicht",
-  "bondCancelNotAllowed": "Diese Order kann nicht storniert werden, solange ihre Einlage aussteht. Verwirf sie stattdessen auf dem Einlage-Bildschirm.",
+  "bondAlreadyLocked": "Deine Einlage wurde bereits bezahlt, die Order ist veröffentlicht. Storniere sie auf dem Order-Bildschirm.",
   "createOrderBondNoticeEstimate": "Dieser Node verlangt eine rückzahlbare Einlage von ≈ {sats} Sats, bevor die Order veröffentlicht wird; sie kommt zurück, wenn der Handel ehrlich endet.",
   "createOrderBondNotice": "Dieser Node verlangt eine rückzahlbare Einlage, bevor die Order veröffentlicht wird; sie kommt zurück, wenn der Handel ehrlich endet.",
   "bondClaimTitle": "Deinen Anteil einfordern",

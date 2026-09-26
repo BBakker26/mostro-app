@@ -27,12 +27,9 @@ charge anything: the daemon sends the exact bolt11.
 
 ## Bond windows
 
-### abandon_bonded_order(order_id: String) → ()
-Walk away from an order parked at `WaitingMakerBond` without paying. The daemon
-refuses a cancel in this window and reaps the unpaid order itself, so this only
-wipes the local row and emits `Canceled` with `UserCanceled`. Decided under the
-order's guard: a bond that locked meanwhile is a published order and is refused.
-**Errors**: `TradeNotFound`, `NotWaitingBond`.
+A maker walks away from an order parked at `WaitingMakerBond` with
+`cancel_order` (see `contracts/orders.md`, *Maker's bond window*): the daemon
+cancel since mostro#996, and a local wipe only when an older daemon refuses it.
 
 ### close_expired_bond_window(order_id: String) → bool
 Close a bond-window row now if its deadline passed unpaid, which the periodic

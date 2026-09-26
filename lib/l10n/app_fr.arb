@@ -972,7 +972,7 @@
   "bondExpiredBodyMaker": "Il n'a pas été payé à temps : l'ordre n'a jamais été publié et aucun sat n'a quitté votre portefeuille.",
   "bondExpiredNoticeMaker": "La facture du dépôt a expiré ; l'ordre n'a pas été publié",
   "orderStatusWaitingBond": "En attente de votre dépôt — pas encore publié",
-  "bondCancelNotAllowed": "Cet ordre ne peut pas être annulé tant que son dépôt est en attente. Abandonnez-le depuis l'écran du dépôt.",
+  "bondAlreadyLocked": "Votre dépôt a déjà été payé : l'ordre est publié. Annulez-le depuis l'écran de l'ordre.",
   "createOrderBondNoticeEstimate": "Ce nœud vous demande de verrouiller un dépôt remboursable de ≈ {sats} sats avant de publier l'ordre ; il revient quand l'échange se termine honnêtement.",
   "createOrderBondNotice": "Ce nœud vous demande de verrouiller un dépôt remboursable avant de publier l'ordre ; il revient quand l'échange se termine honnêtement.",
   "bondClaimTitle": "Réclamer votre part",

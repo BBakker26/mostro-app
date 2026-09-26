@@ -3062,8 +3062,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Warte auf deine Einlage — noch nicht veröffentlicht';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Diese Order kann nicht storniert werden, solange ihre Einlage aussteht. Verwirf sie stattdessen auf dem Einlage-Bildschirm.';
+  String get bondAlreadyLocked =>
+      'Deine Einlage wurde bereits bezahlt, die Order ist veröffentlicht. Storniere sie auf dem Order-Bildschirm.';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

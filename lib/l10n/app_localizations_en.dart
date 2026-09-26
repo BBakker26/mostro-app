@@ -3026,8 +3026,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'Waiting for your deposit — not published yet';
 
   @override
-  String get bondCancelNotAllowed =>
-      'This order can\'t be cancelled while its deposit is pending. Drop it from the deposit screen instead.';
+  String get bondAlreadyLocked =>
+      'Your deposit was already paid, so the order is published. Cancel it from the order screen.';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

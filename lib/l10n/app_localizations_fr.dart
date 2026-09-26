@@ -3058,8 +3058,8 @@ class AppLocalizationsFr extends AppLocalizations {
       'En attente de votre dépôt — pas encore publié';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Cet ordre ne peut pas être annulé tant que son dépôt est en attente. Abandonnez-le depuis l\'écran du dépôt.';
+  String get bondAlreadyLocked =>
+      'Votre dépôt a déjà été payé : l\'ordre est publié. Annulez-le depuis l\'écran de l\'ordre.';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

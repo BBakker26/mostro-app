@@ -972,7 +972,7 @@
   "bondExpiredBodyMaker": "Non è stato pagato in tempo: l'ordine non è mai stato pubblicato e nessun sat ha lasciato il tuo wallet.",
   "bondExpiredNoticeMaker": "La fattura del deposito è scaduta; l'ordine non è stato pubblicato",
   "orderStatusWaitingBond": "In attesa del tuo deposito — non ancora pubblicato",
-  "bondCancelNotAllowed": "Questo ordine non può essere annullato finché il deposito è in sospeso. Scartalo dalla schermata del deposito.",
+  "bondAlreadyLocked": "Il tuo deposito è già stato pagato, quindi l'ordine è pubblicato. Annullalo dalla schermata dell'ordine.",
   "createOrderBondNoticeEstimate": "Questo nodo ti chiede di bloccare un deposito rimborsabile di ≈ {sats} sats prima di pubblicare l'ordine; torna quando lo scambio finisce onestamente.",
   "createOrderBondNotice": "Questo nodo ti chiede di bloccare un deposito rimborsabile prima di pubblicare l'ordine; torna quando lo scambio finisce onestamente.",
   "bondClaimTitle": "Reclama la tua parte",

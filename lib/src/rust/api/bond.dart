@@ -27,14 +27,6 @@ Future<BigInt?> estimateBondSats({required BigInt orderAmountSats}) => RustLib
     .api
     .crateApiBondEstimateBondSats(orderAmountSats: orderAmountSats);
 
-/// Walk away from an order parked at `WaitingMakerBond` without paying the
-/// bond (docs/ANTI_ABUSE_BOND.md §6.2). The daemon refuses a cancel in this
-/// window and reaps the unpaid order itself, so this only wipes the local
-/// row and emits `Canceled` with `UserCanceled`. Markers: `TradeNotFound`,
-/// `NotWaitingBond` when the row is not a maker's bond window.
-Future<void> abandonBondedOrder({required String orderId}) =>
-    RustLib.instance.api.crateApiBondAbandonBondedOrder(orderId: orderId);
-
 /// Close the bond window of `order_id` now if its deadline passed unpaid —
 /// what the periodic sweep would do on its next pass. The pay-bond screen
 /// calls it when its countdown ends, so a row does not linger as "pay

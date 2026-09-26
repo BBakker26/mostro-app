@@ -5104,13 +5104,13 @@ abstract class AppLocalizations {
   /// **'{pct} % of the amount'**
   String bondContextPercent(String pct);
 
-  /// Pay-bond screen, maker variant: abandon the unpublished order (local wipe)
+  /// Pay-bond screen, maker variant: cancel the unpublished order and its deposit invoice
   ///
   /// In en, this message translates to:
   /// **'Don\'t publish the order'**
   String get bondDontPublish;
 
-  /// Snackbar after a maker abandons their bond
+  /// Snackbar after a maker cancels the order during its bond window
   ///
   /// In en, this message translates to:
   /// **'Order dropped. Nothing was published and nothing was charged.'**
@@ -5146,11 +5146,11 @@ abstract class AppLocalizations {
   /// **'Waiting for your deposit — not published yet'**
   String get orderStatusWaitingBond;
 
-  /// Error for the BondCancelNotAllowed marker
+  /// Pay-bond screen, maker: the cancel lost to a bond that locked first (BondAlreadyLocked marker); the order is published
   ///
   /// In en, this message translates to:
-  /// **'This order can\'t be cancelled while its deposit is pending. Drop it from the deposit screen instead.'**
-  String get bondCancelNotAllowed;
+  /// **'Your deposit was already paid, so the order is published. Cancel it from the order screen.'**
+  String get bondAlreadyLocked;
 
   /// Create-order preview notice on a maker-bond node with the core estimate; sats is a formatted figure
   ///

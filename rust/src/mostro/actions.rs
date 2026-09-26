@@ -206,13 +206,16 @@ pub(crate) fn action_message(
     ))
 }
 
-/// Build and wrap a Cancel MostroMessage.
+/// Build and wrap a Cancel MostroMessage. `request_id` is the nonce the
+/// daemon echoes when the caller waits for its answer — the maker's cancel
+/// of its bond window (mostro#996); `None` for the fire-and-forget cancels.
 pub async fn cancel(
     identity_keys: &Keys,
     trade_keys: &Keys,
     mostro_pubkey: &PublicKey,
     order_id: &str,
     trade_index: u32,
+    request_id: Option<u64>,
 ) -> Result<String> {
     simple_action(
         identity_keys,
@@ -221,6 +224,7 @@ pub async fn cancel(
         order_id,
         trade_index,
         Action::Cancel,
+        request_id,
     )
     .await
 }
@@ -229,9 +233,7 @@ pub async fn cancel(
 ///
 /// `request_id` is the correlation nonce the daemon echoes in its reply
 /// (`DisputeInitiatedByYou` or `CantDo`); `open_dispute` relies on it to tell
-/// the genuine reply apart from stale relay-replayed events. This is why the
-/// message is built here instead of through `simple_action`, which sends no
-/// nonce.
+/// the genuine reply apart from stale relay-replayed events.
 pub async fn dispute(
     identity_keys: &Keys,
     trade_keys: &Keys,
@@ -396,9 +398,10 @@ async fn simple_action(
     order_id: &str,
     trade_index: u32,
     action: Action,
+    request_id: Option<u64>,
 ) -> Result<String> {
     let id = Uuid::parse_str(order_id)?;
-    let msg = Message::new_order(Some(id), None, Some(trade_index as i64), action, None);
+    let msg = Message::new_order(Some(id), request_id, Some(trade_index as i64), action, None);
     wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 

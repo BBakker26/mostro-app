@@ -3050,8 +3050,8 @@ class AppLocalizationsEs extends AppLocalizations {
       'Esperando tu depósito — aún no publicada';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Esta orden no se puede cancelar mientras su depósito esté pendiente. Descártala desde la pantalla del depósito.';
+  String get bondAlreadyLocked =>
+      'Tu depósito ya se pagó, así que la orden está publicada. Cancélala desde la pantalla de la orden.';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

@@ -28,7 +28,6 @@ import 'package:mostro/features/trades/providers/trades_providers.dart'
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/shared/widgets/nwc_payment_widget.dart';
-import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart'
     show BondInfo, OrderStatus, TradeInfo, TradeRole, TradeUpdate;
 
@@ -76,22 +75,21 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     setState(() => _waiting = true);
   }
 
-  /// Walk away: nothing is committed yet, so no confirmation. A taker
-  /// cancels — the daemon releases the bond and the order stays in the book.
-  /// A maker abandons — the daemon refuses a cancel during its bond window
-  /// (docs/ANTI_ABUSE_BOND.md §6.2), so the row is wiped locally: the order
-  /// was never published and nothing was charged.
+  /// Walk away: nothing is committed yet, so no confirmation. Both sides
+  /// send the daemon a cancel. A taker's releases the bond and the order
+  /// stays in the book. A maker's waits for the answer (mostro#996): the
+  /// daemon closes the unpublished order and cancels the bond invoice, or —
+  /// on an older daemon that refuses it — the core drops the row locally. A
+  /// bond that locked first leaves the order published: the error says so
+  /// (docs/ANTI_ABUSE_BOND.md §6.2).
   Future<void> _cancel({required bool maker}) async {
     if (_canceling) return;
     final l10n = AppLocalizations.of(context);
     setState(() => _canceling = true);
     try {
-      if (maker) {
-        await ref.read(abandonBondedOrderProvider)(widget.orderId);
-      } else {
-        await orders_api.cancelOrder(orderId: widget.orderId);
-      }
-      if (!mounted) return;
+      await ref.read(cancelBondWindowProvider)(widget.orderId);
+      // The core's `canceled` update may already have left the screen.
+      if (!mounted || _navigated) return;
       _navigated = true;
       refreshTrades(ref);
       if (maker) {
@@ -101,7 +99,8 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
       }
       context.go(AppRoute.home);
     } catch (e) {
-      if (!mounted) return;
+      // A lock that beat the cancel was already told by the listener.
+      if (!mounted || _navigated) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -198,7 +197,9 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     return switch (bondCancelCopy(update.reason)) {
       BondCancelCopy.lostRace => l10n.bondLostRace,
       BondCancelCopy.makerCanceled => l10n.bondMakerCanceled,
-      BondCancelCopy.own => null,
+      BondCancelCopy.own => maker ? l10n.bondAbandoned : null,
+      BondCancelCopy.expired =>
+        maker ? l10n.bondExpiredNoticeMaker : l10n.bondExpiredNotice,
       BondCancelCopy.neutral => l10n.orderNoLongerActive,
     };
   }
@@ -221,6 +222,13 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
           if (!maker) break;
           _navigated = true;
           refreshTrades(ref);
+          // The bond locked while the maker was cancelling: the cancel
+          // lost, and the order it meant to drop is now live.
+          if (_canceling) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(l10n.bondAlreadyLocked)));
+          }
           context.go(AppRoute.myOrderPath(widget.orderId));
         case OrderStatus.canceled:
         case OrderStatus.cooperativelyCanceled:

@@ -3050,8 +3050,8 @@ class AppLocalizationsIt extends AppLocalizations {
       'In attesa del tuo deposito — non ancora pubblicato';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Questo ordine non può essere annullato finché il deposito è in sospeso. Scartalo dalla schermata del deposito.';
+  String get bondAlreadyLocked =>
+      'Il tuo deposito è già stato pagato, quindi l\'ordine è pubblicato. Annullalo dalla schermata dell\'ordine.';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

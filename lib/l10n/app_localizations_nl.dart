@@ -3049,8 +3049,8 @@ class AppLocalizationsNl extends AppLocalizations {
       'Wacht op je borg, nog niet gepubliceerd';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Deze order kan niet worden geannuleerd zolang de borg openstaat. Laat hem vallen vanuit het borgscherm.';
+  String get bondAlreadyLocked =>
+      'Je borg is al betaald, dus de order is gepubliceerd. Annuleer hem vanaf het orderscherm.';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

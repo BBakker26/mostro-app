@@ -12,6 +12,11 @@ import 'package:mostro/src/rust/api/types.dart';
 /// and nothing else happens — no mint is contacted and no proof store opens.
 /// Whether the *UI* should exist at all is a separate question, answered by
 /// `isCashuAvailableProvider`.
+///
+/// Not `autoDispose`, unlike `mostroNodeProvider`, on purpose: the stream and
+/// its Rust handle live for the process, so reopening the wallet shows the
+/// last known balance at once instead of re-subscribing on every visit. It
+/// holds one receiver on Rust's status broadcast (`on_cashu_wallet_changed`).
 final cashuWalletProvider = StreamProvider<CashuWalletStatus>((ref) async* {
   // Subscribe before the snapshot so no change is missed in between.
   final stream = await cashu_api.onCashuWalletChanged();

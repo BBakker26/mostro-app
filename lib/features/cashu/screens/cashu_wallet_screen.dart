@@ -377,6 +377,11 @@ class _AmountDialogState extends State<_AmountDialog> {
       setState(() => _error = l10n.cashuErrorAmountZero);
       return;
     }
+    // Bounded by the balance only. A mint fee, or a swap cdk needs to hit an
+    // exact amount, is known to the mint and to Rust, never to Dart (no
+    // protocol logic here). A send of the whole balance that cannot cover it
+    // fails in Rust as `CashuSendFailed`, shown as "you may not have enough
+    // funds", and nothing leaves the wallet.
     if (amount > widget.maxSats) {
       setState(() => _error = l10n.cashuErrorAmountTooLarge(widget.maxSats));
       return;

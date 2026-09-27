@@ -188,6 +188,63 @@ void main() {
       expect(find.text('cashuBtesttoken'), findsOneWidget);
     });
 
+    testWidgets('an amount above the balance is refused in the dialog',
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 100));
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '101');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('You only have 100 sats.'), findsOneWidget);
+      // Still open: the user corrects the amount instead of starting over.
+      expect(find.text('Confirm'), findsOneWidget);
+      expect(find.text('cashuBtesttoken'), findsNothing);
+    });
+
+    testWidgets('neither a stray tap nor back closes the token dialog',
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 100));
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '10');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      // Outside the dialog, on the barrier.
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(find.text('cashuBtesttoken'), findsOneWidget);
+
+      // The system back gesture / button.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('cashuBtesttoken'), findsOneWidget);
+    });
+
+    testWidgets("I've sent it clears the exported-token reminder",
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 100));
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '10');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(find.text('Show it again'), findsOneWidget);
+
+      await tester.tap(find.text("I've sent it"));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Show it again'), findsNothing);
+      expect(find.text("I've sent it"), findsNothing);
+    });
+
     testWidgets('a token too large for a QR is shown as text, never as an error',
         (tester) async {
       // A cdk token from many small proofs runs to tens of KB; a QR holds

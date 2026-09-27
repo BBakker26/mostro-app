@@ -6292,12 +6292,6 @@ abstract class AppLocalizations {
   /// **'This file could not be decrypted.'**
   String get attachmentDecryptFailed;
 
-  /// Shown on the web build, where attachments are not supported yet
-  ///
-  /// In en, this message translates to:
-  /// **'Files are not available on the web yet.'**
-  String get attachmentWebUnavailable;
-
   /// Status of a file bubble while it is being encrypted and uploaded
   ///
   /// In en, this message translates to:

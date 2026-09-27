@@ -264,8 +264,13 @@ Pinned by a cross-client vector produced with v1's own code
 **Download behavior**: Images download and preview automatically. All
 other types show a download button (download-on-demand).
 
-**WASM consideration**: not implemented yet — the web build has no Blossom
-client and no blob cache (#589 phase 4).
+**WASM consideration** (#589 phase 4): the same client runs on the browser's
+`fetch` (reqwest's wasm backend), so the upload is a CORS request from a
+cross-origin isolated page. v1's five servers all answer
+`Access-Control-Allow-Origin: *`; one whose preflight does not name
+`Authorization` refuses the upload and the next is tried. The encrypted blob
+is cached in IndexedDB (100 MB cap), and the web smoke test runs an upload
+and read-back against a Blossom endpoint of its own (`SMOKE_ATTACHMENTS=1`).
 
 **Alternatives considered**:
 - Inline file content in Nostr events: Size-limited, inefficient. Rejected.

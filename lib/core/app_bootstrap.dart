@@ -16,6 +16,7 @@ import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/core/test_environment.dart';
 import 'package:mostro/core/lifecycle/app_lifecycle_service.dart';
 import 'package:mostro/core/lifecycle/resume_resync.dart';
+import 'package:mostro/core/web/attachment_probe.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/core/web/store_probe.dart';
 import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
@@ -155,6 +156,10 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     // it seeds bond rows and checks they come back through the bridge — see
     // lib/core/web/store_probe.dart. A normal launch skips it entirely.
     if (kIsWeb && storeProbeRequested()) unawaited(publishStoreProbe());
+    // Likewise for SMOKE_ATTACHMENTS=1: an encrypted upload and read-back
+    // against the smoke test's own Blossom endpoint (attachment_probe.dart).
+    final probeServer = kIsWeb ? attachmentProbeServer() : null;
+    if (probeServer != null) unawaited(publishAttachmentProbe(probeServer));
   } catch (e) {
     debugPrint('[main] rehydrate active Mostro node failed: $e');
     markBridgeFailed(e);
@@ -245,8 +250,8 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     isEnabled: (event) => prefs.getBool(event.prefsKey) ?? true,
     identityCreatedAt: IdentityService.createdAt,
     currentLocation: _currentLocation,
-    disputeIdForTrade: (tradeId) =>
-        container.read(disputeByTradeIdProvider(tradeId))?.id,
+    disputeIdForTrade:
+        (tradeId) => container.read(disputeByTradeIdProvider(tradeId))?.id,
   );
   pumpEvents('trade-cards', tradeUpdateStream.next, eventCards.onTradeUpdate);
   pumpEvents('chat-cards', chatMessageStream.next, eventCards.onChatMessage);
@@ -264,8 +269,10 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   final attachmentLauncher = container.read(attachmentLauncherProvider);
   unawaited(attachmentLauncher.sweep());
   AppLifecycleService(
-    onResume: () =>
-        attachmentLauncher.sweep(olderThan: attachmentLauncher.copyLifetime),
+    onResume:
+        () => attachmentLauncher.sweep(
+          olderThan: attachmentLauncher.copyLifetime,
+        ),
   ).attach();
 
   runApp(

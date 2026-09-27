@@ -7,6 +7,7 @@
 //! Blossom upload (`nostr::blossom`). Either app opens the other's files.
 pub mod media;
 pub mod payload;
+pub(crate) mod probe;
 
 /// Largest file a user may attach, before encryption. v1's limit.
 pub const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;

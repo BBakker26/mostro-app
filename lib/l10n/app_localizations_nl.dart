@@ -3787,10 +3787,6 @@ class AppLocalizationsNl extends AppLocalizations {
       'Dit bestand kon niet worden ontsleuteld.';
 
   @override
-  String get attachmentWebUnavailable =>
-      'Bestanden zijn nog niet beschikbaar op het web.';
-
-  @override
   String get attachmentUploading => 'Versturen…';
 
   @override

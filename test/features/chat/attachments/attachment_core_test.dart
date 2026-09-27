@@ -102,8 +102,6 @@ void main() {
 
     test('maps each Rust marker, wrapped in context, to its message', () {
       final cases = {
-        'NotImplemented: Blossom download on the web':
-            l10n.attachmentWebUnavailable,
         'FileTooLarge: 30000000 bytes': l10n.attachmentTooLarge,
         'UnsupportedFileType: image/webp': l10n.attachmentUnsupported,
         'InvalidImage: truncated': l10n.attachmentInvalidImage,
@@ -133,7 +131,6 @@ void main() {
       expect(isRetryableAttachmentError('UnsupportedFileType: x'), isFalse);
       expect(isRetryableAttachmentError('InvalidImage: x'), isFalse);
       expect(isRetryableAttachmentError('DecryptionFailed: x'), isFalse);
-      expect(isRetryableAttachmentError('NotImplemented: x'), isFalse);
     });
   });
 
@@ -151,6 +148,21 @@ void main() {
     expect(checkPicked(file(kMaxAttachmentBytes)), isA<Picked>());
     expect(checkPicked(file(kMaxAttachmentBytes + 1)), isA<PickTooLarge>());
     expect(reads, 0);
+  });
+
+  test('collectBytes joins a web read stream in order', () async {
+    // Arrange: the slices file_picker hands over on the web.
+    final stream = Stream<List<int>>.fromIterable([
+      [1, 2],
+      [3],
+      [4, 5, 6],
+    ]);
+
+    // Act
+    final bytes = await collectBytes(stream);
+
+    // Assert
+    expect(bytes, [1, 2, 3, 4, 5, 6]);
   });
 
   test('formatAttachmentSize shows KB below a megabyte, MB above', () {

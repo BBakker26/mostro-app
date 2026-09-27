@@ -65,6 +65,9 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (no-op off web) — rename that flag on one side only and the check silently never fires.
   The CI run also sets `SMOKE_BOND_STORE=1`: it seeds bond rows (`test/web/smoke/seed/`) into
   IndexedDB, reloads, and compares them with what `lib/core/web/store_probe.dart` read back.
+  And `SMOKE_ATTACHMENTS=1`: it serves a Blossom endpoint on a **second origin** and waits for
+  `lib/core/web/attachment_probe.dart` to report an encrypted upload, verified download and
+  IndexedDB cache round trip — the one check that a CORS fetch from the isolated page works.
 - **The FCM messaging worker is a second service worker**, `web/firebase-messaging-sw.js`,
   registered from `web/index.html` and `web_push_web.dart` **relative to the base path** under
   the scope `firebase-cloud-messaging-push-scope` — Firebase's default is the origin root, a 404

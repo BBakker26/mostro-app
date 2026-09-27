@@ -183,7 +183,7 @@ mod tests {
                 .await
                 .expect("connected");
         }
-        let event = EventBuilder::new(Kind::TextNote, "hola")
+        let event = EventBuilder::new(Kind::TextNote, "hello")
             .finalize(&Keys::generate())
             .unwrap();
 

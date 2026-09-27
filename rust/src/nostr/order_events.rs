@@ -76,7 +76,10 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     let amount_sats: Option<u64> = get("amt").and_then(|v| v.parse().ok());
     // creator_pubkey is the Mostro node's pubkey (the event author).
     let creator_pubkey = event.pubkey.to_hex();
-    let created_at = order_created_at(event, get("created_at").as_deref());
+    let created_at = order_created_at(
+        event,
+        get("published_at").or_else(|| get("created_at")).as_deref(),
+    );
     let expires_at: Option<i64> = get("expiration").and_then(|v| v.parse().ok());
 
     // is_mine is always false for Kind 38383 events: the event author is the
@@ -112,9 +115,11 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
 ///
 /// Order events are addressable, so the event's own `created_at` moves on every
 /// revision: a taken-then-reverted order would read as brand new and jump to
-/// the top of the book. The NIP-69 `created_at` tag (MostroP2P/mostro#971)
-/// carries the creation time and stays put. Nodes that predate the tag, or send
-/// one that does not parse, fall back to the event's time.
+/// the top of the book. The NIP-69 `published_at` tag (MostroP2P/mostro#1000)
+/// carries the creation time and stays put. Daemon builds between
+/// MostroP2P/mostro#971 and #1000 sent it as `created_at`, which is read when
+/// `published_at` is absent. Nodes that predate both, or send a value that does
+/// not parse, fall back to the event's time.
 ///
 /// Capped at the event's time: an order cannot have been created after a
 /// revision of it was published, and without the cap a node could pin its

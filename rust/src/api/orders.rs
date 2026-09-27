@@ -1141,6 +1141,13 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
                 "fiat_amount_min must be > 0 and < fiat_amount_max"
             ));
         }
+        // A range is priced at market when taken; mostro-core refuses one
+        // with sats (`check_range_order_limits`), so don't send it.
+        if params.amount_sats.is_some_and(|sats| sats > 0) {
+            return Err(anyhow::anyhow!(
+                "amount_sats must not be set on a range order"
+            ));
+        }
     }
     if params.fiat_code.trim().is_empty() {
         return Err(anyhow::anyhow!("fiat_code must not be empty"));
@@ -21181,5 +21188,25 @@ mod bond_window_tests {
             Some(OrderStatus::WaitingTakerBond),
         );
         assert_eq!(locked.status, OrderStatus::InProgress);
+    }
+
+    /// The form never sends sats with a range; the core refuses it too, as
+    /// the daemon would.
+    #[tokio::test]
+    async fn a_range_order_with_fixed_sats_is_refused() {
+        let params = crate::api::types::NewOrderParams {
+            kind: crate::api::types::OrderKind::Sell,
+            fiat_amount: None,
+            fiat_amount_min: Some(30.0),
+            fiat_amount_max: Some(50.0),
+            fiat_code: "PEN".to_string(),
+            payment_method: "Yape".to_string(),
+            premium: 1.0,
+            amount_sats: Some(17_285),
+        };
+
+        let err = create_order_once(params).await.unwrap_err();
+
+        assert_eq!(err.to_string(), "amount_sats must not be set on a range order");
     }
 }

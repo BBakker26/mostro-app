@@ -73,7 +73,16 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
         .map(|t| &t.as_slice()[1..])
         .unwrap_or(&[]);
     let (fiat_amount, fiat_amount_min, fiat_amount_max) = parse_fiat_amounts(fa_values);
-    let amount_sats: Option<u64> = get("amt").and_then(|v| v.parse().ok());
+    // A range is priced at market when taken: it has no sats amount of its
+    // own. mostrod before mostro#986 published the in-flight taker's slice in
+    // `amt` during the taker-bond window (mostro#927), which made a pending
+    // range read as fixed-price; such an `amt` is ignored.
+    let is_range = fiat_amount_min.is_some() && fiat_amount_max.is_some();
+    let amount_sats: Option<u64> = if is_range {
+        None
+    } else {
+        get("amt").and_then(|v| v.parse().ok())
+    };
     // creator_pubkey is the Mostro node's pubkey (the event author).
     let creator_pubkey = event.pubkey.to_hex();
     let created_at = order_created_at(
@@ -445,6 +454,62 @@ mod tests {
         assert_eq!(order.fiat_amount, None);
         assert_eq!(order.fiat_amount_min, Some(20.0));
         assert_eq!(order.fiat_amount_max, Some(60.0));
+    }
+
+    /// mostro#927: a node before mostro#986 publishes a pending range with the
+    /// in-flight taker's slice in `amt`. The range must not read as fixed.
+    #[test]
+    fn a_range_ignores_the_sats_of_a_take_in_flight() {
+        // Arrange
+        let mut event = order_event(&["30", "50"]);
+        let keys = Keys::generate();
+        let tags = event
+            .tags
+            .iter()
+            .map(|t| {
+                if t.as_slice()[0] == "amt" {
+                    Tag::parse(["amt", "17285"]).unwrap()
+                } else {
+                    t.clone()
+                }
+            })
+            .collect::<Vec<_>>();
+        event = EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+
+        // Act
+        let order = parse_order_event(&event, None).expect("order");
+
+        // Assert
+        assert_eq!(
+            (order.fiat_amount_min, order.fiat_amount_max),
+            (Some(30.0), Some(50.0))
+        );
+        assert_eq!(order.amount_sats, None);
+    }
+
+    /// The same `amt` on a single amount is the order's own fixed price.
+    #[test]
+    fn a_single_amount_keeps_its_fixed_sats() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags([
+                Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", "pending"]).unwrap(),
+                Tag::parse(["f", "PEN"]).unwrap(),
+                Tag::parse(["amt", "17285"]).unwrap(),
+                Tag::parse(["fa", "50"]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        let order = parse_order_event(&event, None).expect("order");
+
+        assert_eq!(order.amount_sats, Some(17285));
     }
 
     #[test]

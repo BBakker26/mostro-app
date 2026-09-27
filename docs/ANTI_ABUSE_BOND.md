@@ -482,8 +482,10 @@ Rules:
       book shows published. **Keep waiting** leaves the row to the confirmation or
       the local expiry.
   - No answer: `NoDaemonResponse`, the row stays. The registry keeps the nonce —
-    and those of earlier timed-out attempts a retry superseded — so a late
-    `canceled` for any of them is still read as the user's own.
+    and those of earlier timed-out attempts a retry superseded, even once the retry
+    itself is refused — so a late `canceled` for any of them is still read as the
+    user's own. None is forgotten while the window is open; all go when it closes
+    (a `canceled`, the bond's lock, or the local abandon).
   Copy says nothing was published and nothing was charged.
 - **Deadline notice.** A `canceled` with no matching cancel in the maker's window is
   the daemon's payment deadline (mostro#994): the row is wiped with `BondExpired`, and

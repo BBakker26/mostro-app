@@ -617,13 +617,14 @@ struct MakerCancel {
     /// Nonces of earlier cancels on this key that timed out and were then
     /// retried. Each may still be answered, and its `canceled` is the user's
     /// own as much as the retry's.
+    ///
+    /// Not capped: a forgotten nonce turns the user's own cancel into a
+    /// payment-deadline notice. The list only grows through user retries,
+    /// each after a 10 s timeout, and the whole record goes when the window
+    /// closes — a `canceled`, the bond's lock, or the local abandon
+    /// ([`forget_maker_cancels`]).
     superseded: Vec<u64>,
 }
-
-/// How many timed-out cancels one key remembers. Each needs a user retry
-/// after a 10 s timeout; past this the oldest is forgotten, and its late
-/// `canceled` reads as the payment deadline.
-const MAX_SUPERSEDED_MAKER_CANCELS: usize = 8;
 
 /// Maker cancels in flight, keyed by trade pubkey. Apart from
 /// [`pending_requests`] because that key still holds the create's record,
@@ -652,10 +653,6 @@ pub(crate) fn register_maker_cancel(
                 ..
             }) => {
                 superseded.push(replaced);
-                let excess = superseded
-                    .len()
-                    .saturating_sub(MAX_SUPERSEDED_MAKER_CANCELS);
-                superseded.drain(..excess);
                 superseded
             }
             None => Vec::new(),
@@ -690,9 +687,11 @@ pub(crate) fn take_maker_cancel(
     map.remove(trade_pubkey_hex).map(|c| c.tx)
 }
 
-/// A `cant-do` echoing a cancel of this key. The live one's is consumed and
-/// its waiter handed back; a superseded one's only drops that nonce and
-/// answers nobody (`Some(None)`) — the retry waits for its own reply.
+/// A `cant-do` echoing a cancel of this key. The live one's hands its waiter
+/// back; the nonces it superseded stay answerable, since the refusal may be
+/// because one of them already closed the order and its `canceled` is late.
+/// A superseded one's only drops that nonce and answers nobody
+/// (`Some(None)`) — the retry waits for its own reply.
 pub(crate) fn take_maker_cancel_refusal(
     trade_pubkey_hex: &str,
     got: Option<u64>,
@@ -706,7 +705,22 @@ pub(crate) fn take_maker_cancel_refusal(
     if !request_id_matches(entry.request_id, got) {
         return None;
     }
-    map.remove(trade_pubkey_hex).map(|c| c.tx)
+    let tx = entry.tx.take();
+    match entry.superseded.pop() {
+        Some(previous) => entry.request_id = previous,
+        None => {
+            map.remove(trade_pubkey_hex);
+        }
+    }
+    Some(tx)
+}
+
+/// The maker's window on this key is over (the bond locked, the order was
+/// dropped or closed): no reply to any of its cancels can mean anything now.
+pub(crate) fn forget_maker_cancels(trade_pubkey_hex: &str) {
+    if let Ok(mut map) = maker_cancels().lock() {
+        map.remove(trade_pubkey_hex);
+    }
 }
 
 /// The caller stopped waiting (timeout): keep the record for a late reply.

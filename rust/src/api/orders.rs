@@ -3448,7 +3448,7 @@ async fn dispatch_mostro_message(
                         // persisted with the bond reply moves on. Never a
                         // fresh row from this payload — that would drop the
                         // bond.
-                        if !confirm_maker_bond(
+                        if confirm_maker_bond(
                             &daemon_id,
                             &row_state,
                             trade_index,
@@ -3456,6 +3456,9 @@ async fn dispatch_mostro_message(
                         )
                         .await
                         {
+                            // The window is over: its cancels answer nothing.
+                            crate::mostro::pending::forget_maker_cancels(trade_pubkey_hex);
+                        } else {
                             crate::api::logging::blog_info("daemon-msg", format!(
                                 "NewOrder: bond confirmation for order={daemon_id} \
                                  found no WaitingMakerBond row — ignored"
@@ -3504,7 +3507,9 @@ async fn dispatch_mostro_message(
                     // No record (the app restarted while the maker's bond
                     // was outstanding), but the persisted WaitingMakerBond
                     // row of this very trade key says what this is
-                    // (docs/ANTI_ABUSE_BOND.md §6.2 fallback).
+                    // (docs/ANTI_ABUSE_BOND.md §6.2 fallback). The window
+                    // is over: its cancels answer nothing.
+                    crate::mostro::pending::forget_maker_cancels(trade_pubkey_hex);
                 } else if adopt_range_remainder(
                     &daemon_id,
                     kind,
@@ -3638,6 +3643,9 @@ async fn dispatch_mostro_message(
                                 // record waits for a `new-order` that will
                                 // not come.
                                 purge_detached_pending_request(trade_pubkey_hex);
+                                // Nor can any other cancel of the window
+                                // mean anything once it is closed.
+                                crate::mostro::pending::forget_maker_cancels(trade_pubkey_hex);
                                 Some(if own_maker_cancel.0.is_some() {
                                     crate::api::types::TradeUpdateReason::UserCanceled
                                 } else {
@@ -5540,6 +5548,7 @@ pub(crate) async fn abandon_maker_bond(order_id: &str) -> Result<()> {
         // gate above guarantees that happened), and a still-live waiter on
         // this key belongs to a newer attempt this abandon must not kill.
         purge_detached_pending_request(&keys.public_key().to_hex());
+        crate::mostro::pending::forget_maker_cancels(&keys.public_key().to_hex());
     }
     crate::api::logging::blog_info(
         "orders",
@@ -18417,6 +18426,113 @@ mod tests {
                 Some(crate::api::types::TradeUpdateReason::UserCanceled)
             )]
         );
+    }
+
+    /// However many times the user retried, the first cancel's late
+    /// `canceled` is still theirs: no nonce is forgotten while the window
+    /// is open.
+    #[tokio::test]
+    async fn a_late_canceled_after_many_retries_reads_as_the_users() {
+        use crate::mostro::pending::{detach_maker_cancel, register_maker_cancel};
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            42,
+        ))
+        .await
+        .unwrap();
+        let key = "ff00ff82";
+        for nonce in 950..962u64 {
+            let _rx = register_maker_cancel(key, nonce);
+            detach_maker_cancel(key, nonce);
+        }
+        let mut updates = trade_updates_tx().subscribe();
+
+        dispatch_mostro_message(
+            correlated_message(order_uuid, 950, Action::Canceled, None, 2_000),
+            "test-maker-cancel-many-retries",
+            key,
+            42,
+        )
+        .await;
+
+        assert_eq!(
+            drain_reasoned(&mut updates, &order_id),
+            vec![(
+                crate::api::types::OrderStatus::Canceled,
+                Some(crate::api::types::TradeUpdateReason::UserCanceled)
+            )]
+        );
+    }
+
+    /// The retry is refused because the first cancel already closed the
+    /// order: that first cancel's late `canceled` must still be the user's.
+    #[tokio::test]
+    async fn a_refused_retry_keeps_the_earlier_cancels_answerable() {
+        use crate::mostro::pending::{
+            detach_maker_cancel, register_maker_cancel, take_maker_cancel,
+            take_maker_cancel_refusal,
+        };
+        let key = "ff00ff83";
+        let _first = register_maker_cancel(key, 971);
+        detach_maker_cancel(key, 971);
+        let _retry = register_maker_cancel(key, 972);
+
+        assert!(matches!(
+            take_maker_cancel_refusal(key, Some(972)),
+            Some(Some(_))
+        ));
+        assert!(
+            take_maker_cancel(key, Some(971)).is_some(),
+            "the first cancel is still answerable"
+        );
+    }
+
+    /// Once the bond locks the window is over: the maker's cancels are
+    /// forgotten with it.
+    #[tokio::test]
+    async fn a_bond_lock_forgets_the_makers_cancels() {
+        use crate::mostro::pending::{
+            detach_maker_cancel, register_maker_cancel, take_maker_cancel,
+        };
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            43,
+        ))
+        .await
+        .unwrap();
+        let key = "ff00ff84";
+        let _rx = register_maker_cancel(key, 981);
+        detach_maker_cancel(key, 981);
+
+        dispatch_mostro_message(
+            correlated_message(
+                order_uuid,
+                982,
+                Action::NewOrder,
+                Some(Payload::Order(pending_small_order(order_uuid))),
+                2_000,
+            ),
+            "test-maker-bond-lock-forgets",
+            key,
+            43,
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, crate::api::types::OrderStatus::Pending);
+        assert!(take_maker_cancel(key, Some(981)).is_none());
     }
 
     /// A late `cant-do` for a superseded cancel answers nobody: the retry

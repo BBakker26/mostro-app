@@ -46,7 +46,7 @@ A buy or sell offer on the Mostro network.
 | payment_method | String | Fiat payment method description |
 | premium | f64 | Price premium/discount percentage |
 | creator_pubkey | String | Public key of order creator |
-| created_at | Timestamp | When order was created |
+| created_at | Timestamp | When order was created: the Kind 38383 `published_at` tag, else the legacy `created_at` tag, else the event's `created_at`; a tag value is capped at the event's `created_at` |
 | expires_at | Timestamp? | Expiration time (null if no expiry) |
 | nostr_event_id | String? | Kind 38383 event ID on relay |
 | is_mine | bool | Whether current user created this order |

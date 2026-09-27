@@ -4,7 +4,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-blue?logo=flutter)](https://flutter.dev)
 [![Rust](https://img.shields.io/badge/Rust-1.94+-orange?logo=rust)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20iOS%20%7C%20Web%20%7C%20macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#supported-platforms)
 
 ---
@@ -38,7 +38,7 @@ Mostro App is the official cross-platform client for the [Mostro](https://mostro
 - **Lightning-native** — All BTC settlements happen via Lightning invoices (BOLT 11). Supports [Nostr Wallet Connect (NWC)](https://nwc.dev) for automated invoice generation.
 - **Censorship-resistant** — Built on the Nostr network; no central server or domain to block.
 - **Multi-platform** — Single codebase targets Android, iOS, Web (PWA), macOS, Windows, and Linux.
-- **Open source** — MIT licensed. Fully auditable, no proprietary components.
+- **Open source** — AGPLv3 licensed. Fully auditable, no proprietary components.
 
 ---
 
@@ -224,7 +224,7 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 | Platform | Status |
 |----------|--------|
 | Android 5.0+ | Supported |
-| iOS 13+ | Supported |
+| iOS 14+ | Supported |
 | Web (PWA) | Supported (WASM) |
 | macOS 10.15+ | Supported |
 | Windows 10+ | Supported |
@@ -476,7 +476,7 @@ If you modify any `#[frb]`-annotated Rust function in `rust/src/api/`:
 
 This wraps `flutter_rust_bridge_codegen generate` and refuses to run when your local codegen CLI does not match the version pinned in `pubspec.yaml` — generating with a mismatched CLI produces bindings that fail to compile. Pass `--check` to verify without generating.
 
-> **Do not hand-edit** files under `lib/src/rust/` — they are auto-generated and will be overwritten on the next codegen run. They are gitignored and regenerated on the fly, both locally and in CI, so there is nothing to commit.
+> **Do not hand-edit** files under `lib/src/rust/` — they are auto-generated and will be overwritten on the next codegen run. They are **committed**: commit the regenerated files in the same commit as the `rust/src/api/` change, and CI fails if they drift. See [CONTRIBUTING.md → Generated code](CONTRIBUTING.md#generated-code), which also covers resolving conflicts in them.
 
 ---
 
@@ -500,7 +500,7 @@ app/
 │   │   ├── about/              #     Mostro node info
 │   │   └── settings/           #     Relays, wallet, preferences
 │   ├── shared/                 #   Cross-feature providers, widgets, utils
-│   ├── l10n/                   #   Localization strings (EN, ES, IT, FR, DE)
+│   ├── l10n/                   #   Localization strings (EN, ES, IT, FR, DE, NL)
 │   └── src/rust/               #   Auto-generated Rust bridge (DO NOT EDIT)
 │
 ├── rust/                       # Rust core
@@ -577,7 +577,7 @@ Contributions are welcome. Please read this section before opening an issue or p
 
 ### Development Notes
 
-- **Bridge changes:** Any modification to `rust/src/api/` requires re-running `./scripts/frb-generate.sh`. The generated files are gitignored — there is nothing to commit.
+- **Bridge changes:** Any modification to `rust/src/api/` requires re-running `./scripts/frb-generate.sh` and committing the regenerated files with the change. For conflicts in them, see [CONTRIBUTING.md → Generated code](CONTRIBUTING.md#generated-code).
 - **Serde conventions:** `mostro-core` uses `#[serde(rename_all = "kebab-case")]` — all protocol status strings on the wire are kebab-case (e.g., `"waiting-buyer-invoice"`, `"fiat-sent"`, `"in-progress"`).
 - **`pub` vs `pub(crate)`:** Only types that must be exposed to the Dart bridge should be `pub`. Internal helpers and types wrapping `nostr-sdk` structs should be `pub(crate)` to prevent broken FRB stub generation.
 - **Key derivation:** Per-trade keys follow BIP-32 path `m/44'/1237'/38383'/0/N`. Never reuse the master identity key for trade-level messages.
@@ -600,13 +600,21 @@ The app is localized in:
 | Italian | `it` | `lib/l10n/app_it.arb` |
 | French | `fr` | `lib/l10n/app_fr.arb` |
 | German | `de` | `lib/l10n/app_de.arb` |
+| Dutch | `nl` | `lib/l10n/app_nl.arb` |
 
 To add a new language:
 
 1. Copy `lib/l10n/app_en.arb` to `lib/l10n/app_<code>.arb`
 2. Translate all string values (keep the `"@@locale"` key correct)
 3. Run `flutter gen-l10n` to regenerate the Dart localizations — it auto-detects the new `.arb` file (no `l10n.yaml` change needed)
-4. Open a PR — translation contributions are always welcome
+4. Register the language in the places that keep their own list:
+   - `lib/features/settings/widgets/language_selector.dart`: the English and native name in `languageNames` (the picker already lists every `.arb` file; without a name it shows the bare code)
+   - `rust/src/api/settings.rs`: the code in `SUPPORTED_LOCALES`, then `./scripts/frb-generate.sh`
+   - `web/push_worker_logic.js`: the locale's `pushNewMessageBody` in `CHAT_WAKE_BODIES` (a service worker cannot read `.arb` files)
+   - `lib/features/walkthrough/utils/highlight_config.dart`: the locale's wording of each highlighted onboarding phrase
+   - `specs/006-announcement-channel/spec.md`: the locales every announcement must carry, in the rule and in the JSON example
+5. Run `flutter test` and `cargo test`: `test/l10n/locale_lists_test.dart` checks the picker names, the Rust list, the push worker and spec 006 against the `.arb` files, and `highlight_config_test.dart` checks the walkthrough phrases per locale, so a place missed in step 4 fails there
+6. Open a PR — translation contributions are always welcome
 
 ---
 
@@ -633,7 +641,7 @@ We aim to acknowledge reports within 72 hours and provide a fix within 30 days f
 
 ## License
 
-MIT License
+GNU Affero General Public License v3.0 or later
 
 See [LICENSE](LICENSE) for the full text.
 

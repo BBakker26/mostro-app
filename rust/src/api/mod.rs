@@ -3,13 +3,19 @@ pub mod cashu;
 pub mod disputes;
 pub mod escrow;
 pub mod identity;
+pub mod invoice;
 pub mod logging;
 pub mod messages;
+pub mod node_stats;
+pub mod nodes;
 pub mod nostr;
 pub mod nwc;
 pub mod orders;
+pub mod push;
 pub mod reputation;
+pub mod restore_progress;
 pub mod settings;
+pub mod trade_touch;
 pub mod types;
 
 pub fn get_app_version() -> String {

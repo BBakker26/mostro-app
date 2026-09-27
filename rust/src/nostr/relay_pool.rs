@@ -18,9 +18,25 @@ use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 
 use crate::api::types::{ConnectionState, RelayInfo, RelaySource, RelayStatus};
+use crate::nostr::relay_probe::{self, RelayLiveness};
 
 /// How often the background task polls each relay's SDK status (seconds).
 const STATUS_POLL_INTERVAL_SECS: u64 = 2;
+
+/// How often the probe monitor looks for a relay worth asking. Shorter than
+/// `relay_probe::PROBE_INTERVAL`, which is what actually spaces the probes:
+/// the tick only decides when a relay becomes eligible.
+const PROBE_TICK: Duration = Duration::from_secs(30);
+
+/// How often it looks while the pool has never been connected, and for how
+/// long. The first `Online` starts the order-book subscription, the outbox
+/// flush and the capability fetch, and a relay handshake is over in a few
+/// hundred milliseconds — at the steady interval the app sat connected but
+/// idle for up to two seconds of every cold start. Each look is four map
+/// reads, so the fast cadence is free; the window keeps a pool of unreachable
+/// relays from holding it forever.
+const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const STARTUP_POLL_WINDOW: Duration = Duration::from_secs(10);
 
 /// Shared relay pool state.
 pub struct RelayPool {
@@ -36,6 +52,10 @@ pub struct RelayPool {
     /// only ever sees real transitions — see `broadcast_if_changed`.
     last_broadcast: Arc<Mutex<Option<ConnectionState>>>,
     relay_tx: broadcast::Sender<RelayInfo>,
+    /// When each relay was last heard from and last asked, for the liveness
+    /// probe — the one recovery signal that does not wait for the SDK to
+    /// notice something (`nostr::relay_probe`).
+    liveness: Arc<RwLock<RelayLiveness>>,
 }
 
 impl RelayPool {
@@ -55,6 +75,7 @@ impl RelayPool {
             conn_tx,
             last_broadcast: Arc::new(Mutex::new(None)),
             relay_tx,
+            liveness: Arc::new(RwLock::new(RelayLiveness::default())),
         });
 
         for url in relay_urls {
@@ -63,15 +84,17 @@ impl RelayPool {
 
         client.connect().await;
 
-        // Give the SDK a moment to initiate WebSocket handshakes before the
-        // first status poll.  Without this the initial broadcast is always
-        // Reconnecting (every relay is still in Pending/Connecting state).
-        crate::rt::time::sleep(Duration::from_millis(500)).await;
-
-        // Broadcast initial connection state after all relays are wired up.
+        // The initial state. It reads `Reconnecting` whatever the sockets are
+        // doing: `relays[].status` is written by the status monitor alone, and
+        // that has not run yet. (A 500 ms sleep used to sit here "so the
+        // handshakes can start" — it could not change the outcome, and every
+        // cold start paid for it before the first frame.) The monitor's
+        // start-up cadence is what reports the real state promptly.
         pool.broadcast_connection_state().await;
 
         pool.spawn_status_monitor();
+        pool.spawn_liveness_observer();
+        pool.spawn_probe_monitor();
         Ok(pool)
     }
 
@@ -145,6 +168,9 @@ impl RelayPool {
         if matches!(removed.source, RelaySource::MostroDiscovered) {
             self.blacklist.write().await.insert(url.to_string());
         }
+        // Otherwise a URL re-added later inherits the stamps of its previous
+        // life, and is judged against a window it was never in.
+        self.liveness.write().await.forget(url);
 
         self.client
             .remove_relay(url)
@@ -258,8 +284,11 @@ impl RelayPool {
         let relay_tx = self.relay_tx.clone();
 
         crate::rt::spawn(async move {
+            let started = crate::rt::time::Instant::now();
+            let mut has_connected = false;
             loop {
-                crate::rt::time::sleep(Duration::from_secs(STATUS_POLL_INTERVAL_SECS)).await;
+                crate::rt::time::sleep(status_poll_interval(started.elapsed(), has_connected))
+                    .await;
 
                 let relay_urls: Vec<String> =
                     relays.read().await.iter().map(|r| r.url.clone()).collect();
@@ -296,6 +325,7 @@ impl RelayPool {
                             info.status = new_status;
                             if matches!(info.status, RelayStatus::Connected) {
                                 info.last_connected_at = Some(unix_now());
+                                has_connected = true;
                             }
                             any_changed = true;
                             let _ = relay_tx.send(info.clone());
@@ -311,9 +341,104 @@ impl RelayPool {
             }
         });
     }
+
+    /// Stamp every relay we hear from, so the probe can skip the ones that
+    /// are plainly working.
+    ///
+    /// One pool-owned receiver rather than instrumenting each consumer: the
+    /// signal has to outlive any single subscription being dropped and
+    /// rebuilt. `Message` covers every relay message, not only novel events,
+    /// which is the broadest "this socket delivers" evidence available.
+    fn spawn_liveness_observer(self: &Arc<Self>) {
+        let client = self.client.clone();
+        let liveness = self.liveness.clone();
+
+        crate::rt::spawn(async move {
+            use nostr_sdk::prelude::{ClientNotification, StreamExt};
+
+            let mut notifications = client.notifications();
+            loop {
+                match notifications.next().await {
+                    Some(ClientNotification::Event { relay_url, .. })
+                    | Some(ClientNotification::Message { relay_url, .. }) => {
+                        liveness
+                            .write()
+                            .await
+                            .record_traffic(relay_url.as_str(), unix_now());
+                    }
+                    Some(_) => continue,
+                    None => break,
+                }
+            }
+        });
+    }
+
+    /// Ask a quiet `Connected` relay whether it is still there, and bounce
+    /// its connection when it does not answer.
+    ///
+    /// The reconnect is the point: it produces the `→Connected` transition
+    /// `live_subs` already repairs on, and that repair re-REQs — which is
+    /// what replays what was missed. Measured, without it the client stayed
+    /// deaf for six minutes without logging a line, and the five events it
+    /// missed were never requested again.
+    fn spawn_probe_monitor(self: &Arc<Self>) {
+        let client = self.client.clone();
+        let relays = self.relays.clone();
+        let liveness = self.liveness.clone();
+
+        crate::rt::spawn(async move {
+            loop {
+                crate::rt::time::sleep(PROBE_TICK).await;
+
+                let relay_urls: Vec<String> =
+                    relays.read().await.iter().map(|r| r.url.clone()).collect();
+
+                for url in relay_urls {
+                    let Ok(Some(sdk_relay)) = client.relay(&url).await else {
+                        continue;
+                    };
+                    let now = unix_now();
+                    let (last_seen, last_probe) = {
+                        let liveness_r = liveness.read().await;
+                        (liveness_r.last_seen(&url), liveness_r.last_probe(&url))
+                    };
+                    if !relay_probe::should_probe(sdk_relay.status(), last_seen, last_probe, now) {
+                        continue;
+                    }
+                    // Stamped on the attempt, not the outcome: a relay that
+                    // never answers must not be re-asked on the next tick.
+                    liveness.write().await.record_probe(&url, now);
+
+                    if relay_probe::probe_once(&sdk_relay).await {
+                        continue;
+                    }
+                    crate::api::logging::blog_warn(
+                        "relay",
+                        format!(
+                            "liveness probe unanswered relay={} — Connected but not \
+                             delivering; reconnecting it (#291)",
+                            crate::api::logging::display_relay(&url)
+                        ),
+                    );
+                    relay_probe::force_reconnect(&client, &url).await;
+                }
+            }
+        });
+    }
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
+
+/// How long the status monitor waits before its next look: the start-up
+/// cadence until a relay has connected or the start-up window ran out, the
+/// steady interval from then on.
+fn status_poll_interval(since_start: Duration, has_connected: bool) -> Duration {
+    if !has_connected && since_start < STARTUP_POLL_WINDOW {
+        STARTUP_POLL_INTERVAL
+    } else {
+        Duration::from_secs(STATUS_POLL_INTERVAL_SECS)
+    }
+}
 
 /// Derive the state from `relays` and send it on `tx` only if it differs
 /// from what was last sent.
@@ -418,6 +543,35 @@ use crate::rt::unix_now;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A relay handshake takes a few hundred milliseconds, and the first
+    /// `Online` is what starts the order-book subscription: waiting a whole
+    /// steady-state interval for the first look cost a cold start ~2 s.
+    #[test]
+    fn the_monitor_looks_often_until_the_pool_first_connects() {
+        assert_eq!(status_poll_interval(Duration::ZERO, false), STARTUP_POLL_INTERVAL);
+        assert_eq!(
+            status_poll_interval(STARTUP_POLL_WINDOW - Duration::from_millis(1), false),
+            STARTUP_POLL_INTERVAL
+        );
+    }
+
+    #[test]
+    fn the_monitor_settles_once_a_relay_has_connected() {
+        assert_eq!(
+            status_poll_interval(Duration::from_millis(300), true),
+            Duration::from_secs(STATUS_POLL_INTERVAL_SECS)
+        );
+    }
+
+    /// Unreachable relays must not keep the fast cadence up forever.
+    #[test]
+    fn the_monitor_settles_when_nothing_connects_within_the_window() {
+        assert_eq!(
+            status_poll_interval(STARTUP_POLL_WINDOW, false),
+            Duration::from_secs(STATUS_POLL_INTERVAL_SECS)
+        );
+    }
 
     /// One relay connecting and dropping while another stays connected
     /// changes a relay's status without changing the derived state.

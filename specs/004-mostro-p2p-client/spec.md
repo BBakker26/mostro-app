@@ -34,20 +34,21 @@ The notification bell in the app bar displays a red dot (no number) as long as t
 
 ### User Story 2 — Secret Words Backup (Priority: P1)
 
-The user taps the backup reminder or navigates to the Account screen. The Secret Words card displays the mnemonic fully masked (all 12 words hidden behind asterisks). The user taps "Show" to reveal the 12 words. At the exact moment the words become visible, a confirmation checkbox appears below them with the label "I have written down my words and backed them up securely". The backup is only confirmed when the user explicitly taps this checkbox — merely viewing the words is not sufficient. Once the checkbox is ticked, the backup notification is permanently removed, the red dot on the bell disappears permanently, and the checkbox state is persisted across sessions.
+The user taps the backup reminder or navigates to the Account screen. Until the words are backed up, Account shows an amber "Secure your reputation" banner and no Secret Words card; the banner opens a sheet that starts a 3-step backup: write down the 12 words, tap 3 of them asked at random (4 options each, decoys drawn from the mnemonic; only when the mnemonic has too few distinct words are the missing decoys filled from a fixed word list), done. Passing the verification is what confirms the backup — merely viewing the words is not sufficient. Once confirmed, the backup notification is permanently removed, the red dot on the bell disappears permanently, and Account swaps the banner for the Secret Words card (masked, with a "Backed up" chip), persisted across sessions.
 
-**Why this priority**: Funds recovery depends on these words. Without this flow the user has no way to restore their account after device loss. The explicit checkbox — rather than passive viewing — ensures intentional confirmation.
+**Why this priority**: Funds recovery depends on these words. Without this flow the user has no way to restore their account after device loss. Asking 3 words back — rather than passive viewing or a checkbox — proves the words were written down.
 
-**Independent Test**: Can be fully tested by navigating to Account, tapping "Show" on the masked mnemonic, verifying all 12 words are revealed and the checkbox appears, ticking the checkbox, then confirming: (a) the backup notification is gone from the Notifications screen, (b) the red dot on the bell is gone, (c) reopening the app shows no backup reminder.
+**Independent Test**: Can be fully tested by navigating to Account, opening the banner's sheet, running the 3 steps and tapping the 3 correct words, then confirming: (a) the backup notification is gone from the Notifications screen, (b) the red dot on the bell is gone, (c) Account shows the masked Secret Words card and no banner, (d) reopening the app shows no backup reminder.
 
 **Acceptance Scenarios**:
 
-1. **Given** the user arrives at the Account screen (via backup notification tap or direct navigation), **When** the screen loads, **Then** the first card is "Secret Words" and the mnemonic is fully masked — all 12 words are hidden (e.g., shown as bullet characters or asterisks) and none of the words are readable.
-2. **Given** the Secret Words card is showing the masked mnemonic, **When** the user taps the "Show" button, **Then** all 12 words become fully visible in order, AND simultaneously a confirmation checkbox appears below the word list with the label "I have written down my words and backed them up securely".
-3. **Given** the 12 words are visible and the confirmation checkbox is shown, **When** the user has NOT yet ticked the checkbox, **Then** the backup reminder notification remains pinned in the Notifications screen and the red dot on the bell remains active.
-4. **Given** the 12 words are visible and the confirmation checkbox is shown, **When** the user taps the checkbox, **Then** the checkbox becomes checked, the backup is marked as confirmed in persistent storage, the backup reminder notification is permanently removed from the Notifications screen, and the red dot on the notification bell permanently disappears.
-5. **Given** the user has confirmed backup in a previous session, **When** they navigate to the Account screen, **Then** the Secret Words card still shows the masked mnemonic and the "Show" button, but no backup reminder notification or red dot exists anywhere in the app.
-6. **Given** the user generates a new identity (User Story 15), **When** the new mnemonic is created, **Then** the backup confirmation is reset: the backup reminder notification is re-pinned, the red dot reappears, and the checkbox is unchecked.
+1. **Given** the backup is not confirmed, **When** the Account screen loads, **Then** it shows the "Secure your reputation" banner and does not render the Secret Words card.
+2. **Given** the banner's sheet, **When** the user taps "I'll do it later", **Then** the sheet closes and the banner stays on Account.
+3. **Given** the verification step, **When** fewer than the 3 words are answered correctly, **Then** "Confirm" stays disabled; "View words" returns to the words keeping the answered slots; a second wrong pick on the same word returns to the words and starts a new round.
+4. **Given** the 3 words are answered correctly, **When** the user taps "Confirm", **Then** the backup is marked as confirmed in persistent storage, the backup reminder notification is permanently removed from the Notifications screen, and the red dot on the notification bell permanently disappears.
+5. **Given** the backup is confirmed, **When** the user navigates to the Account screen, **Then** it shows the Secret Words card fully masked with a "Backed up" chip and no banner; "Show words" reveals all 12 words in order with only "Hide" and "Copy" (no confirmation is asked again), and leaving the screen masks them again.
+6. **Given** the user generates a new identity (User Story 15), **When** the new mnemonic is stored, **Then** the backup confirmation is reset: the backup reminder notification is re-pinned, the red dot reappears, and Account shows the banner again.
+7. **Given** the user imports an identity from a mnemonic they typed in (User Story 15), **When** the mnemonic is stored, **Then** the backup counts as confirmed: no backup reminder notification is pinned, the bell shows no red dot, and Account shows the Secret Words card — the words came from the user's own backup, so the app MUST NOT ask them to write them down again. A reminder armed earlier (first run, or the replaced identity) is cleared.
 
 ---
 
@@ -65,6 +66,8 @@ A user browses available buy/sell offers in the public order book. The list is o
 2. **Given** an order card is rendered, **When** a user looks at it, **Then** they can see: fiat amount or range, currency code, country flag, price type, premium, payment methods, maker rating, trade count, and days active.
 3. **Given** the user taps the Filter button, **When** they select a currency or payment method, **Then** only matching orders are shown and the offer count updates.
 4. **Given** there are no matching orders for the active filter, **When** the filter is applied, **Then** a "No orders available" empty state is shown.
+5. **Given** the user applied filters, **When** they close the app completely and reopen it, **Then** the same filters are still applied and the Filter chip shows that the book is filtered and how many filters are on (#575).
+6. **Given** filters are applied, **When** the user taps Reset in the Filters dialog or Clear filters in the empty state, **Then** the book is unfiltered and stays unfiltered after the app is reopened.
 
 ---
 
@@ -118,7 +121,7 @@ A buyer (taker of a sell order) completes a trade. Without NWC, they manually en
 2. **Given** a buyer has taken a sell order and NWC IS configured, **When** the order is accepted, **Then** the invoice step is skipped entirely and the buyer proceeds to the active trade view.
 3. **Given** the trade is in "active" status, **When** the buyer views Trade Detail, **Then** they see: trade summary, payment method, order ID, instructions to contact the seller, a "Fiat Sent" primary CTA, a secondary row with outlined Cancel and Dispute buttons, and a persistent chat chip for Contact.
 4. **Given** the buyer has sent fiat payment, **When** they tap "Fiat Sent", **Then** the order status changes to "Fiat sent" and the seller sees instructions to verify and release.
-5. **Given** the seller releases sats, **When** the buyer receives the Lightning payment, **Then** both parties are prompted to rate each other.
+5. **Given** the seller releases sats, **When** the daemon settles the hold invoice, **Then** the seller is prompted to rate the buyer right away; the buyer sees the payout as pending and is prompted to rate the seller once the Lightning payment completes (#586).
 
 ---
 
@@ -192,7 +195,7 @@ After a trade completes, both parties are prompted to rate each other on a 1–5
 
 **Acceptance Scenarios**:
 
-1. **Given** a seller releases sats, **When** the transaction settles, **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen.
+1. **Given** a seller releases sats, **When** the hold invoice settles (`settled-hold-invoice`), **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen — without waiting for the payout to the buyer, which is Mostro's job and may take long if it retries. mostrod sends the seller `rate` with the release and accepts the seller's rating in that status (#586).
 2. **Given** a buyer receives the Lightning payment, **When** the order reaches "success", **Then** the buyer is prompted to rate the seller.
 3. **Given** the user taps "Rate", **When** the rating screen opens, **Then** 5 tappable stars are shown and the Submit button is disabled until at least 1 star is selected.
 4. **Given** the user selects 4 stars and taps Submit, **When** the rating is sent, **Then** the screen closes and the trade moves to a completed state.
@@ -282,6 +285,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 1. **Given** the user opens Account, **When** the screen loads, **Then** they see the masked mnemonic, a privacy mode toggle, and a "Generate New User" option.
 2. **Given** the user is in Reputation mode, **When** they switch to Full Privacy mode, **Then** a new identity is used for trades and no reputation data is accumulated.
 3. **Given** the user generates a new identity, **When** confirmed, **Then** a new 12-word mnemonic is created and the backup reminder reactivates.
+4. **Given** the user imports an identity from a mnemonic, **When** the import succeeds, **Then** the backup reminder does not activate and is cleared if it was already active.
 
 ---
 
@@ -293,7 +297,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - What happens if the Mostro node does not respond when creating an order? → A timeout fires; the order is treated as not created (nothing is shown in My Trades or the order book) and a "no response, try again later" message is shown.
 - What happens if a dispute is opened but no admin is available? → The dispute shows "Initiated" status; the user waits in the Disputes tab until an admin picks up the case.
 - What happens when a user tries to submit a 0-star rating? → The Submit button remains disabled; at least 1 star must be selected.
-- What happens when a cooperative cancel is pending agreement from the other party? → The Cancel button is grayed out (disabled) and a Contact button appears to allow both parties to coordinate.
+- What happens when a cooperative cancel is pending agreement from the other party? → Both sides are told, from the daemon's `cooperative-cancel-initiated-by-{you,peer}`: a Notifications card each, and a notice on the trade screen. The requester's screen drops the Cancel action (the trade stays open; Dispute and the step's primary action stay). The counterparty's Cancel reads "Accept cancel", and its confirmation dialog says the cancel ends the trade for both. The chat card is the Contact button.
 - What happens if the shared key for dispute chat is not yet established? → The dispute chat input is hidden; the system retries key establishment automatically and shows it once available.
 
 ---
@@ -308,22 +312,24 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - **FR-002**: The generated mnemonic MUST be persisted to platform secure storage (iOS Keychain / Android Keystore) immediately after generation, before any UI transition occurs.
 - **FR-002a**: If secure storage persistence fails during first launch, the system MUST: (a) halt onboarding and display a blocking error message instructing the user to check device settings and restart the app; (b) NOT proceed to the walkthrough or any other UI; (c) NOT proceed to the order book in any state where the mnemonic is not durably persisted. Recovery path: the user restarts the app and the system retries persistence on the next launch.
 - **FR-003**: The system MUST display a 6-page illustrated walkthrough on first launch only; it MUST NOT appear on subsequent launches.
-- **FR-004**: Upon successful identity generation on first launch, the system MUST create a backup reminder notification and pin it as the first item in the Notifications screen. This notification MUST NOT be dismissible by swipe-to-dismiss or "Mark all as read" — it can only be removed by the user confirming their backup via the Secret Words checkbox.
+- **FR-004**: Upon successful identity generation on first launch, the system MUST create a backup reminder notification and pin it as the first item in the Notifications screen. This notification MUST NOT be dismissible by swipe-to-dismiss or "Mark all as read" — it can only be removed by the user confirming their backup through the 3-step backup's word verification, or by an identity import (FR-013a), which pins no such notification in the first place.
 - **FR-005**: The notification bell icon in the app bar MUST display a red dot indicator (no number) whenever the backup has not yet been confirmed by the user. Once backup is confirmed, the red dot MUST disappear permanently and MUST NOT reappear unless a new identity is generated.
 - **FR-006**: The notification bell MUST display a numbered badge (pill shape, dark gold) showing the count of unread non-backup notifications once the backup is confirmed. The red dot and the numbered badge are mutually exclusive: the red dot takes priority while backup is pending.
 - **FR-007**: The notification bell MUST play a left-right shake animation (two oscillations, approximately 300 ms, ease-in-out) whenever any indicator becomes active (red dot appears, or unread badge count increases). The animation MUST NOT loop continuously — it fires once per state change.
 - **FR-008**: Tapping the backup reminder notification MUST navigate the user directly to the Account screen.
-- **FR-009**: The Secret Words card on the Account screen MUST display the mnemonic fully masked by default (all 12 words hidden). None of the words are visible until the user explicitly taps "Show".
-- **FR-010**: When the user taps "Show" on the Secret Words card, the system MUST simultaneously: (a) reveal all 12 mnemonic words in order, and (b) display a confirmation checkbox below the word list with the label "I have written down my words and backed them up securely".
-- **FR-011**: The backup MUST only be marked as confirmed when the user explicitly taps the confirmation checkbox. Viewing the words without ticking the checkbox MUST NOT confirm the backup.
-- **FR-012**: When the user ticks the backup confirmation checkbox, the system MUST: (a) persist the confirmed state to local storage, (b) permanently remove the backup reminder notification from the Notifications screen, and (c) permanently remove the red dot from the notification bell. These changes MUST survive app restart.
+- **FR-009**: The Account screen MUST render exactly one of: the "Secure your reputation" banner while the backup is unconfirmed, or the Secret Words card once it is confirmed. The card MUST display the mnemonic fully masked by default; none of the words are visible until the user taps "Show words", and they MUST be masked again when the screen is left. The Account screen does not show the user's public key.
+- **FR-010**: When the user taps "Show words" on the Secret Words card, the system MUST reveal all 12 mnemonic words in order and offer only "Hide" and "Copy" — no confirmation checkbox.
+- **FR-011**: For a generated mnemonic, the backup MUST only be marked as confirmed when the user answers correctly the 3 words the backup flow asks at random. Viewing the words MUST NOT confirm the backup. An imported mnemonic is the one exception (FR-013a).
+- **FR-012**: When the verification is confirmed, the system MUST: (a) persist the confirmed state to local storage, (b) permanently remove the backup reminder notification from the Notifications screen, and (c) permanently remove the red dot from the notification bell. These changes MUST survive app restart.
 - **FR-013**: If the user generates a new identity (via Account screen), the backup confirmation state MUST be reset to unconfirmed, re-triggering the backup reminder notification and the red dot on the bell.
+- **FR-013a**: If the user imports an identity from a mnemonic (via Account screen), the backup confirmation state MUST be set to confirmed instead: no backup reminder notification is pinned, no red dot appears, and any reminder already armed MUST be cleared. An imported mnemonic is one the user already holds, so the app MUST NOT ask for it to be backed up or verified. This is an explicit exception to FR-004 and FR-011. This MUST survive app restart.
 
 **Order Book**
 
 - **FR-014**: The system MUST display a public order book with two tabs (BUY BTC / SELL BTC) labeled from the taker's perspective.
 - **FR-015**: Each order card MUST display: fiat amount or range, currency code, country flag, price type, premium, payment methods, maker rating, total trade count, and days active.
 - **FR-016**: The order book MUST support filtering by fiat currency (multi-select), payment method (multi-select), rating range (slider), and premium range (slider).
+- **FR-016a**: The order-book filters MUST persist across app restarts, as a device preference (a new identity keeps them). A stored value MUST be validated on load — ranges clamped to the slider bounds, an unreadable control reset to "no filter" on its own — and every selected value MUST stay visible in the Filters dialog even when the currency catalogue or the method list no longer offers it, so it can be deselected. While any filter is on, the Filter chip MUST say so and how many are on (#575).
 - **FR-017**: The system MUST display only orders with "pending" status in the public order book.
 - **FR-018**: Orders in the public order book MUST be sorted by ascending expiration time (soonest expiring first).
 
@@ -357,7 +363,17 @@ Users manage their cryptographic identity from the Account screen: view their 12
 **P2P Chat**
 
 - **FR-035**: Each active trade MUST have a dedicated encrypted chat room accessible from the Trade Detail screen via the Contact button.
-- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments.
+- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments, **interoperable with v1** in both directions (#589):
+  - **Sent**: JPEG, PNG and PDF, recognised by their content (never by name or claimed MIME), up to 25 MB. Images are re-encoded before upload, with the orientation applied to the pixels, so EXIF/GPS metadata never leaves the device.
+  - **Received**: everything v1 sends (`image_encrypted`, and `file_encrypted` with `file_type` image, video or document).
+  - **Encryption**: ChaCha20-Poly1305 under the raw ECDH secret with the counterpart — the peer's trade key in the P2P chat, the solver in the dispute chat — the key v1 uses. Files are uploaded to Blossom (BUD-02 `/upload`), each upload signed by a throwaway key, never the identity.
+  - **Download**: verified against the blob hash in its URL before decrypting.
+  - **Storage**: the device caches the encrypted blob only, in an identity-scoped, size-bounded cache; decrypted content stays in memory.
+  - **Solver access**: a solver given `K_conv` reads the P2P chat but cannot open its files, as in v1. Changing that needs a protocol change adopted by both clients.
+  - **Sending (UI)**: the paperclip offers Photo, Camera (where the device has one) and PDF. A file over 25 MB is refused before it is read, and every file is confirmed (name and size) before it is sent. The upload shows as the sender's own bubble with its progress; a failed one says why and offers Retry (when retrying can succeed) and Discard. An upload cannot be cancelled once started. The web build offers Photo and PDF (no camera) since #589 phase 4.
+  - **Viewing (UI)**: a received image is downloaded and decrypted on arrival, as in v1, and drawn at the shape the sender declared; tapping it opens a full-screen viewer with pinch-zoom and Save. Any other file shows a card (name, size, type) and is downloaded only when the user taps Save. Save goes through the system save dialog, where the user chooses; on the web, where there is none, the browser downloads the file.
+  - **Dispute chat (UI)**: the same paperclip, bubbles, viewer and hand-off, keyed to the solver (`send_dispute_file`); the attach sheet says only the solver can open the file. The composer shows only once a solver has taken the dispute (#589 phase 3).
+  - **Handing off (UI)**: a file of a type v1 sends (JPEG, PNG, PDF, DOC, DOCX, MP4, MOV, AVI — judged by the type Rust reports, not the name; a file declared JPEG, PNG or PDF whose bytes are not is reported as `application/octet-stream`) can also be opened in another app ("Open with…", the default tap on a file card) and shared; any other type can only be saved. Both write a temporary copy, under the app's cache, named from a safe character set with the extension of its type; a copy no app took is deleted at once, one handed off expires after 5 minutes; all are swept at start-up and on an identity change, and those past the 5 minutes when the user returns to the app. These copies and Save are the only ways decrypted content reaches disk.
 - **FR-037**: The chat room MUST display the peer's avatar, handle, and provide access to a Trade Information panel and a User Information panel.
 - **FR-038**: The User Information panel MUST display the shared ECDH encryption key as a copyable value so it can optionally be shared with a dispute admin.
 - **FR-039**: Messages MUST appear optimistically immediately after send, before relay confirmation.
@@ -367,7 +383,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 
 - **FR-041**: Users MUST be able to open a dispute from the Trade Detail screen when the trade is in "active" or "fiat-sent" status.
 - **FR-042**: All disputes MUST appear in a dedicated "Disputes" sub-tab within the Chat screen.
-- **FR-043**: Each dispute MUST have a separate encrypted chat room for communication between the user and the assigned admin.
+- **FR-043**: Each dispute MUST have a separate encrypted chat room for communication between the user and the assigned admin. It shows only the dispute channel's messages (never the peer's), text and attachments; the user can write once a solver has taken the dispute, and its status (solver assigned, resolution) updates live (#143).
 - **FR-044**: The dispute chat input MUST be hidden once the dispute is resolved or closed; the chat becomes read-only with a visible lock message.
 - **FR-045**: The seller MUST be able to voluntarily release sats from the Trade Detail screen even while a dispute is active.
 - **FR-046**: The system MUST display the dispute resolution outcome clearly (admin released sats vs. admin refunded seller).
@@ -394,7 +410,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 
 **Settings & Preferences**
 
-- **FR-058**: Users MUST be able to configure: app language (5 languages: EN, ES, IT, FR, DE), default fiat currency, default Lightning address, relay list (add/toggle), push notification preferences, and Mostro node.
+- **FR-058**: Users MUST be able to configure: app language (6 languages: EN, ES, IT, FR, DE, NL), default fiat currency, default Lightning address, relay list (add/toggle), push notification preferences, and Mostro node.
 
 ### Key Entities
 
@@ -419,7 +435,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - **SC-005**: Account recovery via 12 secret words succeeds 100% of the time on a new device — users never permanently lose access to their identity.
 - **SC-006**: Chat messages are delivered to the counterparty within 5 seconds under normal network conditions.
 - **SC-007**: The order book loads and displays available orders within 3 seconds of opening the app on a standard mobile connection.
-- **SC-008**: The app is fully localized in all 5 supported languages (EN, ES, IT, FR, DE) with no untranslated strings visible to users.
+- **SC-008**: The app is fully localized in all 6 supported languages (EN, ES, IT, FR, DE, NL) with no untranslated strings visible to users.
 - **SC-009**: Dispute resolution is reachable within 2 taps from the Trade Detail screen for any active trade.
 - **SC-010**: When NWC is connected and responsive, the manual invoice steps are eliminated for 100% of trades.
 
@@ -430,7 +446,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - The app supports dark mode (default on first launch) and light mode. Both themes must be fully implemented and switchable from Settings.
 - The Mostro protocol over Nostr is the sole backend transport; no centralized server or REST API is used.
 - Hold invoices are a protocol-level constraint for securing seller funds during a trade; the app cannot change this mechanism.
-- The 5 languages (EN, ES, IT, FR, DE) are covered by the existing v1 localization files; new strings follow the same format.
+- The original 5 languages (EN, ES, IT, FR, DE) are covered by the existing v1 localization files; new strings follow the same format. Dutch (NL) was added later.
 - "Days active" in reputation refers to days since the user's first recorded rating, not account creation date.
 - The app targets mobile (iOS and Android), web (PWA), and desktop (macOS, Windows, Linux) as per Constitution Principle V. Web is not optional — it must be a fully functional target from day one. Mobile is the primary design reference.
 - Push notifications use a background delivery mechanism; in-app notifications handle foreground delivery.

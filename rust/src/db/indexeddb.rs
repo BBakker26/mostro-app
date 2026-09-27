@@ -18,16 +18,17 @@
 /// stop every order from being created.
 use anyhow::{anyhow, Result};
 use indexed_db_futures::prelude::*;
-use web_sys::wasm_bindgen::JsValue;
+use web_sys::wasm_bindgen::{JsCast, JsValue};
 
 use crate::api::types::{
     ChatMessage, IdentityInfo, OrderInfo, QueuedMessageStatus, RelayInfo, TradeInfo,
 };
-use crate::db::{trade_json, web_lock, Storage};
+use crate::db::blob_cache::{blobs_to_evict, BlobEntry, WEB_ATTACHMENT_CACHE_BYTES};
+use crate::db::{settings_keys, trade_json, web_lock, Storage};
 use crate::queue::outbox::QueuedMessage;
 
 /// Bumped when a store is added; `open_db` creates whatever is missing.
-const DB_VERSION: u32 = 3;
+const DB_VERSION: u32 = 5;
 const MESSAGES_STORE: &str = "messages";
 const SETTINGS_STORE: &str = "settings";
 const TRADES_STORE: &str = "trades";
@@ -36,13 +37,19 @@ const ORDERS_STORE: &str = "orders";
 const RELAYS_STORE: &str = "relays";
 const IDENTITY_STORE: &str = "identity";
 const OUTBOX_STORE: &str = "queued_messages";
+const BOND_CLAIMS_STORE: &str = "bond_claims";
+/// Encrypted attachment blobs (#589 phase 4) as `Uint8Array`s keyed by their
+/// SHA-256, and a small index of them (a [`BlobEntry`] JSON per hash) so the
+/// cache can be trimmed without loading every blob.
+const ATTACHMENT_BLOBS_STORE: &str = "attachment_blobs";
+const ATTACHMENT_INDEX_STORE: &str = "attachment_blob_index";
 /// The single identity document's key, mirroring SQLite's `id = 1` row.
 const IDENTITY_KEY: &str = "1";
 /// Origin-wide lock names (see [`web_lock`]): one per store whose documents
 /// are read, changed and written back as a whole.
 const TRADES_LOCK: &str = "mostro:db:trades";
 const OUTBOX_LOCK: &str = "mostro:db:queued_messages";
-const ALL_STORES: [&str; 8] = [
+const ALL_STORES: [&str; 11] = [
     MESSAGES_STORE,
     SETTINGS_STORE,
     TRADES_STORE,
@@ -51,6 +58,9 @@ const ALL_STORES: [&str; 8] = [
     RELAYS_STORE,
     IDENTITY_STORE,
     OUTBOX_STORE,
+    BOND_CLAIMS_STORE,
+    ATTACHMENT_BLOBS_STORE,
+    ATTACHMENT_INDEX_STORE,
 ];
 
 /// Map an opaque JS-side error into an `anyhow` error the trait can carry.
@@ -344,6 +354,24 @@ impl Storage for IndexedDbStorage {
         Ok(msgs)
     }
 
+    async fn list_unread_messages(&self) -> Result<Vec<ChatMessage>> {
+        let mut msgs: Vec<ChatMessage> = self
+            .get_all_strings(MESSAGES_STORE)
+            .await?
+            .into_iter()
+            .filter_map(|json| match serde_json::from_str::<ChatMessage>(&json) {
+                Ok(msg) => Some(msg),
+                Err(e) => {
+                    log::warn!("[db] skipping unread message: deserialization failed: {e}");
+                    None
+                }
+            })
+            .collect();
+        msgs.retain(|m| !m.is_read);
+        msgs.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        Ok(msgs)
+    }
+
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()> {
         let unread: Vec<ChatMessage> = self
             .list_messages(trade_id)
@@ -477,6 +505,75 @@ impl Storage for IndexedDbStorage {
         self.clear_store(TRADE_KEYS_STORE).await
     }
 
+    async fn clear_identity_data(&self) -> Result<()> {
+        let db = self.open_db().await?;
+
+        // Pass 1, read-only: which settings keys are the identity's. The
+        // store is shared with device preferences, so it cannot be cleared.
+        let scoped_keys: Vec<String> = {
+            let tx = db
+                .transaction_on_one_with_mode(SETTINGS_STORE, IdbTransactionMode::Readonly)
+                .map_err(|e| js_err("tx open", e))?;
+            let store = tx
+                .object_store(SETTINGS_STORE)
+                .map_err(|e| js_err("store open", e))?;
+            store
+                .get_all_keys()
+                .map_err(|e| js_err("get_all_keys", e))?
+                .await
+                .map_err(|e| js_err("get_all_keys await", e))?
+                .iter()
+                .filter_map(|k| k.as_string())
+                .filter(|key| {
+                    settings_keys::IDENTITY_SCOPED_PREFIXES
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+                        || key == settings_keys::BOND_CLAIM_RETAINED_NODES
+                })
+                .collect()
+        };
+
+        // Pass 2, one read-write transaction over every store: all of it
+        // commits or none does. A half-wiped database would show the new
+        // user some of the old one's rows, which is the bug this closes.
+        //
+        // Every request is queued before the first `await`. A transaction is
+        // only active while its own callbacks run, and a Rust future resumes
+        // from a later task — so awaiting between requests would make the
+        // next one hit an inactive transaction (see `patch_serial`). That is
+        // also why the keys are read in a transaction of their own.
+        const WIPED: [&str; 7] = [
+            TRADES_STORE,
+            MESSAGES_STORE,
+            BOND_CLAIMS_STORE,
+            ATTACHMENT_BLOBS_STORE,
+            ATTACHMENT_INDEX_STORE,
+            OUTBOX_STORE,
+            ORDERS_STORE,
+        ];
+        let mut stores = WIPED.to_vec();
+        stores.push(SETTINGS_STORE);
+        let tx = db
+            .transaction_on_multi_with_mode(&stores, IdbTransactionMode::Readwrite)
+            .map_err(|e| js_err("tx open", e))?;
+        for name in WIPED {
+            tx.object_store(name)
+                .map_err(|e| js_err("store open", e))?
+                .clear()
+                .map_err(|e| js_err("clear", e))?;
+        }
+        let settings = tx
+            .object_store(SETTINGS_STORE)
+            .map_err(|e| js_err("store open", e))?;
+        for key in &scoped_keys {
+            settings
+                .delete_owned(key.as_str())
+                .map_err(|e| js_err("delete", e))?;
+        }
+        tx.await.into_result().map_err(|e| js_err("tx commit", e))?;
+        Ok(())
+    }
+
     // ── Settings KV — fully implemented (chat cursor + preferences, #246) ───
 
     async fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -508,15 +605,19 @@ impl Storage for IndexedDbStorage {
     }
 
     async fn delete_trade_by_order_id(&self, order_id: &str) -> Result<()> {
-        // `trades.id` is a fresh UUID for takers, so the document is found
-        // through the order id stored inside it. Messages stay untouched.
+        // `trades.id` is a fresh UUID for takers, so documents are found
+        // through the order id stored inside them — every one of them, as
+        // SQLite's `DELETE … WHERE` does: `take_order` relies on this to leave
+        // one row per order after a retake. Messages stay untouched.
         // Serialised with the patches so a delete never races one.
         let _section = self.exclusive(TRADES_LOCK).await;
-        let Some(doc) = self.trade_document_by_order_id(order_id).await? else {
-            return Ok(());
-        };
-        if let Some(id) = doc.get("id").and_then(serde_json::Value::as_str) {
-            self.delete_key(TRADES_STORE, id).await?;
+        for doc in self.trade_documents().await? {
+            if trade_json::order_id_of(&doc) != Some(order_id) {
+                continue;
+            }
+            if let Some(id) = doc.get("id").and_then(serde_json::Value::as_str) {
+                self.delete_key(TRADES_STORE, id).await?;
+            }
         }
         Ok(())
     }
@@ -554,9 +655,29 @@ impl Storage for IndexedDbStorage {
         .await
     }
 
+    async fn update_trade_bond(
+        &self,
+        order_id: &str,
+        bond: &crate::api::types::BondInfo,
+    ) -> Result<()> {
+        self.patch_trade_by_order_id(order_id, |doc| trade_json::set_bond(doc, bond))
+            .await
+    }
+
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()> {
         self.patch_trade_by_order_id(order_id, |doc| trade_json::mark_rated(doc, rated_at))
             .await
+    }
+
+    async fn set_cooperative_cancel_state(
+        &self,
+        order_id: &str,
+        state: crate::api::types::CooperativeCancelState,
+    ) -> Result<()> {
+        self.patch_trade_by_order_id(order_id, |doc| {
+            trade_json::set_cooperative_cancel_state(doc, &state)
+        })
+        .await
     }
 
     async fn update_trade_counterparty(
@@ -568,6 +689,136 @@ impl Storage for IndexedDbStorage {
             trade_json::set_counterparty(doc, counterparty_pubkey)
         })
         .await
+    }
+
+    // ── Bond payout claims — whole-document, keyed by node:order ────────────
+
+    async fn save_bond_claim(&self, claim: &crate::api::types::BondClaim) -> Result<()> {
+        let json = serde_json::to_string(claim)?;
+        self.put_string(BOND_CLAIMS_STORE, &claim.storage_id(), &json)
+            .await
+    }
+
+    async fn get_bond_claim(
+        &self,
+        node_pubkey: &str,
+        order_id: &str,
+    ) -> Result<Option<crate::api::types::BondClaim>> {
+        Ok(self
+            .get_string(
+                BOND_CLAIMS_STORE,
+                &crate::api::types::bond_claim_key(node_pubkey, order_id),
+            )
+            .await?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?)
+    }
+
+    async fn list_bond_claims(&self) -> Result<Vec<crate::api::types::BondClaim>> {
+        let mut claims: Vec<crate::api::types::BondClaim> = self
+            .get_all_strings(BOND_CLAIMS_STORE)
+            .await?
+            .into_iter()
+            .filter_map(|json| match serde_json::from_str(&json) {
+                Ok(claim) => Some(claim),
+                Err(e) => {
+                    log::warn!("[db] skipping bond claim: deserialization failed: {e}");
+                    None
+                }
+            })
+            .collect();
+        // Same order as SQLite: most recently changed first.
+        claims.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(claims)
+    }
+
+    async fn delete_bond_claim(&self, node_pubkey: &str, order_id: &str) -> Result<()> {
+        self.delete_key(
+            BOND_CLAIMS_STORE,
+            &crate::api::types::bond_claim_key(node_pubkey, order_id),
+        )
+        .await
+    }
+
+    // ── Chat attachment cache (#589 phase 4) — encrypted blobs only ─────────
+
+    async fn save_attachment_blob(&self, sha256: &str, blob: &[u8]) -> Result<()> {
+        let entry = BlobEntry {
+            sha256: sha256.to_string(),
+            size: blob.len() as u64,
+            created_at: crate::rt::unix_now(),
+        };
+        let index = serde_json::to_string(&entry)?;
+        let data = web_sys::js_sys::Uint8Array::from(blob);
+
+        // The blob and its index entry commit together, so the trim never
+        // misses a blob nor deletes one it has no entry for. Both requests
+        // are queued before the first await (see `clear_identity_data`).
+        let db = self.open_db().await?;
+        let stores = [ATTACHMENT_BLOBS_STORE, ATTACHMENT_INDEX_STORE];
+        let tx = db
+            .transaction_on_multi_with_mode(&stores, IdbTransactionMode::Readwrite)
+            .map_err(|e| js_err("tx open", e))?;
+        tx.object_store(ATTACHMENT_BLOBS_STORE)
+            .map_err(|e| js_err("store open", e))?
+            .put_key_val_owned(sha256, &data)
+            .map_err(|e| js_err("put", e))?;
+        tx.object_store(ATTACHMENT_INDEX_STORE)
+            .map_err(|e| js_err("store open", e))?
+            .put_key_val_owned(sha256, &JsValue::from_str(&index))
+            .map_err(|e| js_err("put", e))?;
+        tx.await.into_result().map_err(|e| js_err("tx commit", e))?;
+
+        self.trim_attachment_blobs(WEB_ATTACHMENT_CACHE_BYTES).await
+    }
+
+    async fn get_attachment_blob(&self, sha256: &str) -> Result<Option<Vec<u8>>> {
+        let db = self.open_db().await?;
+        let tx = db
+            .transaction_on_one_with_mode(ATTACHMENT_BLOBS_STORE, IdbTransactionMode::Readonly)
+            .map_err(|e| js_err("tx open", e))?;
+        let value = tx
+            .object_store(ATTACHMENT_BLOBS_STORE)
+            .map_err(|e| js_err("store open", e))?
+            .get_owned(sha256)
+            .map_err(|e| js_err("get", e))?
+            .await
+            .map_err(|e| js_err("get await", e))?;
+        Ok(value
+            .filter(JsCast::is_instance_of::<web_sys::js_sys::Uint8Array>)
+            .map(|v| web_sys::js_sys::Uint8Array::from(v).to_vec()))
+    }
+}
+
+impl IndexedDbStorage {
+    /// Keep the attachment cache within `cap` bytes, oldest blobs first out.
+    /// Reads only the index; each evicted blob goes with its entry.
+    async fn trim_attachment_blobs(&self, cap: u64) -> Result<()> {
+        let entries = self
+            .get_all_strings(ATTACHMENT_INDEX_STORE)
+            .await?
+            .into_iter()
+            .filter_map(|json| serde_json::from_str::<BlobEntry>(&json).ok())
+            .collect();
+        let evicted = blobs_to_evict(entries, cap);
+        if evicted.is_empty() {
+            return Ok(());
+        }
+        let db = self.open_db().await?;
+        let stores = [ATTACHMENT_BLOBS_STORE, ATTACHMENT_INDEX_STORE];
+        let tx = db
+            .transaction_on_multi_with_mode(&stores, IdbTransactionMode::Readwrite)
+            .map_err(|e| js_err("tx open", e))?;
+        for name in stores {
+            let store = tx.object_store(name).map_err(|e| js_err("store open", e))?;
+            for sha256 in &evicted {
+                store
+                    .delete_owned(sha256.as_str())
+                    .map_err(|e| js_err("delete", e))?;
+            }
+        }
+        tx.await.into_result().map_err(|e| js_err("tx commit", e))?;
+        Ok(())
     }
 }
 

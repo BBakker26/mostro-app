@@ -46,7 +46,7 @@ A buy or sell offer on the Mostro network.
 | payment_method | String | Fiat payment method description |
 | premium | f64 | Price premium/discount percentage |
 | creator_pubkey | String | Public key of order creator |
-| created_at | Timestamp | When order was created |
+| created_at | Timestamp | When order was created: the Kind 38383 `published_at` tag, else the legacy `created_at` tag, else the event's `created_at`; a tag value is capped at the event's `created_at` |
 | expires_at | Timestamp? | Expiration time (null if no expiry) |
 | nostr_event_id | String? | Kind 38383 event ID on relay |
 | is_mine | bool | Whether current user created this order |
@@ -117,6 +117,7 @@ trade at a time (v2.0 scope constraint).
 | completed_at | Timestamp? | When trade finished (null if active) |
 | outcome | Enum? | `Success`, `Canceled`, `Expired`, `DisputeWon`, `DisputeLost` |
 | rated_at | Timestamp? | When the local user rated the counterparty; durable marker written by `db.mark_trade_rated` after `submit_rating` publishes (issue #339). "Did I rate this trade" is local knowledge nothing on the wire can rebuild, so the in-memory `RATING_STORE` rehydrates from this on restart — the store stays the cache, this is authoritative on load. The score itself is not persisted (the rated UI shows only a label) |
+| bond | BondInfo? | Anti-abuse bond the node required for this trade (`docs/ANTI_ABUSE_BOND.md` §7.1): `role` (`Maker`/`Taker`), `amount_sats`, `invoice` (the bond bolt11, `None` after a fresh-device restore), `state` (`Requested`/`Locked`/`Released`/`Slashed`), `requested_at`, `expires_at` (decoded from the bolt11), `locked_at`. Null on nodes without bonds and on rows written before the field |
 
 Trade rows are history: they are updated in place (`status`,
 `hold_invoice`, `amount_sats` — see `update_trade_fields`) but never
@@ -131,6 +132,12 @@ in pending/waiting states (never active) is **deleted** rather than kept
 `PaymentLocked`, `AwaitingFiat`, `Complete`
 
 **Special step**: `Disputed` (overlays any step, pauses normal flow)
+
+**Bond windows**: a trade whose `order.status` is `WaitingTakerBond` or
+`WaitingMakerBond` has not started its trade flow; the bond is outstanding.
+Neither status is ever on the public book. An unpaid window is closed locally
+once `bond.expires_at` passes; a maker's also closes at the order's own
+`expires_at`, whichever comes first. A bond already `Locked` never expires.
 
 **Validation rules**:
 - `counterparty_pubkey` MUST differ from current user's public key.
@@ -215,6 +222,42 @@ under different ids.
 
 ---
 
+### BondClaim
+
+The user's share of a counterparty's slashed anti-abuse bond, claimable with a
+Lightning invoice (`docs/ANTI_ABUSE_BOND.md` §6.4, `contracts/bond.md`).
+Created by the daemon's `add-bond-invoice`. **Independent of Trade**: it has no
+foreign key, and it outlives the trade row, which may be completed, canceled or
+wiped by the time the claim arrives.
+
+Stored in `bond_claims` (SQLite table, IndexedDB store), keyed
+`<node_pubkey>:<order_id>`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| order_id | UUID | The order whose counterparty's bond was slashed |
+| node_pubkey | String | The issuing node, and the target of the submission even after a node switch |
+| trade_index | u32? | Key index the request was addressed to (the slashed attempt's); null on rows stored before it was recorded |
+| amount_sats | u64 | The share on offer; the invoice must be for exactly this |
+| slashed_at | Timestamp | When the daemon slashed the bond |
+| deadline_at | Timestamp | `slashed_at` + the node's claim window (default 15 days), frozen on first receipt |
+| phase | Enum | `Pending`, `Submitted`, `Acknowledged`, `Completed`, `Expired` |
+| submitted_invoice | String? | The bolt11 sent |
+| fiat_code | String | Display only |
+| fiat_amount | f64? | Display only |
+| payment_method | String | Display only |
+| updated_at | Timestamp | Last change; list order |
+
+**Validation rules**:
+- A cadence retry of `add-bond-invoice` never re-arms a `Submitted` claim; a
+  re-prompt after `Acknowledged` does.
+- `Completed` is terminal. `Expired` is terminal once `deadline_at` has
+  passed; a re-prompt inside the frozen deadline reopens it as `Pending`.
+- A request with a different `slashed_at` for the same (node, order) replaces
+  the claim, with a deadline computed afresh.
+
+---
+
 ### Settings
 
 User preferences stored locally.
@@ -231,7 +274,11 @@ User preferences stored locally.
 `privacy_mode` (bool — global toggle, applies to future trades),
 `logging_enabled` (bool — verbose diagnostic logging, runtime-only in the Rust
 store: the Flutter layer persists it and re-applies it on launch, so the user's
-choice survives a restart).
+choice survives a restart), `bond_claim_retained_nodes` (JSON map of node
+pubkey → unix seconds: nodes the user switched away from, kept on the kind-14
+filter until then so a claim they issue still arrives), `push_enabled`,
+`push_token`, `push_platform`, `push_registrations` and `push_node_refusals`
+(push registration state, `contracts/push.md`).
 
 ---
 
@@ -278,27 +325,33 @@ A Nostr Wallet Connect wallet connection for automatic invoice payment.
 
 ### FileAttachment
 
-An encrypted file sent or received in trade chat.
+An encrypted file sent or received in trade chat (#589). Stored inside its
+`Message` (`AttachmentInfo`), read from v1's JSON message; nothing about the
+key is stored — it is re-derived (raw ECDH with the counterpart) when needed.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
-| message_id | UUID | FK → Message |
 | file_type | Enum | `Image`, `Document`, `Video` |
-| mime_type | String | MIME type (e.g., "image/jpeg") |
-| file_name | String | Original file name |
-| file_size | u64 | Size in bytes (max 25MB) |
-| blossom_url | String | URL on Blossom server |
-| encryption_nonce | Bytes | 12-byte nonce for ChaCha20-Poly1305 |
-| encryption_key_encrypted | Bytes | Symmetric key encrypted at rest (wrapped by the device master key; plaintext key is ephemeral and held only in memory during encrypt/decrypt) |
-| key_wrapping_id | String | Identifier of the wrapping key used to encrypt `encryption_key_encrypted` |
+| mime_type | String | As declared by the sender (a label; the bytes are sniffed after decrypting) |
+| file_name | String | Sanitized: last path component, no control characters |
+| file_size | u64 | Size before encryption, in bytes (max 25MB) |
+| blossom_url | String | `https://…/<sha256>` |
+| sha256 | String | Hex SHA-256 of the encrypted blob, from the URL |
+| encrypted_size | u64 | `file_size` + 28 (nonce + tag) |
+| width / height | u32? | Pixel size, images only |
 | download_status | Enum | `Pending`, `Downloading`, `Downloaded`, `Failed` |
-| local_path | String? | Path to decrypted file on device (null if not downloaded) |
-| created_at | Timestamp | When attachment was created |
+
+The encrypted blob itself is cached in `attachment_blobs` (keyed by
+`sha256`, still ciphertext, 300 MB cap, oldest evicted first,
+wiped with the identity). On the web it is the IndexedDB store of the same
+name, with an `attachment_blob_index` store of `{sha256, size, created_at}`
+entries the eviction reads instead of the blobs; the cap there is 100 MB,
+since the origin's quota is shared with the rest of the app's data.
 
 **Validation rules**:
 - `file_size` MUST not exceed 26,214,400 bytes (25MB).
-- `file_type` determined from `mime_type`.
+- Only `https://` URLs naming a 64-hex blob hash are accepted; anything else
+  keeps the message as text.
 - Images auto-download; documents and videos are download-on-demand.
 
 ---
@@ -343,4 +396,5 @@ NwcWallet (0..1) ── independent (one active wallet)
 Relay (*) ── independent, no FK relationships
 Settings (*) ── independent key-value store
 MessageQueue (*) ── independent outbox
+BondClaim (*) ── independent of Trade, keyed by (node_pubkey, order_id)
 ```

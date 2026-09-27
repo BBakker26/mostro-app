@@ -164,10 +164,12 @@ impl SessionManager {
     /// but it is not blindly overwritten either. At a confirmed take a session
     /// can already exist for two unrelated reasons, told apart by its index:
     ///
-    /// * **different `trade_key_index`** — a prior failed or timed-out take
-    ///   left it behind. It is stale and must lose: each attempt derives a
-    ///   fresh trade key, so keeping it would leave chat key lookups reading
-    ///   a superseded index (#335). Replaced.
+    /// * **different `trade_key_index`** — an earlier confirmed take of the
+    ///   same order left it behind, never removed (its `Canceled` did not
+    ///   reach this client). A take that was rejected or timed out leaves
+    ///   none: it returns before installing one. It is stale and must lose:
+    ///   each take derives a fresh trade key, so keeping it would leave chat
+    ///   key lookups reading a superseded index (#335). Replaced.
     /// * **same `trade_key_index`** — this take's own session, created by
     ///   `apply_peer_reveal` when the first reply already carried both trade
     ///   pubkeys, with `peer_pubkey` and `shared_key` set (#334/#345). It is
@@ -266,6 +268,12 @@ impl SessionManager {
                 format!("removed order={}", crate::api::logging::short_id(order_id)),
             );
         }
+    }
+
+    /// Drop every session: they hold the trade keys and peer keys of the
+    /// identity being deleted (issue #533).
+    pub async fn clear(&self) {
+        self.sessions.write().await.clear();
     }
 
     /// Store the ECDH admin shared key derived from `adminTookDispute`.

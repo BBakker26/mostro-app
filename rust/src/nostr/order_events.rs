@@ -76,7 +76,10 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     let amount_sats: Option<u64> = get("amt").and_then(|v| v.parse().ok());
     // creator_pubkey is the Mostro node's pubkey (the event author).
     let creator_pubkey = event.pubkey.to_hex();
-    let created_at = event.created_at.as_secs() as i64;
+    let created_at = order_created_at(
+        event,
+        get("published_at").or_else(|| get("created_at")).as_deref(),
+    );
     let expires_at: Option<i64> = get("expiration").and_then(|v| v.parse().ok());
 
     // is_mine is always false for Kind 38383 events: the event author is the
@@ -106,6 +109,26 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
         total_reviews,
         days_active,
     })
+}
+
+/// When the order was created, as opposed to when this revision was published.
+///
+/// Order events are addressable, so the event's own `created_at` moves on every
+/// revision: a taken-then-reverted order would read as brand new and jump to
+/// the top of the book. The NIP-69 `published_at` tag (MostroP2P/mostro#1000)
+/// carries the creation time and stays put. Daemon builds between
+/// MostroP2P/mostro#971 and #1000 sent it as `created_at`, which is read when
+/// `published_at` is absent. Nodes that predate both, or send a value that does
+/// not parse, fall back to the event's time.
+///
+/// Capped at the event's time: an order cannot have been created after a
+/// revision of it was published, and without the cap a node could pin its
+/// orders to the top of a newest-first book with a future date.
+fn order_created_at(event: &Event, tag: Option<&str>) -> i64 {
+    let revision_at = event.created_at.as_secs() as i64;
+    tag.and_then(|v| v.parse::<i64>().ok())
+        .filter(|&t| t > 0)
+        .map_or(revision_at, |t| t.min(revision_at))
 }
 
 /// Parse the `rating` tag value into `(total_rating, total_reviews, days)`.
@@ -264,6 +287,16 @@ pub fn trade_order_filter(mostro_pubkey: &PublicKey, order_id: &str) -> Filter {
         .custom_tag(SingleLetterTag::LOWERCASE_D, order_id)
 }
 
+/// [`trade_order_filter`] for several orders at once: one REQ follows every
+/// order we created or took. Relays cap concurrent REQs per connection
+/// (nos.lol: "too many concurrent REQs"), and one per order filled the cap.
+pub fn watched_orders_filter(mostro_pubkey: &PublicKey, order_ids: &[String]) -> Filter {
+    Filter::new()
+        .kind(Kind::from(KIND_ORDER))
+        .author(*mostro_pubkey)
+        .custom_tags(SingleLetterTag::LOWERCASE_D, order_ids.iter().cloned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +321,80 @@ mod tests {
             ])
             .finalize(&keys)
             .unwrap()
+    }
+
+    /// An order event whose revision was published at `revision_at`, with
+    /// extra `(name, value)` tags.
+    fn order_event_tagged(revision_at: u64, extra: &[(&str, &str)]) -> Event {
+        let keys = Keys::generate();
+        let mut tags = vec![
+            Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+            Tag::parse(["k", "sell"]).unwrap(),
+            Tag::parse(["s", "pending"]).unwrap(),
+            Tag::parse(["f", "USD"]).unwrap(),
+            Tag::parse(["fa", "20"]).unwrap(),
+            Tag::parse(["z", "order"]).unwrap(),
+        ];
+        for (name, value) in extra {
+            tags.push(Tag::parse([*name, *value]).unwrap());
+        }
+        EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags(tags)
+            .custom_created_at(Timestamp::from_secs(revision_at))
+            .finalize(&keys)
+            .unwrap()
+    }
+
+    /// An order event published at `revision_at`, with an optional
+    /// `published_at` tag.
+    fn order_event_created(revision_at: u64, published_tag: Option<&str>) -> Event {
+        match published_tag {
+            Some(value) => order_event_tagged(revision_at, &[("published_at", value)]),
+            None => order_event_tagged(revision_at, &[]),
+        }
+    }
+
+    /// A later revision (published at 5_000) keeps the order's creation time
+    /// from the tag, not the revision's.
+    #[test]
+    fn created_at_comes_from_the_tag_not_the_revision() {
+        let order = parse_order_event(&order_event_created(5_000, Some("1000")), None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// Nodes that predate the tag keep working, with the event's time.
+    #[test]
+    fn created_at_falls_back_to_the_event_without_a_usable_tag() {
+        for tag in [None, Some("soon"), Some("0"), Some("-5")] {
+            let order = parse_order_event(&order_event_created(5_000, tag), None).unwrap();
+            assert_eq!(order.created_at, 5_000, "tag {tag:?}");
+        }
+    }
+
+    /// Daemon builds between MostroP2P/mostro#971 and #1000 named the tag
+    /// `created_at`; it is still read when `published_at` is absent.
+    #[test]
+    fn created_at_reads_the_legacy_created_at_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// With both tags present, `published_at` is the one that counts.
+    #[test]
+    fn created_at_prefers_published_at_over_the_legacy_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "2000"), ("published_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// A creation time later than the revision is impossible; capping it
+    /// stops a node from pinning its orders to the top of the book.
+    #[test]
+    fn created_at_is_capped_at_the_revision_time() {
+        let order =
+            parse_order_event(&order_event_created(5_000, Some("9999999999")), None).unwrap();
+        assert_eq!(order.created_at, 5_000);
     }
 
     #[test]
@@ -554,6 +661,33 @@ mod tests {
             .get(&SingleLetterTag::LOWERCASE_D)
             .expect("filter must carry a `d` tag");
         assert_eq!(d_values.iter().cloned().collect::<Vec<_>>(), vec!["order-1".to_string()]);
+    }
+
+    /// One REQ follows every order we created or took — a REQ per order
+    /// filled nos.lol's per-connection cap — and, like the single-order
+    /// filter, it is unwindowed so each order's latest revision is replayed.
+    #[test]
+    fn watched_orders_filter_follows_every_order_unwindowed() {
+        // Arrange
+        let mostro = Keys::generate().public_key();
+        let ids = ["order-1".to_string(), "order-2".to_string()];
+
+        // Act
+        let filter = watched_orders_filter(&mostro, &ids);
+
+        // Assert
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        assert_eq!(filter.since, None);
+        assert_eq!(filter.limit, None);
+        let d_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::LOWERCASE_D)
+            .expect("filter must carry a `d` tag");
+        assert_eq!(
+            d_values.iter().cloned().collect::<Vec<_>>(),
+            vec!["order-1".to_string(), "order-2".to_string()]
+        );
     }
 
     #[test]

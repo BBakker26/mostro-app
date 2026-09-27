@@ -5,12 +5,16 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/chat/screens/chat_room_screen.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
+import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
@@ -45,8 +49,9 @@ rust_types.ChatMessage _peerMessage(int n, {String? id}) =>
 /// bubbles and hides the tablet side panel.
 Future<void> _pumpChatRoom(
   WidgetTester tester,
-  StreamController<rust_types.ChatMessage> incoming,
-) async {
+  StreamController<rust_types.ChatMessage> incoming, {
+  List<Override> overrides = const [],
+}) async {
   tester.view.physicalSize = const Size(400, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -57,6 +62,7 @@ Future<void> _pumpChatRoom(
     // The sticky header and the nav badge would otherwise reach the bridge.
     chatTradeOrderProvider(_orderId).overrideWith((ref) async => null),
     orderBookNotificationCountProvider.overrideWith((ref) => 0),
+    ...overrides,
   ]);
 
   await tester.pumpWidget(
@@ -240,6 +246,98 @@ void main() {
             reason: 'the reader saw the message; leaving early must not '
                 'leave the room flagged unread');
       });
+    });
+  });
+
+  group('a closed trade', () {
+    testWidgets('opens its conversation read-only, and says why', (
+      tester,
+    ) async {
+      await _pumpChatRoom(
+        tester,
+        incoming,
+        overrides: [
+          chatRowStateProvider(_orderId).overrideWithValue(
+            const ChatRowState(
+              group: ChatGroup.closed,
+              tone: ChatAvatarTone.closed,
+            ),
+          ),
+        ],
+      );
+
+      expect(find.byType(MessageInput), findsNothing);
+      expect(
+        find.text('This trade has ended. The conversation stays here to read.'),
+        findsOneWidget,
+      );
+      await _leaveRoom(tester);
+    });
+
+    testWidgets('holds the composer back while the trade resolves', (
+      tester,
+    ) async {
+      await _pumpChatRoom(
+        tester,
+        incoming,
+        overrides: [
+          chatRowStateProvider(_orderId).overrideWithValue(
+            ChatRowState.resolving,
+          ),
+        ],
+      );
+
+      expect(find.byType(MessageInput), findsNothing);
+      expect(
+        find.text('This trade has ended. The conversation stays here to read.'),
+        findsNothing,
+      );
+      await _leaveRoom(tester);
+    });
+
+    testWidgets('an open one keeps the composer', (tester) async {
+      await _pumpChatRoom(
+        tester,
+        incoming,
+        overrides: [
+          chatRowStateProvider(_orderId).overrideWithValue(
+            const ChatRowState(
+              group: ChatGroup.active,
+              tone: ChatAvatarTone.waiting,
+            ),
+          ),
+        ],
+      );
+
+      expect(find.byType(MessageInput), findsOneWidget);
+      await _leaveRoom(tester);
+    });
+  });
+
+  group('the composer and the keyboard', () {
+    final openChat = chatRowStateProvider(_orderId).overrideWithValue(
+      const ChatRowState(group: ChatGroup.active, tone: ChatAvatarTone.waiting),
+    );
+
+    testWidgets('sits just above the nav bar while the keyboard is closed',
+        (tester) async {
+      await _pumpChatRoom(tester, incoming, overrides: [openChat]);
+
+      final composer = tester.getRect(find.byType(MessageInput));
+      final bar = tester.getRect(find.byType(BottomNavBar));
+      expect(composer.bottom, bar.top - AppSpacing.sm);
+      await _leaveRoom(tester);
+    });
+
+    testWidgets('sits just above an open keyboard, no bar-sized gap',
+        (tester) async {
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.resetViewInsets);
+      await _pumpChatRoom(tester, incoming, overrides: [openChat]);
+
+      final composer = tester.getRect(find.byType(MessageInput));
+      expect(composer.bottom, 800 - 300 - AppSpacing.sm);
+      await _leaveRoom(tester);
     });
   });
 }

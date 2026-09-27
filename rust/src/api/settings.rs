@@ -72,7 +72,7 @@ fn store() -> &'static SettingsStore {
 /// **Keep in sync** with the Flutter side: `AppLocalizations.supportedLocales`
 /// in `lib/l10n/` (or the `flutter_localizations` delegate configuration).
 /// Both lists must be updated together when adding a new language.
-const SUPPORTED_LOCALES: &[&str] = &["en", "es", "it", "fr", "de"];
+const SUPPORTED_LOCALES: &[&str] = &["en", "es", "it", "fr", "de", "nl"];
 
 fn validate_locale(locale: &str) -> Result<()> {
     if SUPPORTED_LOCALES.contains(&locale) {
@@ -144,7 +144,7 @@ pub async fn set_theme(theme: ThemeMode) -> Result<()> {
 
 /// Update the display language.
 ///
-/// **Errors**: `UnsupportedLocale` if `locale` is not one of `en|es|it|fr|de`.
+/// **Errors**: `UnsupportedLocale` if `locale` is not one of `en|es|it|fr|de|nl`.
 pub async fn set_language(locale: String) -> Result<()> {
     validate_locale(&locale)?;
     let snapshot = store().write_with(|s| s.language = locale).await;
@@ -207,14 +207,33 @@ pub fn get_mostro_pubkey() -> String {
 ///
 /// **Errors**: `InvalidPubkey` if `pubkey` is not a valid 64-char hex key.
 pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
+    // Lowercase before persisting: the node registry compares pubkeys as
+    // lowercase hex, and an uppercase active key would read as unknown there
+    // (auto-imported duplicate, never flagged active, undeletable).
+    let pubkey = pubkey.to_lowercase();
     nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
         .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
+    let previous = crate::config::active_mostro_pubkey();
 
-    if let Some(db) = crate::db::app_db::db() {
-        db.save_active_mostro_pubkey(&pubkey).await?;
+    {
+        // Same lock as the node registry: without it, a concurrent
+        // remove_custom_mostro_node could pass its is-active check and then
+        // save a list missing the key this call is about to activate.
+        let _guard = crate::api::nodes::registry_lock().lock().await;
+        if let Some(db) = crate::db::app_db::db() {
+            db.save_active_mostro_pubkey(&pubkey).await?;
+        }
+        crate::config::set_active_mostro_pubkey(Some(pubkey.clone()));
     }
-    crate::config::set_active_mostro_pubkey(Some(pubkey));
+    // Before the refresh drops the previous node's cached policy: a node the
+    // user traded on may still owe them a payout claim (§6.4).
+    if !previous.eq_ignore_ascii_case(&pubkey) {
+        crate::api::bond::retain_previous_node(&previous).await;
+    }
     crate::api::orders::refresh_subscriptions_for_active_node().await;
+    // Selecting a node is the user's "try again" for a push-server refusal
+    // of that node (docs/PUSH_NOTIFICATIONS.md §7.1).
+    crate::api::push::clear_node_refusal(&pubkey).await;
     Ok(())
 }
 
@@ -398,6 +417,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_active_mostro_node_normalizes_to_lowercase() {
+        let _g = settings_lock().lock().unwrap();
+        // The node registry compares pubkeys as lowercase hex; an uppercase
+        // active key would read as unknown there.
+        let upper = crate::config::DEFAULT_MOSTRO_PUBKEY.to_uppercase();
+        set_active_mostro_node(upper).await.unwrap();
+        assert_eq!(get_mostro_pubkey(), crate::config::DEFAULT_MOSTRO_PUBKEY);
+        // Restore the compiled-in default.
+        crate::config::set_active_mostro_pubkey(None);
+    }
+
+    #[tokio::test]
     async fn settings_stream_receives_change() {
         let _g = settings_lock().lock().unwrap();
         let mut stream = on_settings_changed();
@@ -417,5 +448,25 @@ mod tests {
         }
         // Restore
         set_language("en".to_string()).await.unwrap();
+    }
+
+    /// `all_supported_locales_accepted` loops over `SUPPORTED_LOCALES` itself, so it
+    /// cannot notice a locale missing from it. This compares the list with the
+    /// translation files the Flutter side is generated from.
+    #[test]
+    fn supported_locales_match_the_arb_files() {
+        let l10n = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../lib/l10n");
+        let mut from_arb: Vec<String> = std::fs::read_dir(&l10n)
+            .expect("lib/l10n is readable")
+            .filter_map(|entry| {
+                let name = entry.ok()?.file_name().into_string().ok()?;
+                let code = name.strip_prefix("app_")?.strip_suffix(".arb")?;
+                (code.len() == 2).then(|| code.to_string())
+            })
+            .collect();
+        from_arb.sort();
+        let mut supported: Vec<String> = SUPPORTED_LOCALES.iter().map(|s| s.to_string()).collect();
+        supported.sort();
+        assert_eq!(supported, from_arb, "SUPPORTED_LOCALES must equal the app_*.arb files");
     }
 }

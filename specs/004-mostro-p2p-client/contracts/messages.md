@@ -64,6 +64,10 @@ normative list):
   comes online.
 - Isolation: chat runs on its own task and bounded channels; it can never
   block the order state machine, the daemon transport, or a dispute.
+- Push wake: once a peer message or attachment pointer reached the relays,
+  the sender asks the push server to ring the counterparty's trade pubkey,
+  debounced per peer and fire-and-forget (`contracts/push.md`, *Peer wake*).
+  The dispute channel does not.
 
 ## Functions
 
@@ -110,6 +114,22 @@ Get total unread message count across all trades.
 ### on_new_message(trade_id: String) → Stream<ChatMessage>
 Emits when a new message is received for the specified trade.
 
+### on_any_new_message() → AnyMessageStream
+Incoming unread peer and solver messages across all trades for in-app notification
+cards. Delivery is **at least once**: the stream reconciles from persisted unread
+messages at startup, after broadcast lag, and every 60 seconds, even when no new
+relay message arrives. This recovers interrupted or failed Dart card writes without
+bypassing the protocol's durable message deduplication. Recovery includes messages
+whose trade no longer has a live subscription. Already-read messages and the user's
+own messages are excluded; cached read state is checked again before delivery.
+
+Dart atomically records the message id in its processed-event ledger with the card
+update, including events deliberately suppressed by preferences, identity cutoff,
+or an open chat. Repeated deliveries must preserve read/delete state. Card writes,
+reads and deletes commit and publish in invocation order. Mark-read operates on the
+latest persisted record even before UI hydration; a read during event processing
+suppresses that pending event, even if the user has since left the chat.
+
 ### on_unread_count_changed() → Stream<u32>
 Emits when the global unread message count changes.
 
@@ -117,46 +137,61 @@ Emits when the global unread message count changes.
 
 ## File Attachment Functions
 
-### send_file(trade_id: String, file_bytes: Vec<u8>, file_name: String, mime_type: String) → ChatMessage
-Encrypt and upload a file attachment, then send as a chat message.
+### send_file(trade_id: String, file_bytes: Vec<u8>, file_name: String, upload_id: String) → ChatMessage
+Encrypt and upload an image or PDF, then send it in the P2P chat (#589).
 
 **Validation**:
-- File size MUST not exceed 25MB.
-- `mime_type` MUST be a supported type (image/*, application/pdf,
-  text/*, video/*).
-- Trade MUST be active.
+- JPEG, PNG or PDF, recognised by content; ≤ 25MB.
+- The counterpart must be known (the order was taken).
 
 **Flow**:
-1. Encrypt file with ChaCha20-Poly1305 (random nonce, key derived from
-   sharedKey for P2P messages or tradeKey for admin/dispute messages).
-2. Upload encrypted blob to Blossom server.
-3. Send Blossom URL + metadata as a JSON pointer payload (`type: "file"`)
-   through the same chat envelope as text messages.
+1. Images are decoded and re-encoded (orientation applied, EXIF dropped).
+2. Encrypt with ChaCha20-Poly1305: random nonce, key = raw ECDH x-coordinate
+   between our trade key and the peer's (v1's key; not the SHA-256 NIP-04 form).
+3. Upload the blob: `PUT {server}/upload`, `application/octet-stream`,
+   kind 24242 auth signed by a throwaway key. First accepting server of
+   v1's list wins; the URL is `{server}/{sha256}`. The blob is cached.
+4. Send v1's JSON message through the chat envelope:
+   `{"type":"image_encrypted","blossom_url","nonce","mime_type","original_size","width","height","filename","encrypted_size"}`
+   for images, `{"type":"file_encrypted","file_type":"document",…}` for PDFs.
 
-**Returns**: ChatMessage with `has_attachment: true` and attachment metadata.
+`on_attachment_progress(upload_id)` reports 0.1 prepared, 0.3 encrypted,
+0.9 uploaded, 1.0 sent.
 
-**Errors**: `FileTooLarge`, `UnsupportedFileType`, `UploadFailed`,
-`NoActiveTrade`, `SessionNotFound` (only when the session is absent AND
-the trade row cannot rebuild it — see `send_message`; #381).
+**Returns**: ChatMessage with `has_attachment: true`; `content` is the file name.
+
+**Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
+`PeerUnknown`, `UploadFailed`, `SendFailed`, `SessionNotFound` (only when
+the session is absent AND the trade row cannot rebuild it — see
+`send_message`; #381).
 
 ---
 
-### download_attachment(message_id: String) → FileDownloadResult
-Download and decrypt a file attachment.
+### download_attachment(message_id: String) → AttachmentData
+Fetch and decrypt an attachment, in memory.
+
+The encrypted blob comes from the cache or from Blossom — verified against
+the hash in its URL, then cached (still encrypted). Decrypted with the key of
+the conversation it arrived in: the peer's (P2P chat) or the solver's
+(dispute chat) — for the solver's own messages, their authenticated sender,
+so a resolved dispute's history stays openable. Nothing decrypted is written
+to disk. The encrypted blob is cached only while the identity that started
+the transfer is still active: one deleted mid-transfer is not written back. The key is read from
+the trade row when no session is live, so a finished trade's attachments stay
+openable after a restart. Any failure sets the attachment's status to `Failed`.
 
 **Returns**:
 ```text
-FileDownloadResult {
-  local_path: String    # Path to decrypted file on device
-  file_name: String
-  mime_type: String
-  file_size: u64
+AttachmentData {
+  bytes: Vec<u8>        # The decrypted file
+  file_name: String     # Sanitized
+  mime_type: String     # Sniffed (JPEG/PNG/PDF), else the declared one
 }
 ```
 
-**Errors**: `AttachmentNotFound`, `DownloadFailed`, `DecryptionFailed`,
-`SessionNotFound` (only when the session is absent AND the trade row
-cannot rebuild it — see `send_message`; #381).
+**Errors**: `AttachmentNotFound`, `PeerUnknown`, `DownloadFailed`, `DecryptionFailed`,
+`SessionNotFound` (only when no session is live AND no trade row exists —
+the row is used whatever the trade's status, unlike `send_message`).
 
 ---
 
@@ -166,4 +201,5 @@ Get download status of an attachment.
 ## Attachment Streams
 
 ### on_attachment_progress(message_id: String) → Stream<f64>
-Emits download/upload progress (0.0 to 1.0).
+Emits progress (0.0 to 1.0): the download of `message_id`, or the send of the
+`upload_id` given to `send_file`.

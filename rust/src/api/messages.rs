@@ -23,24 +23,28 @@
 /// Streams: `on_new_message(trade_id)`, `on_unread_count_changed()`,
 /// `on_attachment_progress(message_id)`.
 use anyhow::{anyhow, bail, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{broadcast, RwLock};
 
-use crate::api::types::{AttachmentInfo, ChatMessage, DownloadStatus, FileType, MessageType};
+use crate::api::types::{AttachmentInfo, ChatMessage, DownloadStatus, MessageType};
 use crate::db::Storage;
 use crate::nostr::blossom;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-/// Returned by `download_attachment`.
+/// A decrypted attachment, returned by [`download_attachment`].
+///
+/// Handed over in memory: the plaintext never touches the disk here. Dart
+/// renders it, or writes a temporary file only for an explicit "open with…".
 #[derive(Debug, Clone)]
-pub struct FileDownloadResult {
-    /// Absolute path to the decrypted file on the local device.
-    pub local_path: String,
+pub struct AttachmentData {
+    pub bytes: Vec<u8>,
     pub file_name: String,
+    /// What the bytes are, sniffed after decrypting (JPEG, PNG, PDF); for any
+    /// other type, the MIME the sender declared — or `application/octet-stream`
+    /// when the sender declared JPEG, PNG or PDF and the bytes are not.
     pub mime_type: String,
-    pub file_size: u64,
 }
 
 // ── Message store ─────────────────────────────────────────────────────────────
@@ -230,6 +234,42 @@ impl MessageStore {
         store.get(trade_id).cloned().unwrap_or_default()
     }
 
+    /// Reconcile notification delivery from storage, independently of relay
+    /// dedup. Memory wins, including messages read since the DB query began.
+    async fn notification_backlog(&self) -> Result<VecDeque<ChatMessage>> {
+        let persisted = match crate::db::app_db::db() {
+            Some(db) => db.list_unread_messages().await?,
+            None => Vec::new(),
+        };
+        let mut by_id: HashMap<String, ChatMessage> =
+            persisted.into_iter().map(|m| (m.id.clone(), m)).collect();
+        for msg in self.messages.read().await.values().flatten() {
+            if notification_candidate(msg) {
+                by_id.insert(msg.id.clone(), msg.clone());
+            } else {
+                by_id.remove(&msg.id);
+            }
+        }
+        let mut unread: Vec<_> = by_id.into_values().filter(notification_candidate).collect();
+        unread.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        Ok(unread.into())
+    }
+
+    /// A queued clone may have been read while Dart processed an earlier
+    /// event. Use the cache's fresh read flag before delivering it.
+    async fn notification_candidate_now(&self, mut msg: ChatMessage) -> Option<ChatMessage> {
+        if let Some(current) = self
+            .messages
+            .read()
+            .await
+            .get(&msg.trade_id)
+            .and_then(|messages| messages.iter().find(|m| m.id == msg.id))
+        {
+            msg = current.clone();
+        }
+        notification_candidate(&msg).then_some(msg)
+    }
+
     async fn mark_as_read(&self, trade_id: &str) {
         self.ensure_hydrated(trade_id).await;
         let mut store = self.messages.write().await;
@@ -246,6 +286,16 @@ impl MessageStore {
         }
         let unread = self.unread_count_inner().await;
         let _ = self.unread_tx.send(unread);
+    }
+
+    /// Drop every conversation held in memory and publish an unread count
+    /// of zero. `hydrated` goes too, so a later read of the same trade id
+    /// goes back to the database instead of trusting an emptied cache.
+    async fn clear(&self) {
+        self.messages.write().await.clear();
+        self.hydrated.write().await.clear();
+        self.non_durable.write().await.clear();
+        let _ = self.unread_tx.send(0);
     }
 
     async fn unread_count_inner(&self) -> u32 {
@@ -315,18 +365,34 @@ pub(crate) async fn publish_chat_payload_for(
     ctx: &ChatContext,
     payload: &str,
 ) -> Result<nostr_sdk::prelude::Event> {
-    publish_chat_payload(ctx, payload).await
+    publish_chat_payload(ctx, payload).await.map(|p| p.inner)
+}
+
+/// A chat envelope handed to the pool.
+struct PublishedChat {
+    /// The signed inner event: the message's durable identity.
+    inner: nostr_sdk::prelude::Event,
+    /// Whether at least one relay accepted the envelope. `send_event` returns
+    /// `Ok` even when every relay rejected it.
+    delivered: bool,
+}
+
+/// The peer to wake after a publish, if any: only an envelope some relay
+/// accepted is worth a wake. Waking for one that reached nobody rings the
+/// peer for nothing and debounces the wake of the retry that does land.
+fn peer_to_wake(delivered: bool, peer_hex: &str) -> Option<&str> {
+    delivered.then_some(peer_hex)
 }
 
 /// Record a message we just sent to the solver, mirroring what `send_message`
 /// stores for the peer chat: identified by the inner event id so the relay
-/// echo dedups against it, and never unread (we wrote it).
+/// echo dedups against it, and never unread (we wrote it). Returns it.
 pub(crate) async fn store_outgoing_admin_message(
     trade_id: &str,
     ctx: &ChatContext,
     content: &str,
     inner: &nostr_sdk::prelude::Event,
-) {
+) -> ChatMessage {
     let msg = ChatMessage {
         id: inner.id.to_hex(),
         trade_id: trade_id.to_string(),
@@ -339,10 +405,11 @@ pub(crate) async fn store_outgoing_admin_message(
         attachment: None,
         created_at: inner.created_at.as_secs() as i64,
     };
-    let _ = message_store().add_message(msg).await;
+    let _ = message_store().add_message(msg.clone()).await;
+    msg
 }
 
-async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_sdk::prelude::Event> {
+async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<PublishedChat> {
     let (outer, inner) =
         crate::nostr::transport::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
             .await?;
@@ -375,7 +442,10 @@ async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_
             ),
         );
     }
-    Ok(inner)
+    Ok(PublishedChat {
+        inner,
+        delivered: !output.success.is_empty(),
+    })
 }
 
 /// Send an encrypted text message to the trade counterparty.
@@ -433,9 +503,15 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
                             return Err(e);
                         }
                         Err(e) => log::warn!("[messages] send_message trade={trade_id}: {e}"),
-                        Ok(inner) => {
-                            id = inner.id.to_hex();
-                            created_at = inner.created_at.as_secs() as i64;
+                        Ok(published) => {
+                            id = published.inner.id.to_hex();
+                            created_at = published.inner.created_at.as_secs() as i64;
+                            // The envelope's `p` tag is `pub(K_conv)`, which
+                            // the push server cannot match: ask it to ring the
+                            // peer's trade key (docs/PUSH_NOTIFICATIONS.md §7.3).
+                            if let Some(peer) = peer_to_wake(published.delivered, peer_hex) {
+                                crate::api::push::wake_peer(peer);
+                            }
                         }
                     }
                 }
@@ -480,227 +556,369 @@ pub async fn get_unread_count() -> Result<u32> {
     Ok(message_store().unread_count_inner().await)
 }
 
-/// Encrypt, upload, and send a file attachment.
+/// Encrypt, upload and send an image or PDF in the P2P chat (#589).
 ///
-/// Flow:
-/// 1. Validate size (≤ 25 MB) and MIME type.
-/// 2. Derive encryption key from ECDH shared key.
-/// 3. Encrypt with ChaCha20-Poly1305 (`crate::crypto::file_enc`).
-/// 4. Upload encrypted blob to Blossom server.
-/// 5. Send Blossom URL + encryption metadata as NIP-59 message.
+/// 1. Check and clean it ([`crate::attachments::media::prepare_for_send`]):
+///    JPEG, PNG or PDF by content, ≤ 25 MB; images re-encoded without EXIF.
+/// 2. Encrypt with the attachment key — the raw ECDH with the peer, as v1.
+/// 3. Upload the blob to Blossom and keep it, still encrypted, in the cache.
+/// 4. Send the v1 JSON message (`image_encrypted` / `file_encrypted`).
 ///
-/// Returns the sent `ChatMessage` with `has_attachment: true`.
+/// `upload_id` is chosen by the caller: `on_attachment_progress(upload_id)`
+/// reports 0.1 prepared, 0.3 encrypted, 0.9 uploaded, 1.0 sent.
+///
+/// Errors are markers: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
+/// `SessionNotFound`, `PeerUnknown`, `UploadFailed`, `SendFailed`.
 pub async fn send_file(
     trade_id: String,
     file_bytes: Vec<u8>,
     file_name: String,
-    mime_type: String,
+    upload_id: String,
 ) -> Result<ChatMessage> {
     if trade_id.trim().is_empty() {
         bail!("TradeNotFound: trade_id must not be empty");
     }
-    if file_bytes.len() > blossom::MAX_BLOB_SIZE {
-        bail!(
-            "FileTooLarge: {} bytes exceeds 25 MB limit",
-            file_bytes.len()
-        );
-    }
-    if !is_supported_mime_type(&mime_type) {
-        bail!("UnsupportedFileType: {mime_type}");
-    }
+    // The session — rebuilt from the trade row when absent (#381).
+    let target = async {
+        let session = session_or_rebuild(&trade_id)
+            .await
+            .ok_or_else(|| anyhow!("SessionNotFound: {trade_id}"))?;
+        let counterpart_hex = session
+            .peer_pubkey
+            .clone()
+            .ok_or_else(|| anyhow!("PeerUnknown: the counterpart has not taken the order yet"))?;
+        Ok(AttachmentTarget {
+            trade_key_index: session.trade_key_index,
+            counterpart_hex,
+            channel: ChatChannel::Peer,
+        })
+    };
+    send_attachment(&trade_id, file_bytes, file_name, &upload_id, target).await
+}
 
-    // 1. Fetch session once — rebuilt from the trade row when absent (#381) —
-    // and extract everything needed for the entire flow.
-    let session = session_or_rebuild(&trade_id)
-        .await
-        .ok_or_else(|| anyhow!("SessionNotFound: {trade_id}"))?;
+/// Who an attachment goes to: the counterpart its key and envelope are
+/// shared with — the peer, or the solver in the dispute chat — and the
+/// conversation it is filed under.
+pub(crate) struct AttachmentTarget {
+    pub(crate) trade_key_index: u32,
+    pub(crate) counterpart_hex: String,
+    pub(crate) channel: ChatChannel,
+}
 
-    let trade_key_index = session.trade_key_index;
-    let peer_pubkey_hex = session.peer_pubkey.clone();
+/// The send path shared by [`send_file`] and the dispute chat's
+/// `send_dispute_file` (#589 phase 3); see [`send_file`] for the steps.
+///
+/// `target` is awaited only once the file passed its checks, so a file that
+/// could never be sent is refused as such whatever the conversation's state.
+pub(crate) async fn send_attachment(
+    trade_id: &str,
+    file_bytes: Vec<u8>,
+    file_name: String,
+    upload_id: &str,
+    target: impl std::future::Future<Output = Result<AttachmentTarget>>,
+) -> Result<ChatMessage> {
+    use crate::attachments::payload::{AttachmentPayload, FilePayload, ImagePayload};
 
-    let shared_key: [u8; 32] = if let Some(k) = session.shared_key {
-        k
-    } else {
-        let sender_keys = crate::api::identity::get_active_trade_keys(trade_key_index).await?;
-        let peer_hex = peer_pubkey_hex
-            .as_deref()
-            .ok_or_else(|| anyhow!("PeerUnknown: cannot encrypt attachment without peer pubkey"))?;
-        let peer_pubkey = nostr_sdk::prelude::PublicKey::from_hex(peer_hex)
-            .map_err(|e| anyhow!("invalid peer pubkey: {e}"))?;
-        crate::crypto::ecdh::derive_nip04_shared_key(&sender_keys, &peer_pubkey)?
+    let progress = |p: f64| {
+        let _ = message_store()
+            .attachment_tx
+            .send((upload_id.to_string(), p));
+    };
+    let generation = crate::api::identity::identity_generation().await;
+
+    // 1. What it is, decided by the bytes; images leave without metadata.
+    let prepared = crate::attachments::media::prepare_for_send(file_bytes)?;
+    progress(0.1);
+
+    // 2. The conversation, and the key shared with whoever is on the other
+    //    side of it.
+    let target = target.await?;
+    let counterpart = nostr_sdk::prelude::PublicKey::from_hex(&target.counterpart_hex)
+        .map_err(|e| anyhow!("PeerUnknown: invalid counterpart pubkey: {e}"))?;
+    let trade_keys = crate::api::identity::get_active_trade_keys(target.trade_key_index).await?;
+    let key = crate::crypto::file_enc::attachment_key(&trade_keys, &counterpart)?;
+    let encrypted = crate::crypto::file_enc::encrypt_file(&prepared.bytes, &key)
+        .map_err(|e| anyhow!("FileEncryptionFailed: {e}"))?;
+    progress(0.3);
+
+    // 3. Upload, and keep our own copy so our bubble never downloads it.
+    let encrypted_size = encrypted.len() as u64;
+    let nonce_hex = hex::encode(&encrypted[..12]);
+    let uploaded = blossom::upload_blob(encrypted.clone()).await?;
+    let db = crate::db::app_db::db();
+    cache_attachment_blob(db, generation, &uploaded.sha256, &encrypted).await;
+    progress(0.9);
+
+    // 4. The v1 message: JPEG/PNG as `image_encrypted`, the rest as
+    //    `file_encrypted` (v1's `ChatFileUploadHelper` splits them the same way).
+    let file_name = crate::attachments::media::sanitize_filename(&file_name);
+    let mime_type = prepared.kind.mime().to_string();
+    let original_size = prepared.bytes.len() as u64;
+    let payload = match (prepared.width, prepared.height) {
+        (Some(width), Some(height)) => AttachmentPayload::Image(ImagePayload {
+            blossom_url: uploaded.url.clone(),
+            nonce: nonce_hex,
+            mime_type: mime_type.clone(),
+            original_size,
+            width,
+            height,
+            filename: file_name.clone(),
+            encrypted_size,
+        }),
+        _ => AttachmentPayload::File(FilePayload {
+            file_type: "document".to_string(),
+            blossom_url: uploaded.url.clone(),
+            nonce: nonce_hex,
+            mime_type: mime_type.clone(),
+            original_size,
+            filename: file_name.clone(),
+            encrypted_size,
+        }),
     };
 
-    // 2. Encrypt the file bytes.
-    let encrypted_bytes = crate::crypto::file_enc::encrypt_file(&file_bytes, &shared_key)
-        .map_err(|e| anyhow!("FileEncryptionFailed: {e}"))?;
-
-    // 3. Upload encrypted blob to Blossom.
-    let file_type = mime_to_file_type(&mime_type);
-    let file_size = file_bytes.len() as u64;
-    let msg_id = uuid::Uuid::new_v4().to_string();
-    let _ = message_store().attachment_tx.send((msg_id.clone(), 0.1));
-
-    let blossom_url = blossom::upload_blob(encrypted_bytes, mime_type.clone(), None)
+    let ctx = chat_context(target.trade_key_index, &target.counterpart_hex).await?;
+    let published = publish_chat_payload(&ctx, &payload.to_json())
         .await
-        .map_err(|e| anyhow!("UploadFailed: {e}"))?;
-
-    let _ = message_store().attachment_tx.send((msg_id.clone(), 1.0));
-
-    // 4. Build attachment metadata and publish via the chat envelope. The
-    //    file bytes themselves stay ChaCha20-encrypted on Blossom (step 2) —
-    //    only this pointer payload rides the chat channel.
-    let payload = serde_json::json!({
-        "url": blossom_url,
-        "name": file_name,
-        "mime_type": mime_type,
-        "size": file_size,
-        "type": "file",
-    })
-    .to_string();
-
-    let sender_keys = crate::api::identity::get_active_trade_keys(trade_key_index).await?;
-    let sender_pubkey = sender_keys.public_key().to_hex();
-
-    // Local-only defaults, replaced by the inner event identity on publish.
-    let mut msg_created_at = unix_now();
-    let mut published_id: Option<String> = None;
-
-    if let Some(peer_hex) = &peer_pubkey_hex {
-        match chat_context(trade_key_index, peer_hex).await {
-            Err(e) => log::warn!("[messages] send_file trade={trade_id}: {e}"),
-            Ok(ctx) => match publish_chat_payload(&ctx, &payload).await {
-                Err(e) => log::warn!("[messages] send_file trade={trade_id}: {e}"),
-                Ok(inner) => {
-                    published_id = Some(inner.id.to_hex());
-                    msg_created_at = inner.created_at.as_secs() as i64;
-                }
-            },
+        .map_err(|e| anyhow!("SendFailed: {e}"))?;
+    // Only the peer is a push client: the solver is never rung (see
+    // CLAUDE.md, "Dispute chat must wake").
+    if target.channel == ChatChannel::Peer {
+        if let Some(peer) = peer_to_wake(published.delivered, &target.counterpart_hex) {
+            crate::api::push::wake_peer(peer);
         }
-    } else {
-        log::warn!("[messages] send_file peer not yet known — local-only");
     }
+    progress(1.0);
 
     let attachment = AttachmentInfo {
         file_name: file_name.clone(),
-        mime_type: mime_type.clone(),
-        file_size,
-        file_type,
+        mime_type,
+        file_size: original_size,
+        file_type: prepared.kind.file_type(),
+        // The encrypted blob is already in the cache.
         download_status: DownloadStatus::Downloaded,
-        local_path: None,
+        blossom_url: uploaded.url,
+        sha256: uploaded.sha256,
+        encrypted_size,
+        width: prepared.width,
+        height: prepared.height,
+        counterpart_pubkey: Some(target.counterpart_hex.clone()),
     };
-
-    // Prefer the inner event id so the stored message matches the identity
-    // the recipient (and our own restart catch-up) dedups on.
+    // Identified by the inner event id, like `send_message`: the relay echo
+    // and the recipient's replay dedup on it.
     let msg = ChatMessage {
-        id: published_id.unwrap_or(msg_id),
-        trade_id: trade_id.clone(),
-        sender_pubkey,
-        content: blossom_url,
-        message_type: MessageType::Peer,
+        id: published.inner.id.to_hex(),
+        trade_id: trade_id.to_string(),
+        sender_pubkey: trade_keys.public_key().to_hex(),
+        content: file_name,
+        message_type: target.channel.message_type(),
         is_mine: true,
         is_read: true,
         has_attachment: true,
         attachment: Some(attachment),
-        created_at: msg_created_at,
+        created_at: published.inner.created_at.as_secs() as i64,
     };
-
     let _ = message_store().add_message(msg.clone()).await;
     Ok(msg)
 }
 
-/// Download and decrypt a file attachment.
+/// Fetch and decrypt the attachment of `message_id` (#589).
 ///
-/// Returns a `FileDownloadResult` with the local path to the decrypted file.
-pub async fn download_attachment(message_id: String) -> Result<FileDownloadResult> {
-    // Look up attachment info from message store
-    let store = message_store().messages.read().await;
-    let msg = store
-        .values()
-        .flat_map(|msgs| msgs.iter())
-        .find(|m| m.id == message_id)
-        .ok_or_else(|| anyhow!("AttachmentNotFound: message {message_id}"))?
-        .clone();
-    drop(store);
-
+/// The blob comes from the local cache, or from Blossom — verified against
+/// the hash in its URL, then cached still encrypted. Decrypted in memory
+/// with the key of the conversation it arrived in: the peer's for the P2P
+/// chat, the solver's for the dispute chat. `on_attachment_progress(message_id)`
+/// reports the download.
+///
+/// Errors are markers: `AttachmentNotFound`, `SessionNotFound`, `PeerUnknown`,
+/// `DownloadFailed`, `DecryptionFailed`.
+pub async fn download_attachment(message_id: String) -> Result<AttachmentData> {
+    let msg = {
+        let store = message_store().messages.read().await;
+        store
+            .values()
+            .flat_map(|msgs| msgs.iter())
+            .find(|m| m.id == message_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("AttachmentNotFound: message {message_id}"))?
+    };
     let attachment = msg
         .attachment
+        .clone()
         .ok_or_else(|| anyhow!("AttachmentNotFound: message has no attachment"))?;
 
-    // 1. Get Blossom URL from message content.
-    let blossom_url = msg.content.clone();
-    if blossom_url.is_empty()
-        || (!blossom_url.starts_with("http://") && !blossom_url.starts_with("https://"))
-    {
-        bail!("AttachmentNotFound: message has no valid Blossom URL in content");
+    let generation = crate::api::identity::identity_generation().await;
+    let opened = async {
+        let key = attachment_key_for(&msg).await?;
+        let blob = attachment_blob(&message_id, &attachment, generation).await?;
+        crate::crypto::file_enc::decrypt_file(&blob, &key)
+            .map_err(|e| anyhow!("DecryptionFailed: {e}"))
     }
-
-    // 2. Get the session shared key to decrypt — rebuilding the session from
-    // the trade row when absent (#381).
-    let session = session_or_rebuild(&msg.trade_id).await;
-
-    let shared_key: [u8; 32] = match session {
-        None => bail!("SessionNotFound: cannot decrypt attachment without session"),
-        Some(s) => {
-            if let Some(k) = s.shared_key {
-                k
-            } else {
-                let sender_keys =
-                    crate::api::identity::get_active_trade_keys(s.trade_key_index).await?;
-                let peer_hex = s
-                    .peer_pubkey
-                    .as_deref()
-                    .ok_or_else(|| anyhow!("PeerUnknown: cannot derive key without peer pubkey"))?;
-                let peer_pubkey = nostr_sdk::prelude::PublicKey::from_hex(peer_hex)
-                    .map_err(|e| anyhow!("invalid peer pubkey: {e}"))?;
-                crate::crypto::ecdh::derive_nip04_shared_key(&sender_keys, &peer_pubkey)?
-            }
+    .await;
+    // Any failure — key, transfer or decryption — must leave a state the UI
+    // can offer a retry on, never a stale Pending / Downloading.
+    let bytes = match opened {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            set_download_status(&message_id, DownloadStatus::Failed).await;
+            return Err(e);
         }
     };
 
-    // 3. Download encrypted blob from Blossom.
-    let _ = message_store()
-        .attachment_tx
-        .send((message_id.clone(), 0.1));
-    let encrypted_bytes = blossom::download_blob(blossom_url)
-        .await
-        .map_err(|e| anyhow!("DownloadFailed: {e}"))?;
+    set_download_status(&message_id, DownloadStatus::Downloaded).await;
+    let mime_type = crate::attachments::media::reported_mime(&bytes, &attachment.mime_type);
+    Ok(AttachmentData { bytes, file_name: attachment.file_name, mime_type })
+}
 
-    // 4. Decrypt.
-    let plaintext = crate::crypto::file_enc::decrypt_file(&encrypted_bytes, &shared_key)
-        .map_err(|e| anyhow!("DecryptionFailed: {e}"))?;
-
-    // 5. Persist the decrypted blob to a local path. Native writes to a temp
-    //    file; web has no filesystem, so that path is not supported there yet.
-    let local_path =
-        persist_decrypted_attachment(&message_id, &attachment.file_name, &plaintext).await?;
-
-    let _ = message_store()
-        .attachment_tx
-        .send((message_id.clone(), 1.0));
-
-    let result = FileDownloadResult {
-        local_path: local_path.clone(),
-        file_name: attachment.file_name.clone(),
-        mime_type: attachment.mime_type.clone(),
-        file_size: plaintext.len() as u64,
-    };
-
-    // Update the local message to reflect Downloaded status
+/// The encrypted blob of an attachment: cached, or downloaded and verified.
+/// `generation` is the identity the download started under.
+async fn attachment_blob(
+    message_id: &str,
+    attachment: &AttachmentInfo,
+    generation: Option<u64>,
+) -> Result<Vec<u8>> {
+    let db = crate::db::app_db::db();
+    if let Some(db) = db {
+        match db.get_attachment_blob(&attachment.sha256).await {
+            Ok(Some(blob)) => return Ok(blob),
+            Ok(None) => {}
+            Err(e) => log::warn!("[messages] attachment cache read failed: {e}"),
+        }
+    }
+    set_download_status(message_id, DownloadStatus::Downloading).await;
+    let progress_id = message_id.to_string();
+    let blob = match blossom::download_blob(&attachment.blossom_url, |p| {
+        let _ = message_store().attachment_tx.send((progress_id.clone(), p));
+    })
+    .await
     {
-        let mut store = message_store().messages.write().await;
-        for msgs in store.values_mut() {
-            for m in msgs.iter_mut() {
-                if m.id == message_id {
-                    if let Some(ref mut att) = m.attachment {
-                        att.download_status = DownloadStatus::Downloaded;
-                        att.local_path = Some(result.local_path.clone());
-                    }
-                }
+        Ok(blob) => blob,
+        Err(e) => return Err(e),
+    };
+    cache_attachment_blob(db, generation, &attachment.sha256, &blob).await;
+    Ok(blob)
+}
+
+/// Cache an encrypted blob — only while the identity a transfer started
+/// under (`generation`) is still the active one (PR #590 review).
+///
+/// The transfer awaits the network, and the identity can be deleted
+/// meanwhile: an unguarded write would put the old identity's blob back into
+/// the cache `clear_identity_data` just emptied. Returns whether it wrote.
+async fn cache_attachment_blob<S: crate::db::Storage>(
+    db: Option<&S>,
+    generation: Option<u64>,
+    sha256: &str,
+    blob: &[u8],
+) -> bool {
+    let (Some(db), Some(generation)) = (db, generation) else {
+        return false;
+    };
+    let written = crate::api::identity::while_identity_current(generation, async {
+        if let Err(e) = db.save_attachment_blob(sha256, blob).await {
+            log::warn!("[messages] attachment cache write failed: {e}");
+            return false;
+        }
+        true
+    })
+    .await;
+    if written.is_none() {
+        log::info!("[messages] attachment not cached: its identity was deleted mid-transfer");
+    }
+    written.unwrap_or(false)
+}
+
+/// The key an attachment was encrypted with: the raw ECDH between our trade
+/// key and whoever is on the other side of the conversation it arrived in.
+///
+/// Read from the live session, else straight from the trade row — not
+/// through [`session_or_rebuild`], whose [`chat_still_relevant`] gate refuses
+/// finished trades: their history must stay openable after a restart. A row
+/// whose counterparty is wrong only yields a key the AEAD rejects.
+async fn attachment_key_for(msg: &ChatMessage) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+    let session = crate::mostro::session::session_manager().get_session(&msg.trade_id).await;
+    let row = match (&session, crate::db::app_db::db()) {
+        (None, Some(db)) => db.get_trade_by_order_id(&msg.trade_id).await?,
+        _ => None,
+    };
+    let (trade_key_index, peer_hex) = conversation_of(session.as_ref(), row.as_ref())
+        .ok_or_else(|| anyhow!("SessionNotFound: cannot decrypt without the trade's session"))?;
+    let live_solver = match msg.message_type {
+        MessageType::Admin => crate::api::disputes::solver_pubkey(&msg.trade_id).await,
+        _ => None,
+    };
+    let counterpart_hex = counterpart_of(msg, peer_hex, live_solver)
+        .ok_or_else(|| anyhow!("PeerUnknown: no counterpart key for this conversation"))?;
+    let counterpart = nostr_sdk::prelude::PublicKey::from_hex(&counterpart_hex)
+        .map_err(|e| anyhow!("PeerUnknown: invalid counterpart pubkey: {e}"))?;
+    let trade_keys = crate::api::identity::get_active_trade_keys(trade_key_index).await?;
+    crate::crypto::file_enc::attachment_key(&trade_keys, &counterpart)
+}
+
+/// Who is on the other side of the conversation `msg` arrived in.
+///
+/// For the solver's own messages that is their sender: `mostro_unwrap`
+/// admitted the inner event only as signed by the solver, and the stored
+/// message keeps it after the dispute is resolved and its solver key cleared
+/// — so the history stays openable after a restart (PR #590 review). Our
+/// own files to the solver name the solver they were encrypted to, for the
+/// same reason (PR #596 review); the live dispute is the last fallback, for
+/// a copy that does not (an echo of a send from another device).
+fn counterpart_of(
+    msg: &ChatMessage,
+    peer_hex: Option<String>,
+    live_solver: Option<String>,
+) -> Option<String> {
+    match msg.message_type {
+        MessageType::Peer => peer_hex,
+        MessageType::Admin if !msg.is_mine => Some(msg.sender_pubkey.clone()),
+        MessageType::Admin => msg
+            .attachment
+            .as_ref()
+            .and_then(|a| a.counterpart_pubkey.clone())
+            .or(live_solver),
+        MessageType::System => None,
+    }
+}
+
+/// Our trade key index and the peer's pubkey for a conversation: from the
+/// live session, else from the trade row whatever its status.
+fn conversation_of(
+    session: Option<&crate::mostro::session::Session>,
+    row: Option<&crate::api::types::TradeInfo>,
+) -> Option<(u32, Option<String>)> {
+    match (session, row) {
+        (Some(s), _) => Some((s.trade_key_index, s.peer_pubkey.clone())),
+        (None, Some(t)) => Some((
+            t.trade_key_index,
+            Some(t.counterparty_pubkey.clone()).filter(|pk| !pk.is_empty()),
+        )),
+        (None, None) => None,
+    }
+}
+
+/// Record an attachment's download state on its message (memory only: the
+/// cache, not this flag, is what survives a restart).
+async fn set_download_status(message_id: &str, status: DownloadStatus) {
+    let mut store = message_store().messages.write().await;
+    for m in store.values_mut().flat_map(|msgs| msgs.iter_mut()) {
+        if m.id == message_id {
+            if let Some(att) = m.attachment.as_mut() {
+                att.download_status = status.clone();
             }
         }
     }
+}
 
-    Ok(result)
+/// The web smoke test's attachment round trip (#589 phase 4): encrypt random
+/// bytes, upload them to `server`, download them back, cache and decrypt
+/// them. Only `test/web/smoke` calls it, against its own Blossom endpoint —
+/// the app's uploads always go to the fixed server list.
+///
+/// Errors: `StorageUnavailable` before `init_db`, else the first step's.
+pub async fn attachment_web_probe(server: String) -> Result<()> {
+    let db = crate::db::app_db::db()
+        .ok_or_else(|| anyhow!("StorageUnavailable: the store is not open"))?;
+    crate::attachments::probe::roundtrip(db, &server).await
 }
 
 /// Get the attachment download status for a message.
@@ -721,6 +939,16 @@ pub async fn get_attachment_status(message_id: String) -> Result<Option<Download
 pub async fn on_new_message(trade_id: String) -> Result<MessageStream> {
     let rx = message_store().new_message_tx.subscribe();
     Ok(MessageStream { rx, trade_id })
+}
+
+/// Incoming unread messages for notification cards, with at-least-once
+/// delivery. Replays durable unread history on startup, channel lag and
+/// every minute (including after resume), so a failed Dart persistence write
+/// or a crash between the Rust and Dart commits is retried without a relay.
+/// Consumers must deduplicate by message id, including deliberately suppressed
+/// messages. Per-screen consumers want [`on_new_message`] instead.
+pub async fn on_any_new_message() -> Result<AnyMessageStream> {
+    Ok(AnyMessageStream::new(message_store()))
 }
 
 /// Stream that emits the updated global unread count after any read/write.
@@ -750,6 +978,74 @@ impl MessageStream {
                 Ok(_) => continue, // different trade
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+}
+
+fn notification_candidate(msg: &ChatMessage) -> bool {
+    !msg.is_mine && !msg.is_read && msg.message_type != MessageType::System
+}
+
+pub struct AnyMessageStream {
+    rx: broadcast::Receiver<ChatMessage>,
+    pending: VecDeque<ChatMessage>,
+    replay_at: crate::rt::time::Instant,
+}
+
+impl AnyMessageStream {
+    fn new(store: &MessageStore) -> Self {
+        Self {
+            rx: store.new_message_tx.subscribe(),
+            pending: VecDeque::new(),
+            replay_at: crate::rt::time::Instant::now(),
+        }
+    }
+
+    pub async fn next(&mut self) -> Option<ChatMessage> {
+        self.next_from(message_store()).await
+    }
+
+    async fn next_from(&mut self, store: &MessageStore) -> Option<ChatMessage> {
+        use crate::rt::time::{timeout, Duration, Instant};
+        loop {
+            if let Some(msg) = self.pending.pop_front() {
+                if let Some(msg) = store.notification_candidate_now(msg).await {
+                    return Some(msg);
+                }
+                continue;
+            }
+            if Instant::now() >= self.replay_at {
+                match store.notification_backlog().await {
+                    Ok(backlog) => self.pending = backlog,
+                    Err(e) => {
+                        log::warn!("[messages] notification recovery failed, will retry: {e}")
+                    }
+                }
+                self.replay_at = Instant::now() + Duration::from_secs(60);
+                if !self.pending.is_empty() {
+                    continue;
+                }
+            }
+            match timeout(
+                self.replay_at.saturating_duration_since(Instant::now()),
+                self.rx.recv(),
+            )
+            .await
+            {
+                Ok(Ok(msg)) => {
+                    if let Some(msg) = store.notification_candidate_now(msg).await {
+                        return Some(msg);
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                    log::warn!(
+                        "[messages] notification stream lagged by {n}; recovering stored messages"
+                    );
+                    self.replay_at = Instant::now();
+                }
+                Ok(Err(broadcast::error::RecvError::Closed)) => return None,
+                Err(_) => {} // Retry durable unread messages, even without new traffic.
             }
         }
     }
@@ -793,67 +1089,6 @@ impl AttachmentProgressStream {
 
 use crate::rt::unix_now;
 
-/// Strip directory components from a caller-supplied file name to prevent
-/// path traversal (e.g. `../../../etc/passwd` → `passwd`).
-/// Returns `"attachment"` for empty or path-only inputs.
-// Native-only: the wasm attachment writer errors out before it needs a name.
-#[cfg(not(target_arch = "wasm32"))]
-fn safe_filename(name: &str) -> String {
-    std::path::Path::new(name)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("attachment")
-        .to_string()
-}
-
-/// Persist a decrypted attachment to a local path the UI can open.
-///
-/// Native writes to the OS temp dir. `wasm32` has no filesystem, so this is not
-/// supported on web yet and returns an error.
-#[cfg(not(target_arch = "wasm32"))]
-async fn persist_decrypted_attachment(
-    message_id: &str,
-    file_name: &str,
-    data: &[u8],
-) -> Result<String> {
-    let unique_name = format!("{message_id}_{}", safe_filename(file_name));
-    let local_path = std::env::temp_dir()
-        .join(&unique_name)
-        .to_string_lossy()
-        .into_owned();
-    tokio::fs::write(&local_path, data)
-        .await
-        .map_err(|e| anyhow!("WriteFailed: {e}"))?;
-    Ok(local_path)
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn persist_decrypted_attachment(
-    _message_id: &str,
-    _file_name: &str,
-    _data: &[u8],
-) -> Result<String> {
-    Err(anyhow!("attachment download to disk is not supported on web"))
-}
-
-fn is_supported_mime_type(mime: &str) -> bool {
-    mime.starts_with("image/")
-        || mime.starts_with("video/")
-        || mime.starts_with("text/")
-        || mime == "application/pdf"
-}
-
-fn mime_to_file_type(mime: &str) -> FileType {
-    if mime.starts_with("image/") {
-        FileType::Image
-    } else if mime.starts_with("video/") {
-        FileType::Video
-    } else {
-        FileType::Document
-    }
-}
-
 // ── Incoming-chat subscription ────────────────────────────────────────────────
 
 /// Cap on the backlog requested from relays in one subscription.
@@ -883,8 +1118,14 @@ const MAX_STORED_BYTES_PER_TRADE: usize = 5 * 1024 * 1024;
 /// Subscription id for the chat envelope of one order — explicit so every
 /// exit path can unsubscribe and a lingering relay subscription never
 /// outlives its task.
-fn chat_subscription_id(channel: ChatChannel, order_id: &str) -> nostr_sdk::prelude::SubscriptionId {
-    nostr_sdk::prelude::SubscriptionId::new(format!("mostro-chat-{}{order_id}", channel.id_prefix()))
+fn chat_subscription_id(
+    channel: ChatChannel,
+    order_id: &str,
+) -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new(format!(
+        "mostro-chat-{}{order_id}",
+        channel.id_prefix()
+    ))
 }
 
 /// Which conversation an envelope subscription serves.
@@ -935,17 +1176,106 @@ impl ChatChannel {
     fn cursor_key(self, order_id: &str) -> String {
         crate::db::settings_keys::chat_cursor(&format!("{}{order_id}", self.id_prefix()))
     }
-
 }
 
 /// Orders with a live chat task. Single-owner guard: the peer-reveal capture
 /// fires again on daemon replays and reconnect backfills, and a second task
 /// for the same order would double-process events and race on the cursor.
-static ACTIVE_CHATS: OnceLock<tokio::sync::Mutex<std::collections::HashSet<String>>> =
+static ACTIVE_CHATS: OnceLock<tokio::sync::Mutex<std::collections::HashMap<String, u64>>> =
     OnceLock::new();
 
-fn active_chats() -> &'static tokio::sync::Mutex<std::collections::HashSet<String>> {
-    ACTIVE_CHATS.get_or_init(|| tokio::sync::Mutex::new(std::collections::HashSet::new()))
+/// Live chat tasks, by guard key: the generation of the task that owns the
+/// chat's subscription. Presence alone is not ownership: after a stop, a
+/// replacement task can claim the same chat before the old one wakes, and the
+/// old one's cleanup must not release — or close the REQ of — its successor
+/// (PR #527 review). Same scheme as `single_order_tasks` in `orders.rs`.
+fn active_chats() -> &'static tokio::sync::Mutex<std::collections::HashMap<String, u64>> {
+    ACTIVE_CHATS.get_or_init(Default::default)
+}
+
+/// Source of chat task generations; strictly increasing.
+static CHAT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Claim the chat for a new task: its generation, or `None` while another
+/// task owns it.
+async fn claim_chat(channel: ChatChannel, order_id: &str) -> Option<u64> {
+    let mut active = active_chats().lock().await;
+    let key = channel.guard_key(order_id);
+    if active.contains_key(&key) {
+        return None;
+    }
+    let generation = CHAT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    active.insert(key, generation);
+    Some(generation)
+}
+
+/// Whether `generation` still owns the chat.
+async fn chat_is_current(channel: ChatChannel, order_id: &str, generation: u64) -> bool {
+    active_chats().lock().await.get(&channel.guard_key(order_id)) == Some(&generation)
+}
+
+/// Release `generation`'s claim, returning whether it still held it — only
+/// then does the task own the subscription it is about to close.
+async fn release_chat(channel: ChatChannel, order_id: &str, generation: u64) -> bool {
+    let mut active = active_chats().lock().await;
+    let key = channel.guard_key(order_id);
+    if active.get(&key) == Some(&generation) {
+        active.remove(&key);
+        true
+    } else {
+        false
+    }
+}
+
+/// Stop the chat subscriptions of a trade that is over (#523): release both
+/// channels' ownership and close their REQs, which otherwise stayed open for
+/// the rest of the session and counted against the relays' caps. A running
+/// task sees its ownership gone and exits at its next wake. Returns the
+/// channels that were running.
+pub(crate) async fn stop_chat_subscriptions(order_id: &str) -> Vec<ChatChannel> {
+    let stopped: Vec<ChatChannel> = {
+        let mut active = active_chats().lock().await;
+        [ChatChannel::Peer, ChatChannel::Dispute]
+            .into_iter()
+            .filter(|channel| active.remove(&channel.guard_key(order_id)).is_some())
+            .collect()
+    };
+    if !stopped.is_empty() {
+        if let Ok(pool) = crate::api::nostr::get_pool() {
+            let client = pool.client();
+            for channel in &stopped {
+                crate::nostr::live_subs::live_subs()
+                    .close(&client, &chat_subscription_id(*channel, order_id))
+                    .await;
+            }
+        }
+    }
+    stopped
+}
+
+/// Forget every conversation of the identity being deleted (issue #533):
+/// release each live chat task's claim, close its REQ, and empty the
+/// in-memory store, so the next user starts with no chats and an unread
+/// count of zero. The persisted rows go with `clear_identity_data`; a task
+/// still running sees its claim gone at its next wake and exits.
+pub(crate) async fn forget_identity_chats() {
+    let guard_keys: Vec<String> = active_chats()
+        .lock()
+        .await
+        .drain()
+        .map(|(key, _)| key)
+        .collect();
+    if let Ok(pool) = crate::api::nostr::get_pool() {
+        let client = pool.client();
+        for key in &guard_keys {
+            // Same shape as `chat_subscription_id`, whose suffix is the guard key.
+            let id = nostr_sdk::prelude::SubscriptionId::new(format!("mostro-chat-{key}"));
+            crate::nostr::live_subs::live_subs()
+                .close(&client, &id)
+                .await;
+        }
+    }
+    message_store().clear().await;
 }
 
 /// Bounded insert-only id set with FIFO eviction (outer-id LRU, step 5).
@@ -1032,30 +1362,31 @@ async fn store_chat_cursor(channel: ChatChannel, order_id: &str, ts: i64) {
 
 /// Interpret a validated inner-event payload.
 ///
-/// Attachments travel as a JSON pointer object (`type: "file"`) — everything
-/// else is plaintext. Returns `(content, attachment)` where `content` is the
-/// display text (the Blossom URL for attachments, mirroring `send_file`).
+/// An attachment travels as v1's JSON message (`image_encrypted` /
+/// `file_encrypted`, see [`crate::attachments::payload`]); everything else is
+/// plaintext. Returns `(content, attachment)`: for an attachment the content
+/// is its file name — what a list preview or a notification shows.
 fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
-        if v.get("type").and_then(|t| t.as_str()) == Some("file") {
-            if let (Some(url), Some(name), Some(mime)) = (
-                v.get("url").and_then(|x| x.as_str()),
-                v.get("name").and_then(|x| x.as_str()),
-                v.get("mime_type").and_then(|x| x.as_str()),
-            ) {
-                let attachment = AttachmentInfo {
-                    file_name: name.to_string(),
-                    mime_type: mime.to_string(),
-                    file_size: v.get("size").and_then(|s| s.as_u64()).unwrap_or(0),
-                    file_type: mime_to_file_type(mime),
-                    download_status: DownloadStatus::Pending,
-                    local_path: None,
-                };
-                return (url.to_string(), Some(attachment));
-            }
-        }
+    match crate::attachments::payload::parse(payload) {
+        Some(a) => (
+            a.file_name.clone(),
+            Some(AttachmentInfo {
+                file_name: a.file_name,
+                mime_type: a.mime_type,
+                file_size: a.original_size,
+                file_type: a.file_type,
+                download_status: DownloadStatus::Pending,
+                blossom_url: a.blossom_url,
+                sha256: a.sha256,
+                encrypted_size: a.encrypted_size,
+                width: a.width,
+                height: a.height,
+                // Only our own sends record it; a peer cannot supply it.
+                counterpart_pubkey: None,
+            }),
+        ),
+        None => (payload.to_string(), None),
     }
-    (payload.to_string(), None)
 }
 
 /// Spawn-able listener for the P2P chat conversation of one order.
@@ -1098,29 +1429,37 @@ pub(crate) async fn subscribe_incoming_chat(
     sign: nostr_sdk::prelude::Keys,
 ) {
     // Single-owner guard: a second spawn for the same order is a no-op.
-    {
-        let mut active = active_chats().lock().await;
-        if !active.insert(channel.guard_key(&order_id)) {
-            log::debug!("[messages] chat task already active order={order_id}");
-            return;
-        }
-    }
+    let Some(generation) = claim_chat(channel, &order_id).await else {
+        log::debug!("[messages] chat task already active order={order_id}");
+        return;
+    };
 
-    run_chat_subscription(channel, &order_id, &trade_keys, &peer_pubkey, &conv, &sign).await;
+    run_chat_subscription(
+        channel,
+        &order_id,
+        generation,
+        &trade_keys,
+        &peer_pubkey,
+        &conv,
+        &sign,
+    )
+    .await;
 
     // Cleanup on every exit path: release ownership and drop the relay
-    // subscriptions so they never outlive the task.
-    active_chats().lock().await.remove(&channel.guard_key(&order_id));
+    // subscription so it never outlives the task — but only while this task
+    // still owns the chat. After a stop the REQ is already closed, and a
+    // replacement task may have re-opened it under the same id.
+    if !release_chat(channel, &order_id, generation).await {
+        log::debug!("[messages] chat task superseded order={order_id}");
+        return;
+    }
     if let Ok(pool) = crate::api::nostr::get_pool() {
         let client = pool.client();
-        // Unsubscribing a subscription that already went away is not an
-        // error worth surfacing: the loop is exiting either way.
-        if let Err(e) = client
-            .unsubscribe(&chat_subscription_id(channel, &order_id))
-            .await
-        {
-            log::debug!("[messages] unsubscribe on exit failed: {e}");
-        }
+        // Through the registry, or a reconnect repair would resurrect the
+        // REQ of a chat nobody listens to any more.
+        crate::nostr::live_subs::live_subs()
+            .close(&client, &chat_subscription_id(channel, &order_id))
+            .await;
     }
     log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
 }
@@ -1198,6 +1537,7 @@ impl ChatRxState {
 async fn run_chat_subscription(
     channel: ChatChannel,
     order_id: &str,
+    generation: u64,
     trade_keys: &nostr_sdk::prelude::Keys,
     peer_pubkey: &nostr_sdk::prelude::PublicKey,
     conv: &nostr_sdk::prelude::Keys,
@@ -1233,19 +1573,31 @@ async fn run_chat_subscription(
     // and would otherwise be missed.
     let mut rx = client.notifications();
 
-    if let Err(e) = client.subscribe(filter).with_id(sub_id.clone()).await {
-        log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
-        return;
-    }
+    // `replace`, not a bare subscribe: issued while relays are still coming
+    // back (a resume), it must reach each of them as it connects.
+    let issued = match crate::nostr::live_subs::live_subs()
+        .replace(&client, sub_id.clone(), filter)
+        .await
+    {
+        Ok(issued) => issued,
+        Err(e) => {
+            log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
+            return;
+        }
+    };
 
     log::info!(
-        "[messages] incoming-chat subscription active order={order_id} author={} since={cursor}",
+        "[messages] incoming-chat subscription {issued:?} order={order_id} author={} since={cursor}",
         sign_pubkey.to_hex(),
     );
 
     let mut state = ChatRxState::new(channel, cursor);
 
     loop {
+        // The trade ended and `stop_chat_subscriptions` took the chat back.
+        if !chat_is_current(channel, order_id, generation).await {
+            return;
+        }
         match rx.next().await {
             Some(ClientNotification::Event {
                 subscription_id,
@@ -1253,8 +1605,17 @@ async fn run_chat_subscription(
                 ..
             }) => {
                 if subscription_id == sub_id {
-                    handle_chat_event(channel, order_id, &allowed_signers, conv, &sign_pubkey, &my_trade_pubkey, &event, &mut state)
-                        .await;
+                    handle_chat_event(
+                        channel,
+                        order_id,
+                        &allowed_signers,
+                        conv,
+                        &sign_pubkey,
+                        &my_trade_pubkey,
+                        &event,
+                        &mut state,
+                    )
+                    .await;
                 }
                 if state.flooded {
                     return;
@@ -1411,8 +1772,28 @@ pub(crate) async fn resubscribe_active_chats() {
             return;
         }
     };
-    for trade in trades.into_iter().filter(chat_still_relevant) {
+    let total = trades.len();
+    let relevant: Vec<_> = trades.into_iter().filter(chat_still_relevant).collect();
+    // Each of these is a REQ, and relays cap them per connection (#560): the
+    // count and each trade's age say whether a stale row is holding one.
+    crate::api::logging::blog_info(
+        "messages",
+        format!(
+            "resubscribing {} chats of {total} persisted trades",
+            relevant.len()
+        ),
+    );
+    for trade in relevant {
         let order_id = trade.order.id.clone();
+        crate::api::logging::blog_debug(
+            "messages",
+            format!(
+                "chat resubscribe order={} status={:?} age={}s",
+                crate::api::logging::short_id(&order_id),
+                trade.order.status,
+                crate::rt::unix_now().saturating_sub(trade.started_at),
+            ),
+        );
         let Ok(trade_keys) =
             crate::api::identity::get_active_trade_keys(trade.trade_key_index).await
         else {
@@ -1427,7 +1808,12 @@ pub(crate) async fn resubscribe_active_chats() {
         };
         log::info!("[messages] resubscribing chat order={order_id}");
         crate::rt::spawn(subscribe_incoming_chat(
-            ChatChannel::Peer, order_id, trade_keys, peer, conv, sign,
+            ChatChannel::Peer,
+            order_id,
+            trade_keys,
+            peer,
+            conv,
+            sign,
         ));
     }
 }
@@ -1445,7 +1831,7 @@ pub(crate) async fn resubscribe_active_chats() {
 /// catches the poison whichever node published the event — the trades table
 /// is not scoped per node, and this iterates rows from every node the user
 /// has pointed at. The active-pubkey check stays as defense in depth.
-fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
+pub(crate) fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
     use crate::api::types::OrderStatus::*;
     trade.outcome.is_none()
         && !trade.counterparty_pubkey.is_empty()
@@ -1559,7 +1945,139 @@ async fn rebuild_session(
 
 #[cfg(test)]
 mod tests {
+    fn notification_test_message(trade_id: &str, index: i64) -> ChatMessage {
+        ChatMessage {
+            id: format!("{trade_id}-{index}"),
+            trade_id: trade_id.into(),
+            sender_pubkey: "peer".into(),
+            content: "hello".into(),
+            message_type: MessageType::Peer,
+            is_mine: false,
+            is_read: false,
+            has_attachment: false,
+            attachment: None,
+            created_at: index,
+        }
+    }
+
+    /// Issue #533: a new user starts with no conversations and no unread
+    /// badge, whatever the previous one left in memory.
+    #[tokio::test]
+    async fn clearing_the_store_leaves_no_chats_and_no_unread_count() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let mut unread = store.unread_tx.subscribe();
+        store
+            .add_message(notification_test_message(&trade_id, 1))
+            .await;
+        assert_eq!(store.messages.read().await.len(), 1);
+        assert!(store.hydrated.read().await.contains(&trade_id));
+        assert_eq!(store.unread_count_inner().await, 1);
+
+        store.clear().await;
+
+        // Asserted on the maps `clear` owns, not through `get_messages`: that
+        // read re-hydrates from the process-wide database, where a parallel
+        // test may have had this message persisted. In the app the rows are
+        // wiped first, so the re-hydration `clear` allows finds nothing.
+        assert!(store.messages.read().await.is_empty());
+        assert!(store.hydrated.read().await.is_empty());
+        assert!(store.non_durable.read().await.is_empty());
+        assert_eq!(store.unread_count_inner().await, 0);
+        // The badge is pushed, not polled: the last value published is zero.
+        let mut last = None;
+        while let Ok(count) = unread.try_recv() {
+            last = Some(count);
+        }
+        assert_eq!(last, Some(0));
+    }
+
+    #[tokio::test]
+    async fn notification_stream_recovers_every_message_after_lag() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let mut stream = AnyMessageStream::new(&store);
+        // Exhaust startup reconciliation first, so this tests actual lag recovery.
+        stream.replay_at = crate::rt::time::Instant::now() + std::time::Duration::from_secs(60);
+        for i in 0..70 {
+            store
+                .add_message(notification_test_message(&trade_id, i))
+                .await;
+        }
+        let mut received = Vec::new();
+        while received.len() < 70 {
+            let msg =
+                tokio::time::timeout(std::time::Duration::from_secs(5), stream.next_from(&store))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            if msg.trade_id == trade_id {
+                received.push(msg.created_at);
+            }
+        }
+        assert_eq!(received, (0..70).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn notification_stream_retries_without_another_relay_message() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        store
+            .add_message(notification_test_message(&trade_id, 1))
+            .await;
+        // No receiver existed at send time. Startup still recovers the message.
+        let mut stream = AnyMessageStream::new(&store);
+        for _ in 0..2 {
+            loop {
+                let msg = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    stream.next_from(&store),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                if msg.trade_id == trade_id {
+                    break;
+                }
+            }
+            // Simulate the recovery deadline after a failed Dart write.
+            stream.pending.clear();
+            stream.replay_at = crate::rt::time::Instant::now();
+        }
+    }
+
+    #[tokio::test]
+    async fn notification_stream_drops_queued_messages_read_since_snapshot() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let msg = notification_test_message(&trade_id, 1);
+        store.add_message(msg.clone()).await;
+        store.mark_as_read(&trade_id).await;
+        assert!(store.notification_candidate_now(msg).await.is_none());
+        assert!(!store
+            .notification_backlog()
+            .await
+            .unwrap()
+            .iter()
+            .any(|m| m.trade_id == trade_id));
+    }
+
     use super::*;
+    use crate::api::types::FileType;
+
+    const PEER: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+
+    #[test]
+    fn a_message_no_relay_accepted_wakes_nobody() {
+        // `send_message` and `send_file` both gate `wake_peer` on this: an
+        // empty `output.success` still comes back as `Ok` from the pool.
+        assert_eq!(peer_to_wake(false, PEER), None);
+    }
+
+    #[test]
+    fn a_message_some_relay_accepted_wakes_the_peer() {
+        assert_eq!(peer_to_wake(true, PEER), Some(PEER));
+    }
 
     #[test]
     fn the_two_channels_of_one_order_never_collide() {
@@ -1576,6 +2094,44 @@ mod tests {
             chat_subscription_id(ChatChannel::Peer, order),
             chat_subscription_id(ChatChannel::Dispute, order)
         );
+    }
+
+    /// Issue #474: the Notifications cards read one stream for every trade's
+    /// chat, where the per-trade stream drops all but one.
+    #[tokio::test]
+    async fn the_any_message_stream_carries_every_trade() {
+        let mut stream = on_any_new_message().await.unwrap();
+        let first = uuid::Uuid::new_v4().to_string();
+        let second = uuid::Uuid::new_v4().to_string();
+        for (index, trade_id) in [&first, &second].into_iter().enumerate() {
+            message_store()
+                .add_message(ChatMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    trade_id: trade_id.clone(),
+                    sender_pubkey: "peer".into(),
+                    content: "hi".into(),
+                    message_type: MessageType::Peer,
+                    is_mine: false,
+                    is_read: false,
+                    has_attachment: false,
+                    attachment: None,
+                    created_at: index as i64 + 1,
+                })
+                .await;
+        }
+
+        // Parallel tests share the store, so only our two trades count.
+        let mut seen = Vec::new();
+        while seen.len() < 2 {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+                .await
+                .expect("a message within 5s")
+                .expect("stream open");
+            if msg.trade_id == first || msg.trade_id == second {
+                seen.push(msg.trade_id);
+            }
+        }
+        assert_eq!(seen, vec![first, second]);
     }
 
     #[test]
@@ -1684,28 +2240,19 @@ mod tests {
     #[tokio::test]
     async fn file_too_large_is_rejected() {
         let trade_id = uuid::Uuid::new_v4().to_string();
-        let big = vec![0u8; blossom::MAX_BLOB_SIZE + 1];
-        let result = send_file(
-            trade_id,
-            big,
-            "test.jpg".to_string(),
-            "image/jpeg".to_string(),
-        )
-        .await;
-        assert!(result.is_err());
+        let mut big = b"%PDF-".to_vec();
+        big.resize(crate::attachments::MAX_ATTACHMENT_BYTES + 1, 0);
+        let err = send_file(trade_id, big, "test.pdf".into(), "u1".into()).await.unwrap_err();
+        assert!(err.to_string().starts_with("FileTooLarge"), "got: {err}");
     }
 
     #[tokio::test]
-    async fn unsupported_mime_is_rejected() {
+    async fn only_jpeg_png_and_pdf_are_sent_whatever_the_name_says() {
         let trade_id = uuid::Uuid::new_v4().to_string();
-        let result = send_file(
-            trade_id,
-            vec![1, 2, 3],
-            "test.bin".to_string(),
-            "application/octet-stream".to_string(),
-        )
-        .await;
-        assert!(result.is_err());
+        let err = send_file(trade_id, b"MZ\x90\x00".to_vec(), "receipt.pdf".into(), "u2".into())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("UnsupportedFileType"), "got: {err}");
     }
 
     #[tokio::test]
@@ -1751,23 +2298,14 @@ mod tests {
         assert_eq!(unread_after, 0);
     }
 
-    #[test]
-    fn safe_filename_strips_path_traversal() {
-        assert_eq!(safe_filename("../../../etc/passwd"), "passwd");
-        assert_eq!(safe_filename("/etc/passwd"), "passwd");
-        assert_eq!(safe_filename("normal.jpg"), "normal.jpg");
-        assert_eq!(safe_filename(""), "attachment");
-        assert_eq!(safe_filename("/"), "attachment");
-    }
-
     #[tokio::test]
     async fn send_file_fails_without_session() {
         let trade_id = uuid::Uuid::new_v4().to_string();
         let result = send_file(
             trade_id,
-            vec![1, 2, 3],
-            "photo.jpg".to_string(),
-            "image/jpeg".to_string(),
+            b"%PDF-1.4\n%%EOF".to_vec(),
+            "receipt.pdf".to_string(),
+            "u3".to_string(),
         )
         .await;
         assert!(result.is_err());
@@ -1786,7 +2324,12 @@ mod tests {
             file_size: 100,
             file_type: FileType::Image,
             download_status: DownloadStatus::Pending,
-            local_path: None,
+            blossom_url: format!("https://blossom.example.com/{}", "a".repeat(64)),
+            sha256: "a".repeat(64),
+            encrypted_size: 128,
+            width: Some(10),
+            height: Some(10),
+            counterpart_pubkey: None,
         };
         let msg = ChatMessage {
             id: msg_id.clone(),
@@ -1802,21 +2345,12 @@ mod tests {
         };
         store.add_message(msg).await;
 
-        let result = download_attachment(msg_id).await;
+        let result = download_attachment(msg_id.clone()).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("SessionNotFound"), "got: {err}");
-    }
-
-    #[test]
-    fn mime_type_validation() {
-        assert!(is_supported_mime_type("image/jpeg"));
-        assert!(is_supported_mime_type("image/png"));
-        assert!(is_supported_mime_type("video/mp4"));
-        assert!(is_supported_mime_type("text/plain"));
-        assert!(is_supported_mime_type("application/pdf"));
-        assert!(!is_supported_mime_type("application/octet-stream"));
-        assert!(!is_supported_mime_type("application/zip"));
+        // A failure leaves a retryable state, not a stale Pending.
+        assert_eq!(get_attachment_status(msg_id).await.unwrap(), Some(DownloadStatus::Failed));
     }
 
     /// Verify that the Rust message store does NOT deduplicate by id.
@@ -1897,21 +2431,28 @@ mod tests {
     }
 
     #[test]
-    fn chat_payload_parses_files_and_plaintext() {
-        // Attachment pointer → content is the URL, attachment populated.
+    fn chat_payload_parses_v1_attachments_and_plaintext() {
+        // A v1 image message → content is the file name, attachment populated.
+        let hash = "b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553";
         let file = serde_json::json!({
-            "url": "https://blossom.example.com/abc",
-            "name": "receipt.jpg",
+            "type": "image_encrypted",
+            "blossom_url": format!("https://cdn.hzrd149.com/{hash}"),
+            "nonce": "0102030405060708090a0b0c",
             "mime_type": "image/jpeg",
-            "size": 12345,
-            "type": "file",
+            "original_size": 12345,
+            "width": 800,
+            "height": 600,
+            "filename": "receipt.jpg",
+            "encrypted_size": 12373,
         })
         .to_string();
         let (content, att) = parse_chat_payload(&file);
-        assert_eq!(content, "https://blossom.example.com/abc");
+        assert_eq!(content, "receipt.jpg");
         let att = att.expect("attachment expected");
         assert_eq!(att.file_name, "receipt.jpg");
         assert_eq!(att.file_size, 12345);
+        assert_eq!(att.sha256, hash);
+        assert_eq!((att.width, att.height), (Some(800), Some(600)));
         assert!(matches!(att.file_type, FileType::Image));
         assert!(matches!(att.download_status, DownloadStatus::Pending));
 
@@ -1920,11 +2461,14 @@ mod tests {
         assert_eq!(content, "hola, ¿pagaste?");
         assert!(att.is_none());
 
-        // JSON that is not a file pointer is displayed verbatim, not
-        // misinterpreted.
+        // JSON that is not a v1 attachment (here, v2's old never-sent
+        // shape) is displayed verbatim, not misinterpreted.
         let (content, att) = parse_chat_payload(r#"{"type":"file","url":"x"}"#);
         assert_eq!(content, r#"{"type":"file","url":"x"}"#);
-        assert!(att.is_none(), "incomplete pointer must not become an attachment");
+        assert!(
+            att.is_none(),
+            "incomplete pointer must not become an attachment"
+        );
     }
 
     #[test]
@@ -1984,6 +2528,46 @@ mod tests {
         assert!(!store.quota_exceeded(&other, 1024).await);
     }
 
+    /// #523: a finished trade gives its chat REQs back. Stopping releases
+    /// both channels' ownership — the running tasks exit at their next wake —
+    /// and reports which were running; an order with no chat is a no-op.
+    #[tokio::test]
+    async fn stopping_a_finished_trades_chats_releases_both_channels() {
+        let order = format!("stop-{}", uuid::Uuid::new_v4());
+        let peer = claim_chat(ChatChannel::Peer, &order).await.expect("claim");
+        let dispute = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+
+        let stopped = stop_chat_subscriptions(&order).await;
+
+        assert_eq!(stopped, vec![ChatChannel::Peer, ChatChannel::Dispute]);
+        assert!(!chat_is_current(ChatChannel::Peer, &order, peer).await);
+        assert!(!chat_is_current(ChatChannel::Dispute, &order, dispute).await);
+        assert!(stop_chat_subscriptions(&order).await.is_empty());
+    }
+
+    /// PR #527 review: stop, then a replacement task claims the same chat,
+    /// then the old task finally exits. The old task's cleanup must not take
+    /// the replacement's ownership (nor, therefore, close its REQ).
+    #[tokio::test]
+    async fn an_old_chat_task_cannot_release_its_replacement() {
+        let order = format!("swap-{}", uuid::Uuid::new_v4());
+        let old = claim_chat(ChatChannel::Peer, &order).await.expect("first claim");
+        // One owner at a time.
+        assert!(claim_chat(ChatChannel::Peer, &order).await.is_none());
+
+        stop_chat_subscriptions(&order).await;
+        let new = claim_chat(ChatChannel::Peer, &order).await.expect("replacement");
+        assert_ne!(old, new);
+
+        // The old task wakes: it is no longer current, and releasing reports
+        // that it owned nothing — so its cleanup leaves the REQ alone.
+        assert!(!chat_is_current(ChatChannel::Peer, &order, old).await);
+        assert!(!release_chat(ChatChannel::Peer, &order, old).await);
+        assert!(chat_is_current(ChatChannel::Peer, &order, new).await);
+
+        assert!(release_chat(ChatChannel::Peer, &order, new).await);
+    }
+
     #[test]
     fn chat_still_relevant_selects_only_live_trades() {
         use crate::api::types::*;
@@ -2023,6 +2607,7 @@ mod tests {
             peer_reviews: None,
             peer_days: None,
             rated_at: None,
+            bond: None,
         };
         assert!(chat_still_relevant(&base));
 
@@ -2094,6 +2679,7 @@ mod tests {
             peer_reviews: None,
             peer_days: None,
             rated_at: None,
+            bond: None,
         }
     }
 
@@ -2137,13 +2723,121 @@ mod tests {
     /// panic. (Poisoned/terminal/empty rows never reach the derivation at
     /// all: `session_or_rebuild` filters them with `chat_still_relevant`,
     /// covered above.)
+    /// A finished trade's history stays openable after a restart (#590
+    /// review): with no session, the attachment key comes from the row even
+    /// though `chat_still_relevant` refuses to rebuild a chat for it.
+    #[test]
+    fn attachment_conversation_comes_from_a_finished_trade_row() {
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut trade = live_trade("o", &peer, 7);
+        trade.order.status = crate::api::types::OrderStatus::Success;
+        assert!(!chat_still_relevant(&trade));
+        assert_eq!(conversation_of(None, Some(&trade)), Some((7, Some(peer))));
+
+        trade.counterparty_pubkey.clear();
+        assert_eq!(conversation_of(None, Some(&trade)), Some((7, None)));
+        assert_eq!(conversation_of(None, None), None);
+    }
+
+    /// PR #590 review: once a dispute is resolved its solver key is cleared
+    /// and a restart does not rehydrate it — the solver's attachments are
+    /// still decrypted with the authenticated sender kept on the message.
+    #[test]
+    fn solver_attachment_counterpart_survives_the_resolved_dispute() {
+        let solver = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut msg = notification_test_message("o", 1);
+        msg.message_type = MessageType::Admin;
+        msg.sender_pubkey = solver.clone();
+
+        // No live dispute (resolved, then restarted): the sender answers.
+        assert_eq!(
+            counterpart_of(&msg, Some(peer.clone()), None),
+            Some(solver.clone())
+        );
+
+        // Our own message to the solver names us as sender: only the live
+        // dispute knows who it went to.
+        msg.is_mine = true;
+        assert_eq!(counterpart_of(&msg, Some(peer.clone()), None), None);
+        assert_eq!(
+            counterpart_of(&msg, Some(peer.clone()), Some(solver.clone())),
+            Some(solver)
+        );
+
+        msg.message_type = MessageType::Peer;
+        assert_eq!(counterpart_of(&msg, Some(peer.clone()), None), Some(peer));
+        msg.message_type = MessageType::System;
+        assert_eq!(counterpart_of(&msg, None, None), None);
+    }
+
+    /// PR #596 review: a file we sent to the solver names the solver it was
+    /// encrypted to, so it still opens once the resolved dispute is gone —
+    /// and that record wins over whoever the live dispute names.
+    #[test]
+    fn own_solver_attachment_keeps_its_recipient() {
+        let solver = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let other = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut msg = notification_test_message("o", 1);
+        msg.message_type = MessageType::Admin;
+        msg.is_mine = true;
+        msg.sender_pubkey = "me".into();
+        let (_, attachment) = parse_chat_payload(
+            &crate::attachments::payload::AttachmentPayload::File(
+                crate::attachments::payload::FilePayload {
+                    file_type: "document".into(),
+                    blossom_url: format!("https://blossom.example/{}", "a".repeat(64)),
+                    nonce: "00".repeat(12),
+                    mime_type: "application/pdf".into(),
+                    original_size: 10,
+                    filename: "r.pdf".into(),
+                    encrypted_size: 38,
+                },
+            )
+            .to_json(),
+        );
+        let mut attachment = attachment.expect("a v1 file parses");
+        // Nothing read from the wire names a recipient.
+        assert_eq!(attachment.counterpart_pubkey, None);
+        attachment.counterpart_pubkey = Some(solver.clone());
+        msg.attachment = Some(attachment);
+
+        assert_eq!(counterpart_of(&msg, None, None), Some(solver.clone()));
+        assert_eq!(counterpart_of(&msg, None, Some(other)), Some(solver));
+    }
+
+    /// PR #590 review: a transfer that resumes after its identity was
+    /// deleted must not put the blob back into the wiped cache. A generation
+    /// no identity holds stands for the deleted one — the global identity is
+    /// driven only by the identity lifecycle test, which covers the fence.
+    #[tokio::test]
+    async fn a_transfer_of_a_deleted_identity_does_not_refill_the_cache() {
+        let path = std::env::temp_dir().join(format!(
+            "mostro-attachment-fence-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap();
+        let sha = "b".repeat(64);
+
+        assert!(!cache_attachment_blob(Some(&db), Some(u64::MAX), &sha, b"blob").await);
+        assert!(!cache_attachment_blob(Some(&db), None, &sha, b"blob").await);
+        assert_eq!(db.get_attachment_blob(&sha).await.unwrap(), None);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[tokio::test]
     async fn rebuild_session_rejects_unparseable_peer() {
         let order_id = uuid::Uuid::new_v4().to_string();
         let trade_keys = nostr_sdk::prelude::Keys::generate();
         let trade = live_trade(&order_id, "not-a-pubkey", 1);
         assert!(rebuild_session(&trade, &trade_keys).await.is_none());
-        assert!(crate::mostro::session::session_manager().get_session(&order_id).await.is_none());
+        assert!(crate::mostro::session::session_manager()
+            .get_session(&order_id)
+            .await
+            .is_none());
     }
 
     /// The seam test for #381: `session_or_rebuild` is only useful if the
@@ -2161,10 +2855,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "claims the process-global app_db and identity — run with --ignored"]
     async fn send_message_rebuilds_session_from_trade_row() {
-        let db_path = std::env::temp_dir().join(format!(
-            "mostro-381-seam-test-{}.db",
-            uuid::Uuid::new_v4()
-        ));
+        let db_path =
+            std::env::temp_dir().join(format!("mostro-381-seam-test-{}.db", uuid::Uuid::new_v4()));
         crate::db::app_db::init_db(db_path.to_str().unwrap())
             .await
             .expect("init app db");
@@ -2193,7 +2885,10 @@ mod tests {
             .await
             .expect("save the post-reveal row");
         assert!(
-            crate::mostro::session::session_manager().get_session(&order_id).await.is_none(),
+            crate::mostro::session::session_manager()
+                .get_session(&order_id)
+                .await
+                .is_none(),
             "the restart shape: row persisted, session gone"
         );
 

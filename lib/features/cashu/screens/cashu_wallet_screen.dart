@@ -10,6 +10,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/cashu/cashu_error_messages.dart';
 import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/platform_aware_qr_scanner.dart';
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -100,9 +101,8 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
   Future<void> _receive() async {
     final l10n = AppLocalizations.of(context);
     final token = await _prompt(
-      () => showModalBottomSheet<String>(
+      () => showMostroSheet<String>(
         context: context,
-        isScrollControlled: true,
         builder:
             (sheetContext) => Padding(
               padding: EdgeInsets.only(
@@ -128,7 +128,7 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
 
   Future<void> _send(int balanceSats) async {
     final amount = await _prompt(
-      () => showDialog<int>(
+      () => showMostroDialog<int>(
         context: context,
         builder: (_) => _AmountDialog(maxSats: balanceSats),
       ),
@@ -147,7 +147,7 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
   }
 
   Future<void> _showToken(String token) {
-    return showDialog<void>(
+    return showMostroDialog<void>(
       context: context,
       // Not dismissible: closing this by tapping outside used to be the fastest
       // way to lose an exported token. `barrierDismissible` covers the tap;
@@ -392,8 +392,8 @@ class _AmountDialogState extends State<_AmountDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
-      title: Text(l10n.cashuSendButton),
+    return MostroDialog(
+      title: l10n.cashuSendButton,
       content: TextField(
         controller: _controller,
         autofocus: true,
@@ -405,13 +405,11 @@ class _AmountDialogState extends State<_AmountDialog> {
         ),
         onSubmitted: (_) => _submit(),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.cancel),
-        ),
-        FilledButton(onPressed: _submit, child: Text(l10n.confirm)),
-      ],
+      secondary: ModalAction(
+        label: l10n.cancel,
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+      primary: ModalAction(label: l10n.confirm, onPressed: _submit),
     );
   }
 }
@@ -438,73 +436,64 @@ class _TokenDialog extends StatelessWidget {
 
   final String token;
 
+  Future<void> _copy(BuildContext context, AppLocalizations l10n) async {
+    await Clipboard.setData(ClipboardData(text: token));
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.cashuTokenCopied)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
-      title: Text(l10n.cashuTokenTitle),
-      // Bounded width on purpose: `QrImageView` lays out through a
-      // `LayoutBuilder`, and `AlertDialog` asks its content for intrinsic
-      // dimensions — which a LayoutBuilder cannot answer. Without this the
-      // dialog throws on a narrow screen.
-      content: SizedBox(
-        width: 280,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // A cdk token carries a signature and DLEQ proof per proof, so
-              // a wallet funded from many small proofs exports tens of KB —
-              // far past the ~2.9 KB a version-40 QR holds. Checked *here*
-              // rather than through `errorStateBuilder`: `QrCode.fromData`
-              // silently caps at version 40 and only `make()` throws, inside
-              // the painter, where the builder never sees it — so without
-              // this qr_flutter paints its exception on the one dialog that
-              // is showing the user their money.
-              if (_fitsInQr(token))
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  color: Colors.white,
-                  child: QrImageView(
-                    data: token,
-                    size: 200,
-                    backgroundColor: Colors.white,
-                  ),
-                )
-              else
-                Text(
-                  l10n.cashuTokenTooLargeForQr,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13),
-                ),
-              const SizedBox(height: AppSpacing.md),
-              SelectableText(token, style: const TextStyle(fontSize: 11)),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                l10n.cashuTokenWarning,
-                style: const TextStyle(fontSize: 12),
+    return MostroDialog(
+      title: l10n.cashuTokenTitle,
+      // MostroDialog scrolls its content and never asks it for intrinsic
+      // dimensions, so `QrImageView` (laid out through a `LayoutBuilder`)
+      // needs no fixed width here.
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // A cdk token carries a signature and DLEQ proof per proof, so
+          // a wallet funded from many small proofs exports tens of KB —
+          // far past the ~2.9 KB a version-40 QR holds. Checked *here*
+          // rather than through `errorStateBuilder`: `QrCode.fromData`
+          // silently caps at version 40 and only `make()` throws, inside
+          // the painter, where the builder never sees it — so without
+          // this qr_flutter paints its exception on the one dialog that
+          // is showing the user their money.
+          if (_fitsInQr(token))
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              color: Colors.white,
+              child: QrImageView(
+                data: token,
+                size: 200,
+                backgroundColor: Colors.white,
               ),
-            ],
-          ),
-        ),
+            )
+          else
+            Text(
+              l10n.cashuTokenTooLargeForQr,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13),
+            ),
+          const SizedBox(height: AppSpacing.md),
+          SelectableText(token, style: const TextStyle(fontSize: 11)),
+          const SizedBox(height: AppSpacing.md),
+          Text(l10n.cashuTokenWarning, style: const TextStyle(fontSize: 12)),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: token));
-            if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text(l10n.cashuTokenCopied)));
-            }
-          },
-          child: Text(l10n.cashuCopyToken),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.done),
-        ),
-      ],
+      secondary: ModalAction(
+        label: l10n.cashuCopyToken,
+        onPressed: () => _copy(context, l10n),
+      ),
+      primary: ModalAction(
+        label: l10n.done,
+        onPressed: () => Navigator.of(context).pop(),
+      ),
     );
   }
 }

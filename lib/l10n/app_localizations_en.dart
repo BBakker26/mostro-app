@@ -759,6 +759,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get releaseFailed => 'Failed to release. Please try again.';
 
   @override
+  String get releasePendingLabel => 'Releasing… waiting for the node';
+
+  @override
+  String get releaseSentNotice =>
+      'Release sent. The node can take up to a minute to confirm it.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'The node has not confirmed the release yet. If the order doesn\'t update, you can release again.';
+
+  @override
   String get cancelTradeButton => 'Cancel trade';
 
   @override

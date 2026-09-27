@@ -20,6 +20,7 @@ import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
+import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/models/trade_status.dart';
 import 'package:mostro/features/trades/models/trade_view.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
@@ -410,11 +411,23 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     if (confirmed != true) {
       throw const MostroActionAborted();
     }
+    // Held across the publication: the wait must be recorded even if the
+    // seller leaves this screen before it completes, or a reopened screen
+    // offers Release again while the node settles (#604 review).
+    final pending = ref.read(releasePendingProvider.notifier);
+    final generation = pending.generation;
     try {
       await ref.read(releaseOrderActionProvider)(widget.orderId);
-      if (!mounted) return;
       // Publishing release confirms neither escrow settlement nor payout. Stay
-      // here until the live status reaches Success before offering rating.
+      // here until the live status reaches Success before offering rating —
+      // and don't offer Release again meanwhile: the daemon answers only once
+      // the hold invoice settled, often tens of seconds later. Recorded before
+      // the mounted check, which only guards the UI below.
+      pending.start(widget.orderId, since: generation);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context).releaseSentNotice)),
+      );
       ref.invalidate(tradeStatusProvider(widget.orderId));
     } catch (e, st) {
       debugPrint('[TradeDetailScreen] releaseOrder error: $e\n$st');
@@ -581,6 +594,12 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       previous,
       next,
     ) {
+      // Any move of the order ends a release's wait: settled, completed, or
+      // on to something else a release no longer applies to.
+      final was = previous?.valueOrNull;
+      if (was != null && was != next.valueOrNull) {
+        ref.read(releasePendingProvider.notifier).settle(widget.orderId);
+      }
       final row = ref.read(tradeInfoProvider(widget.orderId));
       // Without the row a public `pending` cannot be told from the trade's
       // own status, so a change into or out of it says nothing yet.
@@ -596,9 +615,24 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       }
     });
 
+    // The node never confirmed a release: say Release is offered again.
+    ref.listen<Map<String, ReleaseWait>>(releasePendingProvider, (
+      previous,
+      next,
+    ) {
+      if (previous?[widget.orderId] != ReleaseWait.waiting ||
+          next[widget.orderId] != ReleaseWait.unconfirmed) {
+        return;
+      }
+      final live = ref.read(tradeStatusProvider(widget.orderId)).valueOrNull;
+      if (live != OrderStatus.fiatSent && live != OrderStatus.dispute) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.releaseUnconfirmedNotice)));
+    });
+
     final role = _isBuyer();
-    final status =
-        role == null ? TradeStatus.loading : _status(isBuyer: role);
+    final status = role == null ? TradeStatus.loading : _status(isBuyer: role);
     final isBuyer = role ?? true;
     // A failed status subscription would otherwise look like a slow one.
     final loadFailed =
@@ -1064,6 +1098,9 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     TradeStatus status,
     CooperativeCancelState? cancelRequest,
   ) {
+    final releasing =
+        ref.watch(releasePendingProvider)[widget.orderId] ==
+        ReleaseWait.waiting;
     final primary = switch (view.primary) {
       TradePrimaryAction.none => null,
       TradePrimaryAction.addInvoice => TradePrimarySpec(
@@ -1103,11 +1140,15 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         automationId: AutomationIds.tradeFiatSent,
         onPressed: _markFiatSent,
       ),
+      // Disabled while the published release waits for the node.
       TradePrimaryAction.release => TradePrimarySpec(
-        label: l10n.confirmReleaseSatsButton,
-        icon: Icons.lock_outline,
+        label:
+            releasing
+                ? l10n.releasePendingLabel
+                : l10n.confirmReleaseSatsButton,
+        icon: releasing ? Icons.hourglass_top : Icons.lock_outline,
         automationId: AutomationIds.tradeRelease,
-        onPressed: _releaseOrder,
+        onPressed: releasing ? null : _releaseOrder,
       ),
       TradePrimaryAction.viewDispute => TradePrimarySpec(
         label: l10n.viewDisputeButton,
@@ -1132,32 +1173,36 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
     final secondary = [
       for (final action in view.secondary)
-        switch (action) {
-          // Once the counterparty asked to cancel, this side's cancel is
-          // the acceptance that ends the trade: say so on the button.
-          TradeSecondaryAction.cancel => TradeSecondarySpec(
-            label:
-                cancelRequest == CooperativeCancelState.requestedByPeer &&
-                        CancelRequestNotice.requestIsOpen(_orderStatus(status))
-                    ? l10n.acceptCancelButton
-                    : view.cancelIsFullWidth
-                    ? l10n.cancelTradeButton
-                    : l10n.cancel,
-            automationId: AutomationIds.tradeCancel,
-            onPressed: () => _cancelOrder(status),
-            isDestructive: true,
-          ),
-          TradeSecondaryAction.dispute => TradeSecondarySpec(
-            label: l10n.openDisputeButton,
-            automationId: AutomationIds.tradeDispute,
-            onPressed: _openDispute,
-          ),
-          TradeSecondaryAction.release => TradeSecondarySpec(
-            label: l10n.releaseSatsButton,
-            automationId: AutomationIds.tradeRelease,
-            onPressed: _releaseOrder,
-          ),
-        },
+        // The disputed row's Release, likewise.
+        if (!(releasing && action == TradeSecondaryAction.release))
+          switch (action) {
+            // Once the counterparty asked to cancel, this side's cancel is
+            // the acceptance that ends the trade: say so on the button.
+            TradeSecondaryAction.cancel => TradeSecondarySpec(
+              label:
+                  cancelRequest == CooperativeCancelState.requestedByPeer &&
+                          CancelRequestNotice.requestIsOpen(
+                            _orderStatus(status),
+                          )
+                      ? l10n.acceptCancelButton
+                      : view.cancelIsFullWidth
+                      ? l10n.cancelTradeButton
+                      : l10n.cancel,
+              automationId: AutomationIds.tradeCancel,
+              onPressed: () => _cancelOrder(status),
+              isDestructive: true,
+            ),
+            TradeSecondaryAction.dispute => TradeSecondarySpec(
+              label: l10n.openDisputeButton,
+              automationId: AutomationIds.tradeDispute,
+              onPressed: _openDispute,
+            ),
+            TradeSecondaryAction.release => TradeSecondarySpec(
+              label: l10n.releaseSatsButton,
+              automationId: AutomationIds.tradeRelease,
+              onPressed: _releaseOrder,
+            ),
+          },
     ];
 
     return TradeActionBar(

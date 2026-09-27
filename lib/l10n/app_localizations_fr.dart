@@ -767,6 +767,17 @@ class AppLocalizationsFr extends AppLocalizations {
   String get releaseFailed => 'Échec de la libération. Veuillez réessayer.';
 
   @override
+  String get releasePendingLabel => 'Libération… en attente du nœud';
+
+  @override
+  String get releaseSentNotice =>
+      'Libération envoyée. Le nœud peut mettre jusqu\'à une minute à la confirmer.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'Le nœud n\'a pas encore confirmé la libération. Si l\'ordre ne se met pas à jour, vous pouvez libérer à nouveau.';
+
+  @override
   String get cancelTradeButton => 'Annuler l\'échange';
 
   @override

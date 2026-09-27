@@ -1426,6 +1426,24 @@ abstract class AppLocalizations {
   /// **'Failed to release. Please try again.'**
   String get releaseFailed;
 
+  /// Trade screen, seller: the disabled Release button while a published release waits for the node's confirmation (hold invoice settlement)
+  ///
+  /// In en, this message translates to:
+  /// **'Releasing… waiting for the node'**
+  String get releasePendingLabel;
+
+  /// Snackbar after the seller confirmed the release: it was published, and the node confirms it only once the hold invoice settled
+  ///
+  /// In en, this message translates to:
+  /// **'Release sent. The node can take up to a minute to confirm it.'**
+  String get releaseSentNotice;
+
+  /// Snackbar when a published release got no confirmation within 90 s: Release is offered again; a retry is safe
+  ///
+  /// In en, this message translates to:
+  /// **'The node has not confirmed the release yet. If the order doesn\'t update, you can release again.'**
+  String get releaseUnconfirmedNotice;
+
   /// Button label to cancel an in-progress trade (secondary action row)
   ///
   /// In en, this message translates to:

@@ -4,6 +4,22 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.8] - 2026-09-27
+
+### ✨ Features
+
+- **cashu:** C5 — seller escrow lock flow (Track A) ([#238](https://github.com/MostroP2P/app/pull/238)) by @grunch
+- **cashu:** C3 — minimal wallet UI (balance, receive, export) ([#237](https://github.com/MostroP2P/app/pull/237)) by @grunch
+- **bond:** let the maker cancel its unpaid bond window ([#601](https://github.com/MostroP2P/app/pull/601)) by @grunch
+- read the published_at tag on order events ([#602](https://github.com/MostroP2P/app/pull/602)) by @grunch
+- **chat-attachments:** phase 4 — the web build sends, shows and saves files (#589) ([#600](https://github.com/MostroP2P/app/pull/600)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **trades:** don't offer Release again while the node settles it ([#604](https://github.com/MostroP2P/app/pull/604)) by @grunch
+- **chat:** show a sent message once the first relay accepts it ([#603](https://github.com/MostroP2P/app/pull/603)) by @grunch
+- **errors:** tell an unsent message apart from a daemon timeout ([#599](https://github.com/MostroP2P/app/pull/599)) by @grunch
+
 ## [2.0.7] - 2026-09-25
 
 ### ✨ Features

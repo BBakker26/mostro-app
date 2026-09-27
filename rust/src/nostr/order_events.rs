@@ -318,9 +318,9 @@ mod tests {
             .unwrap()
     }
 
-    /// An order event published at `published_at`, with an optional
-    /// `created_at` tag.
-    fn order_event_created(published_at: u64, created_tag: Option<&str>) -> Event {
+    /// An order event whose revision was published at `revision_at`, with
+    /// extra `(name, value)` tags.
+    fn order_event_tagged(revision_at: u64, extra: &[(&str, &str)]) -> Event {
         let keys = Keys::generate();
         let mut tags = vec![
             Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
@@ -330,14 +330,23 @@ mod tests {
             Tag::parse(["fa", "20"]).unwrap(),
             Tag::parse(["z", "order"]).unwrap(),
         ];
-        if let Some(value) = created_tag {
-            tags.push(Tag::parse(["created_at", value]).unwrap());
+        for (name, value) in extra {
+            tags.push(Tag::parse([*name, *value]).unwrap());
         }
         EventBuilder::new(Kind::from(KIND_ORDER), "")
             .tags(tags)
-            .custom_created_at(Timestamp::from_secs(published_at))
+            .custom_created_at(Timestamp::from_secs(revision_at))
             .finalize(&keys)
             .unwrap()
+    }
+
+    /// An order event published at `revision_at`, with an optional
+    /// `published_at` tag.
+    fn order_event_created(revision_at: u64, published_tag: Option<&str>) -> Event {
+        match published_tag {
+            Some(value) => order_event_tagged(revision_at, &[("published_at", value)]),
+            None => order_event_tagged(revision_at, &[]),
+        }
     }
 
     /// A later revision (published at 5_000) keeps the order's creation time
@@ -355,6 +364,23 @@ mod tests {
             let order = parse_order_event(&order_event_created(5_000, tag), None).unwrap();
             assert_eq!(order.created_at, 5_000, "tag {tag:?}");
         }
+    }
+
+    /// Daemon builds between MostroP2P/mostro#971 and #1000 named the tag
+    /// `created_at`; it is still read when `published_at` is absent.
+    #[test]
+    fn created_at_reads_the_legacy_created_at_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// With both tags present, `published_at` is the one that counts.
+    #[test]
+    fn created_at_prefers_published_at_over_the_legacy_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "2000"), ("published_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
     }
 
     /// A creation time later than the revision is impossible; capping it

@@ -4006,4 +4006,124 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get cashuErrorSendUnresolved =>
       'L\'envoi a échoué et le portefeuille n\'a pas pu confirmer le retour des fonds. Synchronisez avec la mint avant de réessayer.';
+
+  @override
+  String get lockEscrowTitle => 'Verrouiller le séquestre';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Verrouillez votre ecash dans un séquestre 2-sur-3 au mint de ce nœud. Ni vous ni l\'acheteur ne pouvez le déplacer seul — et si le nœud disparaît, vous pourrez le récupérer vous-même une fois le verrou expiré.';
+
+  @override
+  String get lockEscrowAmount => 'Séquestre';
+
+  @override
+  String get lockEscrowFee => 'Frais Mostro';
+
+  @override
+  String get lockEscrowTotal => 'Total';
+
+  @override
+  String get lockEscrowBalance => 'Votre solde';
+
+  @override
+  String get lockEscrowConfirm => 'Verrouiller le séquestre';
+
+  @override
+  String get lockEscrowFundWallet => 'Approvisionner le portefeuille';
+
+  @override
+  String get lockEscrowSubmitted => 'Séquestre verrouillé et envoyé';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Votre portefeuille ne couvre pas le séquestre et les frais.';
+
+  @override
+  String get lockEscrowNotTheSeller => 'Seul le vendeur finance le séquestre.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'Le séquestre n\'a pas pu être construit correctement. Rien n\'a été envoyé.';
+
+  @override
+  String get lockEscrowFailed =>
+      'Le mint n\'a pas pu verrouiller le séquestre. Vos fonds n\'ont pas bougé.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint : $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Récupérable par vous après $days jours';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'Cet échange n\'a pas encore de demande de séquestre. Attendez que la prise de l\'acheteur arrive, puis réessayez.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'Cet appareil ne détient pas la clé avec laquelle cet ordre a été pris. Restaurez votre compte sur l\'appareil où vous avez commencé l\'échange.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'Le séquestre est encore verrouillé. Vous pourrez le récupérer vous-même une fois le verrou expiré.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'L\'horloge de votre appareil est incorrecte, le séquestre ne peut donc pas être daté correctement. Corrigez la date et réessayez.';
+
+  @override
+  String get lockEscrowRetry => 'Réessayer l\'envoi';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Votre séquestre est verrouillé mais le nœud ne l\'a pas confirmé. Réessayer est sans risque : il ne sera pas verrouillé une seconde fois.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Ce nœud n\'a pas publié son mint : il n\'y a nulle part où verrouiller l\'escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'L\'escrow est arrivé au nœud, mais cet appareil n\'a pas pu en garder une copie. Le trade peut continuer, mais cet appareil ne pourra pas récupérer l\'escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Le nœud n\'a pas accepté cet escrow. Il a été mis de côté — il vous revient à l\'expiration de son verrou — et la prochaine tentative en verrouille un nouveau.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Le nœud utilise un autre mint. Cet escrow a été mis de côté — il vous revient à l\'expiration de son verrou. Vérifiez le mint du nœud avant de réessayer.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Le nœud n\'a pas pu joindre le mint pour vérifier votre escrow. Réessayez : le même escrow est renvoyé, rien n\'est verrouillé deux fois.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Le nœud a refusé l\'escrow. Il reste enregistré sur cet appareil ; réessayez dans un instant.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Le nœud n\'a pas encore répondu. Votre escrow est enregistré ; réessayer renvoie le même.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Le nœud indique que cet ordre n\'attend plus l\'escrow. Votre escrow reste enregistré sur cet appareil ; le statut du trade se mettra à jour quand le nœud le signalera.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Verrouillez l\'escrow pour démarrer le trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Verrouillez votre ecash dans l\'escrow au mint du nœud. Cela démarre le trade, et il vous revient si le nœud disparaît.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Ils verrouillent les sats dans l\'escrow. Une fois verrouillé, c\'est à vous de payer le fiat.';
 }

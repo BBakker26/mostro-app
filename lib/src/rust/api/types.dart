@@ -10,7 +10,7 @@ part 'types.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `default_expiration_hours`, `default_expiration_seconds`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AppState`, `MostroNodeInfo`, `QueuedMessageStatus`, `TradeHistoryEntry`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// The `bond_claims` key for a node / order pair.
 Future<String> bondClaimKey({
@@ -563,6 +563,77 @@ enum BuyerStep {
   fiatSent,
   awaitingRelease,
   complete,
+}
+
+/// What a seller is about to lock into a Cashu escrow — phase C5.
+///
+/// Shown before the seller commits anything. The amount comes from the order;
+/// the fee is derived from the node's advertised rate and must match what the
+/// daemon computed to the satoshi, so it is surfaced rather than hidden.
+class CashuEscrowQuote {
+  final String orderId;
+
+  /// The escrow itself: exactly the order amount.
+  final BigInt amountSats;
+
+  /// The Mostro fee funded with the lock. Zero until the daemon collects a
+  /// fee token (its TA-1f): today it ignores one, so building it would only
+  /// cost the seller.
+  final BigInt feeSats;
+
+  /// `amount_sats + fee_sats` — what the wallet must actually hold.
+  final BigInt totalSats;
+
+  /// Spendable balance right now, so the UI can say "fund your wallet"
+  /// instead of failing at the mint.
+  final BigInt balanceSats;
+
+  /// Mint the escrow will be locked at.
+  final String mintUrl;
+
+  /// Days the escrow stays locked before the seller can reclaim it alone.
+  final int locktimeDays;
+
+  /// An escrow is already locked for this trade and recorded, but the node
+  /// has not confirmed it: the next `lock_escrow` re-sends that same token
+  /// and swaps nothing.
+  final bool pendingSubmission;
+
+  const CashuEscrowQuote({
+    required this.orderId,
+    required this.amountSats,
+    required this.feeSats,
+    required this.totalSats,
+    required this.balanceSats,
+    required this.mintUrl,
+    required this.locktimeDays,
+    required this.pendingSubmission,
+  });
+
+  @override
+  int get hashCode =>
+      orderId.hashCode ^
+      amountSats.hashCode ^
+      feeSats.hashCode ^
+      totalSats.hashCode ^
+      balanceSats.hashCode ^
+      mintUrl.hashCode ^
+      locktimeDays.hashCode ^
+      pendingSubmission.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CashuEscrowQuote &&
+          runtimeType == other.runtimeType &&
+          orderId == other.orderId &&
+          amountSats == other.amountSats &&
+          feeSats == other.feeSats &&
+          totalSats == other.totalSats &&
+          balanceSats == other.balanceSats &&
+          mintUrl == other.mintUrl &&
+          locktimeDays == other.locktimeDays &&
+          pendingSubmission == other.pendingSubmission;
 }
 
 /// State of the embedded Cashu wallet — phase C2 of `docs/cashu/README.md`.
@@ -1833,6 +1904,41 @@ class TradeInfo {
   /// on rows written before the field existed (`#[serde(default)]`).
   final BondInfo? bond;
 
+  /// The buyer's **per-order trade pubkey**, as the daemon stated it.
+  ///
+  /// Not the same as [`Self::counterparty_pubkey`], which holds the maker's
+  /// order-book key for a taker and nothing at all for a maker. The Cashu
+  /// escrow is locked to these keys, and the daemon re-derives them from the
+  /// order and rejects a proof that names any others — so this is the only
+  /// value that can be used to build one.
+  ///
+  /// `None` until the daemon sends a reply carrying an order payload.
+  final String? buyerTradePubkey;
+
+  /// The seller's per-order trade pubkey. See [`Self::buyer_trade_pubkey`].
+  final String? sellerTradePubkey;
+
+  /// Mint the escrow was locked at. Recorded per trade rather than read back
+  /// from settings: a node may change its mint, and a trade must still be
+  /// settleable at the mint its funds actually sit in.
+  final String? cashuMintUrl;
+
+  /// The 2-of-3 escrow token the seller locked. Kept so the seller can
+  /// re-submit after an interrupted send, and so either party can settle or
+  /// reclaim without asking the daemon for it again.
+  final String? cashuEscrowToken;
+
+  /// Unix timestamp (seconds) when the escrow was locked. The locktime
+  /// refund window is counted from the node's advertised locktime, not from
+  /// this — this is for display and for ordering.
+  final PlatformInt64? cashuLockedAt;
+
+  /// Escrow tokens the daemon rejected for good (`invalid_cashu_token`,
+  /// `invalid_mint_url`): it did not store them, so a retry must build a new
+  /// one. Kept, never dropped — each is the seller's money, reclaimable
+  /// through the refund path once its locktime passes.
+  final List<String> cashuRejectedEscrowTokens;
+
   const TradeInfo({
     required this.id,
     required this.order,
@@ -1852,6 +1958,12 @@ class TradeInfo {
     this.peerDays,
     this.ratedAt,
     this.bond,
+    this.buyerTradePubkey,
+    this.sellerTradePubkey,
+    this.cashuMintUrl,
+    this.cashuEscrowToken,
+    this.cashuLockedAt,
+    required this.cashuRejectedEscrowTokens,
   });
 
   @override
@@ -1873,7 +1985,13 @@ class TradeInfo {
       peerReviews.hashCode ^
       peerDays.hashCode ^
       ratedAt.hashCode ^
-      bond.hashCode;
+      bond.hashCode ^
+      buyerTradePubkey.hashCode ^
+      sellerTradePubkey.hashCode ^
+      cashuMintUrl.hashCode ^
+      cashuEscrowToken.hashCode ^
+      cashuLockedAt.hashCode ^
+      cashuRejectedEscrowTokens.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1897,7 +2015,13 @@ class TradeInfo {
           peerReviews == other.peerReviews &&
           peerDays == other.peerDays &&
           ratedAt == other.ratedAt &&
-          bond == other.bond;
+          bond == other.bond &&
+          buyerTradePubkey == other.buyerTradePubkey &&
+          sellerTradePubkey == other.sellerTradePubkey &&
+          cashuMintUrl == other.cashuMintUrl &&
+          cashuEscrowToken == other.cashuEscrowToken &&
+          cashuLockedAt == other.cashuLockedAt &&
+          cashuRejectedEscrowTokens == other.cashuRejectedEscrowTokens;
 }
 
 /// Final trade outcomes.

@@ -3982,4 +3982,125 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get cashuErrorSendUnresolved =>
       'L\'invio non è riuscito e il portafoglio non ha potuto confermare che i fondi siano tornati. Sincronizza con la mint prima di riprovare.';
+
+  @override
+  String get lockEscrowTitle => 'Blocca il deposito';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Blocca il tuo ecash in un deposito 2-su-3 presso la mint di questo nodo. Né tu né l\'acquirente potete muoverlo da soli — e se il nodo sparisce potrai recuperarlo tu stesso una volta scaduto il blocco.';
+
+  @override
+  String get lockEscrowAmount => 'Deposito';
+
+  @override
+  String get lockEscrowFee => 'Commissione Mostro';
+
+  @override
+  String get lockEscrowTotal => 'Totale';
+
+  @override
+  String get lockEscrowBalance => 'Il tuo saldo';
+
+  @override
+  String get lockEscrowConfirm => 'Blocca il deposito';
+
+  @override
+  String get lockEscrowFundWallet => 'Ricarica il portafoglio';
+
+  @override
+  String get lockEscrowSubmitted => 'Deposito bloccato e inviato';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Il tuo portafoglio non copre deposito e commissione.';
+
+  @override
+  String get lockEscrowNotTheSeller =>
+      'Solo il venditore finanzia il deposito.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'Non è stato possibile costruire il deposito correttamente. Non è stato inviato nulla.';
+
+  @override
+  String get lockEscrowFailed =>
+      'La mint non ha potuto bloccare il deposito. I tuoi fondi non si sono mossi.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Recuperabile da te dopo $days giorni';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'Questo scambio non ha ancora una richiesta di deposito. Attendi che arrivi la presa dell\'acquirente e riprova.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'Questo dispositivo non ha la chiave con cui è stato preso questo ordine. Ripristina il tuo account sul dispositivo da cui hai iniziato lo scambio.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'Il deposito è ancora bloccato. Potrai recuperarlo tu stesso una volta scaduto il blocco.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'L\'orologio del tuo dispositivo è errato, quindi il deposito non può essere datato correttamente. Correggi la data e riprova.';
+
+  @override
+  String get lockEscrowRetry => 'Riprova l\'invio';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Il tuo deposito è bloccato ma il nodo non lo ha confermato. Riprovare è sicuro: non verrà bloccato una seconda volta.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Questo nodo non ha pubblicato il suo mint, quindi non c\'è dove bloccare l\'escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'L\'escrow è arrivato al nodo, ma questo dispositivo non ha potuto salvarne una copia. Il trade può continuare, ma da questo dispositivo non potrai recuperare l\'escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Il nodo non ha accettato questo escrow. È stato messo da parte — torna a te quando scade il suo blocco — e il prossimo tentativo ne blocca uno nuovo.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Il nodo usa un altro mint. Questo escrow è stato messo da parte — torna a te quando scade il suo blocco. Controlla il mint del nodo prima di riprovare.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Il nodo non ha potuto contattare il mint per verificare il tuo escrow. Riprova: viene rinviato lo stesso escrow, niente viene bloccato due volte.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Il nodo ha rifiutato l\'escrow. Resta salvato su questo dispositivo; riprova tra un momento.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Il nodo non ha ancora risposto. Il tuo escrow è salvato; riprovare rinvia lo stesso.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Il nodo dice che questo ordine non attende più l\'escrow. Il tuo escrow resta salvato su questo dispositivo; lo stato del trade si aggiornerà quando il nodo lo comunicherà.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Blocca l\'escrow per avviare il trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Blocca il tuo ecash nell\'escrow presso il mint del nodo. Questo avvia il trade, e torna a te se il nodo scompare.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Stanno bloccando i sats nell\'escrow. Una volta bloccato, tocca a te pagare il fiat.';
 }

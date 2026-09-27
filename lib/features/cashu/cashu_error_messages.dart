@@ -22,6 +22,26 @@ String cashuErrorMessage(Object error, AppLocalizations l10n) {
 /// Marker → message. Insertion-ordered, most specific first: a marker that is a
 /// prefix of another must come first, or the broader one would shadow it.
 final Map<String, String Function(AppLocalizations)> _messages = {
+  'CashuInsufficientFunds': (l) => l.lockEscrowInsufficientFunds,
+  'CashuMintUnknown': (l) => l.lockEscrowMintUnknown,
+  // The daemon's answers to a submission (phase C5). Each reason says what
+  // happened to the recorded escrow, which is what the seller must know.
+  'CashuEscrowRejected: InvalidCashuToken': (l) => l.lockEscrowRejectedToken,
+  'CashuEscrowRejected: InvalidMintUrl': (l) => l.lockEscrowRejectedMint,
+  'CashuEscrowRejected: CashuMintUnavailable': (l) =>
+      l.lockEscrowMintUnavailableAtNode,
+  'CashuEscrowRejected': (l) => l.lockEscrowRejectedGeneric,
+  'CashuEscrowOrderMovedOn': (l) => l.lockEscrowOrderMovedOn,
+  'CashuEscrowNotPersisted': (l) => l.lockEscrowNotRecorded,
+  'NoDaemonResponse': (l) => l.lockEscrowNoAnswer,
+  'CashuEscrowRequestMissing': (l) => l.lockEscrowRequestMissing,
+  'CashuWrongTradeKey': (l) => l.lockEscrowWrongTradeKey,
+  'CashuLocktimeNotReached': (l) => l.lockEscrowLocktimeNotReached,
+  'DeviceClockInvalid': (l) => l.lockEscrowClockInvalid,
+  'InvalidEscrowParties': (l) => l.lockEscrowInvalidToken,
+  'InvalidEscrowToken': (l) => l.lockEscrowInvalidToken,
+  'NotTheSeller': (l) => l.lockEscrowNotTheSeller,
+  'CashuLockFailed': (l) => l.lockEscrowFailed,
   'CashuNotEnabled': (l) => l.cashuErrorNotEnabled,
   'CashuNotConnected': (l) => l.cashuErrorNotConnected,
   // The wallet is bound to the previous node's mint: a node switch happened

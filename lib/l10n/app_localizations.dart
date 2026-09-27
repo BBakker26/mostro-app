@@ -6615,6 +6615,198 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The send failed and the wallet could not confirm the funds are back. Sync with the mint before trying again.'**
   String get cashuErrorSendUnresolved;
+
+  /// Title of the seller's Cashu escrow funding screen
+  ///
+  /// In en, this message translates to:
+  /// **'Lock the escrow'**
+  String get lockEscrowTitle;
+
+  /// Explanation shown on the escrow funding screen
+  ///
+  /// In en, this message translates to:
+  /// **'Lock your ecash in a 2-of-3 escrow at this node\'s mint. Neither you nor the buyer can move it alone — and if the node disappears, you can reclaim it yourself once the locktime passes.'**
+  String get lockEscrowExplanation;
+
+  /// Escrow screen — the order amount to be locked
+  ///
+  /// In en, this message translates to:
+  /// **'Escrow'**
+  String get lockEscrowAmount;
+
+  /// Escrow screen — the separate fee token amount
+  ///
+  /// In en, this message translates to:
+  /// **'Mostro fee'**
+  String get lockEscrowFee;
+
+  /// Escrow screen — escrow plus fee
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get lockEscrowTotal;
+
+  /// Escrow screen — the Cashu wallet balance
+  ///
+  /// In en, this message translates to:
+  /// **'Your balance'**
+  String get lockEscrowBalance;
+
+  /// Escrow screen — button that funds and submits the escrow
+  ///
+  /// In en, this message translates to:
+  /// **'Lock escrow'**
+  String get lockEscrowConfirm;
+
+  /// Escrow screen — button shown when the balance is short, opening the wallet
+  ///
+  /// In en, this message translates to:
+  /// **'Fund your wallet'**
+  String get lockEscrowFundWallet;
+
+  /// Escrow screen — confirmation after a successful lock
+  ///
+  /// In en, this message translates to:
+  /// **'Escrow locked and sent'**
+  String get lockEscrowSubmitted;
+
+  /// Escrow error — balance below amount plus fee
+  ///
+  /// In en, this message translates to:
+  /// **'Your wallet does not hold enough for the escrow and the fee.'**
+  String get lockEscrowInsufficientFunds;
+
+  /// Escrow error — the lock was attempted from the buyer side
+  ///
+  /// In en, this message translates to:
+  /// **'Only the seller funds the escrow.'**
+  String get lockEscrowNotTheSeller;
+
+  /// Escrow error — the locally built token failed its own verification
+  ///
+  /// In en, this message translates to:
+  /// **'The escrow could not be built correctly. Nothing was sent.'**
+  String get lockEscrowInvalidToken;
+
+  /// Escrow error — the mint refused the swap
+  ///
+  /// In en, this message translates to:
+  /// **'The mint could not lock the escrow. Your funds have not moved.'**
+  String get lockEscrowFailed;
+
+  /// Escrow screen — the mint the escrow is locked at
+  ///
+  /// In en, this message translates to:
+  /// **'Mint: {mint}'**
+  String lockEscrowMint(String mint);
+
+  /// Escrow screen — when the seller can unilaterally reclaim
+  ///
+  /// In en, this message translates to:
+  /// **'Reclaimable by you after {days} days'**
+  String lockEscrowLocktime(int days);
+
+  /// Escrow error — the daemon has not sent the escrow request, so the buyer trade key is unknown
+  ///
+  /// In en, this message translates to:
+  /// **'This trade has no escrow request yet. Wait for the buyer\'s take to arrive, then try again.'**
+  String get lockEscrowRequestMissing;
+
+  /// Escrow error — the stored seller trade key does not match this device
+  ///
+  /// In en, this message translates to:
+  /// **'This device does not hold the key this order was taken with. Restore your account on the device you started the trade on.'**
+  String get lockEscrowWrongTradeKey;
+
+  /// Escrow error — a refund was attempted before the locktime expired
+  ///
+  /// In en, this message translates to:
+  /// **'The escrow is still locked. You can reclaim it yourself once the locktime passes.'**
+  String get lockEscrowLocktimeNotReached;
+
+  /// Escrow error — the system clock is before 1970
+  ///
+  /// In en, this message translates to:
+  /// **'Your device\'s clock is wrong, so the escrow cannot be timed correctly. Fix the date and try again.'**
+  String get lockEscrowClockInvalid;
+
+  /// Escrow screen — resubmits an escrow that was locked but whose message did not reach the node
+  ///
+  /// In en, this message translates to:
+  /// **'Retry sending'**
+  String get lockEscrowRetry;
+
+  /// Escrow screen — shown when a token exists locally but the submission may not have arrived
+  ///
+  /// In en, this message translates to:
+  /// **'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.'**
+  String get lockEscrowPendingSubmission;
+
+  /// Escrow error — the node published no mint (CashuMintUnknown)
+  ///
+  /// In en, this message translates to:
+  /// **'This node has not published its mint, so there is nowhere to lock the escrow.'**
+  String get lockEscrowMintUnknown;
+
+  /// Escrow error — submitted, but the device could not save the token (CashuEscrowNotPersisted)
+  ///
+  /// In en, this message translates to:
+  /// **'The escrow reached the node, but this device could not save a copy of it. The trade can go on, but this device cannot reclaim the escrow.'**
+  String get lockEscrowNotRecorded;
+
+  /// Escrow error — the daemon answered invalid_cashu_token; the token is retired and kept
+  ///
+  /// In en, this message translates to:
+  /// **'The node did not accept this escrow. It was set aside — it comes back to you when its lock expires — and the next attempt locks a new one.'**
+  String get lockEscrowRejectedToken;
+
+  /// Escrow error — the daemon answered invalid_mint_url; the token is retired and kept
+  ///
+  /// In en, this message translates to:
+  /// **'The node uses a different mint. This escrow was set aside — it comes back to you when its lock expires. Check the node\'s mint before trying again.'**
+  String get lockEscrowRejectedMint;
+
+  /// Escrow error — the daemon could not reach the mint (cashu_mint_unavailable); a retry re-sends the same token
+  ///
+  /// In en, this message translates to:
+  /// **'The node could not reach the mint to check your escrow. Try again: the same escrow is re-sent, nothing is locked twice.'**
+  String get lockEscrowMintUnavailableAtNode;
+
+  /// Escrow error — any other daemon refusal; the token stays recorded
+  ///
+  /// In en, this message translates to:
+  /// **'The node refused the escrow. It stays recorded on this device; try again in a moment.'**
+  String get lockEscrowRejectedGeneric;
+
+  /// Escrow error — no daemon answer within the wait; the token is recorded and re-sent on retry
+  ///
+  /// In en, this message translates to:
+  /// **'The node has not answered yet. Your escrow is recorded; retrying re-sends the same one.'**
+  String get lockEscrowNoAnswer;
+
+  /// Escrow error — a re-sent escrow was refused because the order no longer waits for it (CashuEscrowOrderMovedOn); not reported as locked
+  ///
+  /// In en, this message translates to:
+  /// **'The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade\'s status will update when the node reports it.'**
+  String get lockEscrowOrderMovedOn;
+
+  /// Trade screen headline for the seller while it must lock the Cashu escrow (the hold-invoice step on a Cashu node)
+  ///
+  /// In en, this message translates to:
+  /// **'Lock the escrow to start the trade'**
+  String get tradeHeadlineWaitingPaymentSellerCashu;
+
+  /// Trade screen instruction for the seller on a Cashu node: lock the escrow
+  ///
+  /// In en, this message translates to:
+  /// **'Lock your ecash in the escrow at the node\'s mint. That starts the trade, and it comes back to you if the node disappears.'**
+  String get tradeWaitingPaymentSellerInstructionCashu;
+
+  /// Trade screen body for the buyer while the seller locks the Cashu escrow
+  ///
+  /// In en, this message translates to:
+  /// **'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.'**
+  String get tradeBodyWaitingPaymentBuyerCashu;
 }
 
 class _AppLocalizationsDelegate

@@ -198,6 +198,10 @@ async fn on_pool_online() {
     fetch_and_set_node_capabilities().await;
     drop(capabilities_pending);
     let _ = flush_message_queue().await;
+    // A seller's escrow recorded but never confirmed (the app died or lost
+    // the relays mid-submission) is re-sent now, the same token, no second
+    // swap. Detached: it waits on the daemon, and nothing here may.
+    crate::rt::spawn(crate::api::cashu::resubmit_pending_escrows());
     // Rebuild chat listeners for persisted active trades — sessions are
     // in-memory, so after a restart nothing else would resubscribe.
     // Idempotent: orders with a live chat task are skipped by the
@@ -845,6 +849,17 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
                 &mostro_pubkey_hex,
                 crate::mostro::bond_policy::parse_tags(&tags),
             );
+            // The service fee. Only Cashu mode needs it client-side — there the
+            // seller funds the whole fee as its own token — but it rides in the
+            // same event, so reading it here costs nothing.
+            if let Some(fee) = tags
+                .iter()
+                .find(|t| t.first().map(String::as_str) == Some("fee"))
+                .and_then(|t| t.get(1))
+                .and_then(|v| v.trim().parse::<f64>().ok())
+            {
+                crate::mostro::node_fee::set_fee(fee);
+            }
         }
         Ok(None) => {
             log::warn!("[nostr] no Kind 38385 event found — PoW defaults to 0");

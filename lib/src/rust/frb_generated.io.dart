@@ -723,6 +723,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BuyerStep dco_decode_buyer_step(dynamic raw);
 
   @protected
+  CashuEscrowQuote dco_decode_cashu_escrow_quote(dynamic raw);
+
+  @protected
   CashuWalletStatus dco_decode_cashu_wallet_status(dynamic raw);
 
   @protected
@@ -1690,6 +1693,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BuyerStep sse_decode_buyer_step(SseDeserializer deserializer);
+
+  @protected
+  CashuEscrowQuote sse_decode_cashu_escrow_quote(SseDeserializer deserializer);
 
   @protected
   CashuWalletStatus sse_decode_cashu_wallet_status(
@@ -2877,6 +2883,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_buyer_step(BuyerStep self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_cashu_escrow_quote(
+    CashuEscrowQuote self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_cashu_wallet_status(

@@ -3994,4 +3994,125 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get cashuErrorSendUnresolved =>
       'Das Senden ist fehlgeschlagen und die Wallet konnte nicht bestätigen, dass das Guthaben zurück ist. Synchronisiere mit der Mint, bevor du es erneut versuchst.';
+
+  @override
+  String get lockEscrowTitle => 'Treuhand sperren';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Sperre dein E-Cash in einer 2-von-3-Treuhand bei der Mint dieses Nodes. Weder du noch der Käufer könnt es allein bewegen — und verschwindet der Node, holst du es nach Ablauf der Sperrfrist selbst zurück.';
+
+  @override
+  String get lockEscrowAmount => 'Treuhand';
+
+  @override
+  String get lockEscrowFee => 'Mostro-Gebühr';
+
+  @override
+  String get lockEscrowTotal => 'Gesamt';
+
+  @override
+  String get lockEscrowBalance => 'Dein Guthaben';
+
+  @override
+  String get lockEscrowConfirm => 'Treuhand sperren';
+
+  @override
+  String get lockEscrowFundWallet => 'Wallet aufladen';
+
+  @override
+  String get lockEscrowSubmitted => 'Treuhand gesperrt und gesendet';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Dein Guthaben deckt Treuhand und Gebühr nicht.';
+
+  @override
+  String get lockEscrowNotTheSeller =>
+      'Nur der Verkäufer finanziert die Treuhand.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'Die Treuhand konnte nicht korrekt erstellt werden. Es wurde nichts gesendet.';
+
+  @override
+  String get lockEscrowFailed =>
+      'Die Mint konnte die Treuhand nicht sperren. Dein Geld wurde nicht bewegt.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Von dir rückholbar nach $days Tagen';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'Für diesen Handel gibt es noch keine Treuhand-Anfrage. Warte, bis die Annahme des Käufers eintrifft, und versuche es erneut.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'Dieses Gerät hat nicht den Schlüssel, mit dem diese Order angenommen wurde. Stelle dein Konto auf dem Gerät wieder her, auf dem du den Handel begonnen hast.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'Die Treuhand ist noch gesperrt. Nach Ablauf der Sperrfrist kannst du sie selbst zurückholen.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'Die Uhr deines Geräts geht falsch, daher lässt sich die Treuhand nicht korrekt datieren. Korrigiere das Datum und versuche es erneut.';
+
+  @override
+  String get lockEscrowRetry => 'Senden erneut versuchen';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Deine Treuhand ist gesperrt, aber der Node hat sie nicht bestätigt. Ein erneuter Versuch ist sicher — es wird kein zweites Mal gesperrt.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Dieser Node hat seine Mint nicht veröffentlicht, daher gibt es keinen Ort, um den Escrow zu sperren.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'Der Escrow hat den Node erreicht, aber dieses Gerät konnte keine Kopie speichern. Der Trade kann weiterlaufen, aber dieses Gerät kann den Escrow nicht zurückfordern.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Der Node hat diesen Escrow nicht angenommen. Er wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft — und der nächste Versuch sperrt einen neuen.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Der Node verwendet eine andere Mint. Dieser Escrow wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft. Prüfe die Mint des Nodes, bevor du es erneut versuchst.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Der Node konnte die Mint nicht erreichen, um deinen Escrow zu prüfen. Versuche es erneut: derselbe Escrow wird erneut gesendet, nichts wird doppelt gesperrt.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Der Node hat den Escrow abgelehnt. Er bleibt auf diesem Gerät gespeichert; versuche es gleich noch einmal.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Der Node hat noch nicht geantwortet. Dein Escrow ist gespeichert; ein erneuter Versuch sendet denselben.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Der Node meldet, dass diese Order nicht mehr auf den Escrow wartet. Dein Escrow bleibt auf diesem Gerät gespeichert; der Status des Trades aktualisiert sich, sobald der Node ihn meldet.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Sperre den Escrow, um den Trade zu starten';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Sperre dein Ecash im Escrow bei der Mint des Nodes. Das startet den Trade, und es kommt zu dir zurück, falls der Node verschwindet.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Die Gegenseite sperrt die Sats im Escrow. Sobald er gesperrt ist, bist du dran, den Fiat-Betrag zu zahlen.';
 }

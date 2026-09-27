@@ -3970,4 +3970,124 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get cashuErrorSendUnresolved =>
       'El envío falló y la billetera no pudo confirmar que los fondos volvieron. Sincronizá con el mint antes de intentar de nuevo.';
+
+  @override
+  String get lockEscrowTitle => 'Bloquear la custodia';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Bloqueá tu ecash en una custodia 2-de-3 en el mint de este nodo. Ni vos ni el comprador pueden moverlo solos, y si el nodo desaparece podés recuperarlo vos mismo cuando pase el locktime.';
+
+  @override
+  String get lockEscrowAmount => 'Custodia';
+
+  @override
+  String get lockEscrowFee => 'Comisión de Mostro';
+
+  @override
+  String get lockEscrowTotal => 'Total';
+
+  @override
+  String get lockEscrowBalance => 'Tu saldo';
+
+  @override
+  String get lockEscrowConfirm => 'Bloquear custodia';
+
+  @override
+  String get lockEscrowFundWallet => 'Cargá tu billetera';
+
+  @override
+  String get lockEscrowSubmitted => 'Custodia bloqueada y enviada';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Tu billetera no alcanza para la custodia más la comisión.';
+
+  @override
+  String get lockEscrowNotTheSeller => 'Solo el vendedor financia la custodia.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'No se pudo construir la custodia correctamente. No se envió nada.';
+
+  @override
+  String get lockEscrowFailed =>
+      'El mint no pudo bloquear la custodia. Tus fondos no se movieron.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Podés recuperarlo tras $days días';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'Esta operación todavía no tiene pedido de custodia. Esperá a que llegue la toma del comprador e intentá de nuevo.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'Este dispositivo no tiene la clave con la que se tomó esta orden. Restaurá tu cuenta en el dispositivo donde empezaste la operación.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'La custodia sigue bloqueada. Vas a poder recuperarla vos mismo cuando pase el locktime.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'El reloj de tu dispositivo está mal, así que la custodia no se puede fechar bien. Corregí la fecha e intentá de nuevo.';
+
+  @override
+  String get lockEscrowRetry => 'Reintentar envío';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Tu custodia está bloqueada pero el nodo no la confirmó. Reintentar es seguro: no se bloquea una segunda vez.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Este nodo no publicó su mint, así que no hay dónde bloquear el escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'El escrow llegó al nodo, pero este dispositivo no pudo guardar una copia. El trade puede seguir, pero desde este dispositivo no podrás recuperar el escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'El nodo no aceptó este escrow. Quedó apartado —vuelve a ti cuando venza su bloqueo— y el próximo intento bloquea uno nuevo.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'El nodo usa otra mint. Este escrow quedó apartado —vuelve a ti cuando venza su bloqueo—. Revisa la mint del nodo antes de reintentar.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'El nodo no pudo contactar la mint para verificar tu escrow. Reintenta: se reenvía el mismo escrow, nada se bloquea dos veces.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'El nodo rechazó el escrow. Sigue guardado en este dispositivo; reintenta en un momento.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'El nodo todavía no respondió. Tu escrow está guardado; reintentar reenvía el mismo.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'El nodo dice que esta orden ya no espera el escrow. Tu escrow sigue guardado en este dispositivo; el estado del trade se actualizará cuando el nodo lo informe.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Bloquea el escrow para empezar el trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Bloquea tu ecash en el escrow de la mint del nodo. Eso inicia el trade, y vuelve a ti si el nodo desaparece.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Están bloqueando los sats en el escrow. Cuando esté bloqueado, te toca pagar el fiat.';
 }

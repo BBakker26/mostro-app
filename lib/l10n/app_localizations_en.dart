@@ -3942,4 +3942,124 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get cashuErrorSendUnresolved =>
       'The send failed and the wallet could not confirm the funds are back. Sync with the mint before trying again.';
+
+  @override
+  String get lockEscrowTitle => 'Lock the escrow';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Lock your ecash in a 2-of-3 escrow at this node\'s mint. Neither you nor the buyer can move it alone — and if the node disappears, you can reclaim it yourself once the locktime passes.';
+
+  @override
+  String get lockEscrowAmount => 'Escrow';
+
+  @override
+  String get lockEscrowFee => 'Mostro fee';
+
+  @override
+  String get lockEscrowTotal => 'Total';
+
+  @override
+  String get lockEscrowBalance => 'Your balance';
+
+  @override
+  String get lockEscrowConfirm => 'Lock escrow';
+
+  @override
+  String get lockEscrowFundWallet => 'Fund your wallet';
+
+  @override
+  String get lockEscrowSubmitted => 'Escrow locked and sent';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Your wallet does not hold enough for the escrow and the fee.';
+
+  @override
+  String get lockEscrowNotTheSeller => 'Only the seller funds the escrow.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'The escrow could not be built correctly. Nothing was sent.';
+
+  @override
+  String get lockEscrowFailed =>
+      'The mint could not lock the escrow. Your funds have not moved.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Reclaimable by you after $days days';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'This trade has no escrow request yet. Wait for the buyer\'s take to arrive, then try again.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'This device does not hold the key this order was taken with. Restore your account on the device you started the trade on.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'The escrow is still locked. You can reclaim it yourself once the locktime passes.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'Your device\'s clock is wrong, so the escrow cannot be timed correctly. Fix the date and try again.';
+
+  @override
+  String get lockEscrowRetry => 'Retry sending';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'This node has not published its mint, so there is nowhere to lock the escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'The escrow reached the node, but this device could not save a copy of it. The trade can go on, but this device cannot reclaim the escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'The node did not accept this escrow. It was set aside — it comes back to you when its lock expires — and the next attempt locks a new one.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'The node uses a different mint. This escrow was set aside — it comes back to you when its lock expires. Check the node\'s mint before trying again.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'The node could not reach the mint to check your escrow. Try again: the same escrow is re-sent, nothing is locked twice.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'The node refused the escrow. It stays recorded on this device; try again in a moment.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'The node has not answered yet. Your escrow is recorded; retrying re-sends the same one.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade\'s status will update when the node reports it.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Lock the escrow to start the trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Lock your ecash in the escrow at the node\'s mint. That starts the trade, and it comes back to you if the node disappears.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.';
 }

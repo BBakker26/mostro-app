@@ -3975,4 +3975,125 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get cashuErrorSendUnresolved =>
       'Het versturen is mislukt en de portemonnee kon niet bevestigen dat het geld terug is. Synchroniseer met de mint voordat je het opnieuw probeert.';
+
+  @override
+  String get lockEscrowTitle => 'De escrow vergrendelen';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Vergrendel je ecash in een 2-van-3-escrow bij de mint van deze node. Noch jij noch de koper kan het alleen verplaatsen — en als de node verdwijnt, kun je het zelf terugvorderen zodra de locktime verstreken is.';
+
+  @override
+  String get lockEscrowAmount => 'Escrow';
+
+  @override
+  String get lockEscrowFee => 'Mostro-vergoeding';
+
+  @override
+  String get lockEscrowTotal => 'Totaal';
+
+  @override
+  String get lockEscrowBalance => 'Je saldo';
+
+  @override
+  String get lockEscrowConfirm => 'Escrow vergrendelen';
+
+  @override
+  String get lockEscrowFundWallet => 'Portemonnee opwaarderen';
+
+  @override
+  String get lockEscrowSubmitted => 'Escrow vergrendeld en verstuurd';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Je portemonnee bevat niet genoeg voor de escrow en de vergoeding.';
+
+  @override
+  String get lockEscrowNotTheSeller =>
+      'Alleen de verkoper financiert de escrow.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'De escrow kon niet correct worden opgebouwd. Er is niets verstuurd.';
+
+  @override
+  String get lockEscrowFailed =>
+      'De mint kon de escrow niet vergrendelen. Je geld is niet verplaatst.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Na $days dagen door jou terug te vorderen';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'Deze trade heeft nog geen escrow-verzoek. Wacht tot de take van de koper binnenkomt en probeer het dan opnieuw.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'Dit apparaat heeft niet de sleutel waarmee deze order is genomen. Herstel je account op het apparaat waarop je de trade bent begonnen.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'De escrow is nog vergrendeld. Je kunt hem zelf terugvorderen zodra de locktime verstreken is.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'De klok van je apparaat klopt niet, dus de escrow kan niet correct worden getimed. Corrigeer de datum en probeer het opnieuw.';
+
+  @override
+  String get lockEscrowRetry => 'Opnieuw versturen';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Je escrow is vergrendeld, maar de node heeft het nog niet bevestigd. Opnieuw proberen is veilig — hij wordt niet een tweede keer vergrendeld.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Deze node heeft zijn mint niet gepubliceerd, dus er is geen plek om de escrow te vergrendelen.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'De escrow heeft de node bereikt, maar dit apparaat kon er geen kopie van opslaan. De trade kan doorgaan, maar dit apparaat kan de escrow niet terugvorderen.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'De node heeft deze escrow niet geaccepteerd. Hij is opzijgezet — hij komt naar je terug als zijn vergrendeling afloopt — en de volgende poging vergrendelt een nieuwe.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'De node gebruikt een andere mint. Deze escrow is opzijgezet — hij komt naar je terug als zijn vergrendeling afloopt. Controleer de mint van de node voordat je het opnieuw probeert.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'De node kon de mint niet bereiken om je escrow te controleren. Probeer het opnieuw: dezelfde escrow wordt opnieuw verstuurd, niets wordt twee keer vergrendeld.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'De node heeft de escrow geweigerd. Hij blijft op dit apparaat opgeslagen; probeer het zo meteen opnieuw.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'De node heeft nog niet geantwoord. Je escrow is opgeslagen; opnieuw proberen verstuurt dezelfde.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'De node zegt dat deze order niet meer op de escrow wacht. Je escrow blijft op dit apparaat opgeslagen; de status van de trade wordt bijgewerkt zodra de node die meldt.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Vergrendel de escrow om de trade te starten';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Vergrendel je ecash in de escrow bij de mint van de node. Dat start de trade, en het komt naar je terug als de node verdwijnt.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen.';
 }

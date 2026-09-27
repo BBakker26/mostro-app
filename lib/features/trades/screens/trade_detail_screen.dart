@@ -43,6 +43,8 @@ import 'package:mostro/shared/widgets/mostro_reactive_button.dart';
 import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
+import 'package:mostro/features/cashu/seller_funding_route.dart';
+import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show CooperativeCancelState, TradeInfo;
 
@@ -827,6 +829,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       TradeStatus.waitingPayment =>
         isBuyer
             ? l10n.tradeHeadlineWaitingPaymentBuyer
+            : ref.watch(isCashuModeProvider)
+            ? l10n.tradeHeadlineWaitingPaymentSellerCashu
             : l10n.tradeHeadlineWaitingPaymentSeller,
       TradeStatus.inProgress => l10n.tradeHeadlineInProgress,
       TradeStatus.waitingBond => l10n.tradeHeadlineWaitingBond,
@@ -873,6 +877,11 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         isBuyer
             ? l10n.tradeWaitingInvoiceBuyerInstruction
             : l10n.tradeWaitingInvoiceSellerInstruction,
+      // On a Cashu node the seller locks an escrow, not a hold invoice.
+      TradeStatus.waitingPayment when ref.watch(isCashuModeProvider) =>
+        isBuyer
+            ? l10n.tradeBodyWaitingPaymentBuyerCashu
+            : l10n.tradeWaitingPaymentSellerInstructionCashu,
       TradeStatus.waitingPayment =>
         isBuyer
             ? l10n.tradeBodyWaitingPaymentBuyer
@@ -1071,12 +1080,22 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         onPressed:
             () async => context.push(AppRoute.payBondPath(widget.orderId)),
       ),
+      // On a Cashu node the seller's funding step is the escrow lock.
       TradePrimaryAction.payHoldInvoice => TradePrimarySpec(
-        label: l10n.payHoldInvoiceButton,
-        icon: Icons.bolt,
+        label:
+            ref.read(isCashuModeProvider)
+                ? l10n.lockEscrowConfirm
+                : l10n.payHoldInvoiceButton,
+        icon:
+            ref.read(isCashuModeProvider) ? Icons.lock_outline : Icons.bolt,
         automationId: AutomationIds.tradePayInvoice,
         onPressed:
-            () async => context.push(AppRoute.payInvoicePath(widget.orderId)),
+            () async => context.push(
+              sellerFundingPath(
+                widget.orderId,
+                cashu: ref.read(isCashuModeProvider),
+              ),
+            ),
       ),
       TradePrimaryAction.fiatSent => TradePrimarySpec(
         label: l10n.tradeFiatSentAction,

@@ -3634,6 +3634,10 @@ async fn dispatch_mostro_message(
                                 bond_cancel_reason(&oid).await
                             }
                             crate::api::types::OrderStatus::WaitingMakerBond => {
+                                // Whoever closed the window, the create's
+                                // record waits for a `new-order` that will
+                                // not come.
+                                purge_detached_pending_request(trade_pubkey_hex);
                                 Some(if own_maker_cancel.0.is_some() {
                                     crate::api::types::TradeUpdateReason::UserCanceled
                                 } else {
@@ -5398,11 +5402,8 @@ async fn cancel_maker_bond(order_id: &str) -> Result<()> {
     );
     let reply = crate::rt::time::timeout(std::time::Duration::from_secs(10), reply_rx).await;
     match reply {
-        Ok(Ok(MakerCancelReply::Canceled)) => {
-            // The create's record waited for a `new-order` that will not come.
-            purge_detached_pending_request(&trade_pk_hex);
-            Ok(())
-        }
+        // The `canceled` arm wiped the row and dropped the create's record.
+        Ok(Ok(MakerCancelReply::Canceled)) => Ok(()),
         Ok(Ok(MakerCancelReply::Rejected { reason, .. })) if reason == "NotAllowedByStatus" => {
             settle_refused_maker_cancel(order_id, MAKER_BOND_LOCK_GRACE).await
         }
@@ -18141,6 +18142,52 @@ mod tests {
                 crate::api::types::OrderStatus::Canceled,
                 Some(crate::api::types::TradeUpdateReason::BondExpired)
             )]
+        );
+    }
+
+    /// Whatever closes the maker's window — the user's cancel, a late one,
+    /// or the payment deadline — the create's record waiting for a
+    /// `new-order` that will never come goes with the row.
+    #[tokio::test]
+    async fn a_deadline_canceled_drops_the_creates_leftover_record() {
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            41,
+        ))
+        .await
+        .unwrap();
+        let key = "ff00ff81";
+        pending_requests().lock().unwrap().insert(
+            key.to_string(),
+            PendingRequest {
+                request_id: 941,
+                trade_index: 41,
+                kind: PendingRequestKind::Create {
+                    local_uuid: "local-maker-deadline".to_string(),
+                    bond_requested: true,
+                },
+                tx: None,
+            },
+        );
+
+        dispatch_mostro_message(
+            daemon_message(order_uuid, Action::Canceled, None, 2_000),
+            "test-maker-bond-deadline-purge",
+            key,
+            41,
+        )
+        .await;
+
+        assert!(db.get_trade_by_order_id(&order_id).await.unwrap().is_none());
+        assert!(
+            take_matching_request(key, Some(941)).is_none(),
+            "the create's record is gone"
         );
     }
 

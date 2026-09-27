@@ -465,7 +465,8 @@ Rules:
   create's record on the same trade key still waits for the `new-order` of a bond
   that may lock.
   - `canceled` on that nonce: the `canceled` arm wipes the row with `UserCanceled`,
-    then wakes the cancel, which also drops the create's detached record.
+    then wakes the cancel. Every `canceled` that closes the window — the user's,
+    a late one, or the deadline's — also drops the create's detached record.
   - `NotAllowedByStatus`: the bond locked first, or the daemon predates #996. Both
     look the same on the wire, and the node advertises nothing that tells them apart
     (mostrod main still reports 0.18.8, like the release without #996). So
@@ -791,7 +792,9 @@ Same skeleton as `pay_lightning_invoice_screen.dart` (QR, amount, copy, share,
   bond-enabled node; the timeout risk is the node-policy switch).
 - Countdown to the bolt11 expiry when `expires_at` is known; nothing otherwise.
 - Taker: **Cancel** (daemon cancel). Maker: **Don't publish** (daemon cancel since
-  mostro#996, local wipe on an older daemon; copy explains).
+  mostro#996). When the node refuses it with no sign of a lock
+  (`MakerCancelRefused`), the row stays and a dialog lets the user choose
+  **Remove from this device** or **Keep waiting** (§6.2).
 - Restored without an invoice: "Request the invoice again" (taker) / countdown only
   (maker).
 - On `TradeUpdate` leaving the waiting-bond status: taker-buyer → Trade Detail;

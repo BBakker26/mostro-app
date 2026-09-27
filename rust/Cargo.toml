@@ -134,3 +134,6 @@ universal-time = { version = "0.3", default-features = false }
 nostr-sdk = { version = "0.45", default-features = false, features = ["local-relay"] }
 # A throwaway HTTP server for the Blossom client tests (nostr/blossom.rs).
 tokio = { version = "1", features = ["net", "io-util"] }
+# A relay that completes the websocket handshake and never answers
+# (nostr/publish.rs). Already in the tree through nostr-sdk's async-wsocket.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }

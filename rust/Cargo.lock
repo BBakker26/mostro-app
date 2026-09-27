@@ -3456,6 +3456,7 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite 0.28.0",
  "tracing",
  "universal-time",
  "uuid",

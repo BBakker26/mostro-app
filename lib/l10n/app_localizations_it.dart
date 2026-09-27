@@ -3850,4 +3850,136 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get attachmentSaveOnly =>
       'Questo tipo di file può solo essere salvato.';
+
+  @override
+  String get cashuWalletTitle => 'Portafoglio Cashu';
+
+  @override
+  String get cashuWalletSubtitle =>
+      'Conserva ecash per gli scambi su questo nodo';
+
+  @override
+  String get cashuBalanceLabel => 'Saldo';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Non connesso a una mint';
+
+  @override
+  String get cashuReceiveButton => 'Ricevi';
+
+  @override
+  String get cashuSendButton => 'Invia';
+
+  @override
+  String get cashuReceiveHint => 'Incolla o scansiona un token Cashu';
+
+  @override
+  String get cashuAmountLabel => 'Importo in sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return 'Ricevuti $sats sats';
+  }
+
+  @override
+  String get cashuSyncButton => 'Sincronizza con la mint';
+
+  @override
+  String get cashuSynced => 'Sincronizzato con la mint';
+
+  @override
+  String get cashuTokenTitle => 'Il tuo token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Chi riscuote questo token tiene i fondi. Trattalo come contante: invialo una sola volta, a una sola persona.';
+
+  @override
+  String get cashuCopyToken => 'Copia';
+
+  @override
+  String get cashuTokenCopied => 'Token copiato';
+
+  @override
+  String get cashuWalletExplanation =>
+      'Questo portafoglio contiene ecash emesso dalla mint che usa il tuo nodo Mostro. Serve a finanziare e incassare scambi su quel nodo: non è un portafoglio generico.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'Questo nodo Mostro non liquida gli scambi con Cashu.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'Il portafoglio non è ancora connesso a una mint.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'Impossibile raggiungere la mint. Controlla la connessione e riprova.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'Alla mint di questo nodo mancano funzioni necessarie al deposito, quindi qui non si può scambiare.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'Il portafoglio Cashu non è ancora disponibile nella versione web.';
+
+  @override
+  String get cashuErrorAmountZero => 'Inserisci un importo maggiore di zero.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'Hai solo $sats sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'Non è stato possibile riscuotere il token. Potrebbe essere di un\'altra mint o già speso.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'Non è stato possibile creare il token. Potresti non avere fondi sufficienti.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Crea o importa un account prima di usare il portafoglio.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Qualcosa è andato storto con il portafoglio. Riprova.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'Hai esportato un token. È denaro finché qualcuno non lo riscuote: conservalo finché non sei sicuro che sia arrivato.';
+
+  @override
+  String get cashuShowLastToken => 'Mostralo di nuovo';
+
+  @override
+  String get cashuLastTokenDone => 'L\'ho inviato';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Questo token è troppo grande per un codice QR. Copialo invece.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'Il nodo attivo è cambiato e questo portafoglio è legato a un\'altra mint. Torna indietro e riapri il portafoglio.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Questo account è stato importato da un nsec, quindi non c\'è una frase di recupero da cui derivare il portafoglio. Il portafoglio Cashu richiede un account creato da una frase di recupero.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'Non è stato possibile verificare questo token: non contiene la prova della firma della mint, quindi non è stato accettato.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'L\'invio non è riuscito e il portafoglio non ha potuto confermare che i fondi siano tornati. Sincronizza con la mint prima di riprovare.';
 }

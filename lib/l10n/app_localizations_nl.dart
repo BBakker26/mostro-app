@@ -3844,4 +3844,135 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get attachmentSaveOnly =>
       'Dit type bestand kan alleen worden opgeslagen.';
+
+  @override
+  String get cashuWalletTitle => 'Cashu-portemonnee';
+
+  @override
+  String get cashuWalletSubtitle => 'Bewaar ecash voor trades op deze node';
+
+  @override
+  String get cashuBalanceLabel => 'Saldo';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Niet verbonden met een mint';
+
+  @override
+  String get cashuReceiveButton => 'Ontvangen';
+
+  @override
+  String get cashuSendButton => 'Versturen';
+
+  @override
+  String get cashuReceiveHint => 'Plak of scan een Cashu-token';
+
+  @override
+  String get cashuAmountLabel => 'Bedrag in sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return '$sats sats ontvangen';
+  }
+
+  @override
+  String get cashuSyncButton => 'Synchroniseren met mint';
+
+  @override
+  String get cashuSynced => 'Gesynchroniseerd met mint';
+
+  @override
+  String get cashuTokenTitle => 'Je token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Wie deze token inwisselt, houdt het geld. Behandel hem als contant geld: verstuur hem één keer, naar één persoon.';
+
+  @override
+  String get cashuCopyToken => 'Kopiëren';
+
+  @override
+  String get cashuTokenCopied => 'Token gekopieerd';
+
+  @override
+  String get cashuWalletExplanation =>
+      'Deze portemonnee bewaart ecash die is uitgegeven door de mint die je Mostro-node gebruikt. Hij dient om trades op die node te financieren en te ontvangen — het is geen portemonnee voor algemeen gebruik.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'Deze Mostro-node rekent trades niet af met Cashu.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'De portemonnee is nog niet verbonden met een mint.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'De mint is niet bereikbaar. Controleer je verbinding en probeer het opnieuw.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'De mint van deze node mist functies die de escrow nodig heeft, dus handelen is hier niet mogelijk.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'De Cashu-portemonnee is nog niet beschikbaar in de webversie.';
+
+  @override
+  String get cashuErrorAmountZero => 'Voer een bedrag groter dan nul in.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'Je hebt maar $sats sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'Deze token kon niet worden ingewisseld. Hij komt misschien van een andere mint of is al uitgegeven.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'De token kon niet worden aangemaakt. Misschien heb je niet genoeg saldo.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Maak een account aan of importeer er een voordat je de portemonnee gebruikt.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Er ging iets mis met de portemonnee. Probeer het opnieuw.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'Je hebt een token geëxporteerd. Het is geld totdat iemand hem inwisselt — bewaar hem tot je zeker weet dat hij is aangekomen.';
+
+  @override
+  String get cashuShowLastToken => 'Opnieuw tonen';
+
+  @override
+  String get cashuLastTokenDone => 'Ik heb hem verstuurd';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Deze token is te groot voor een QR-code. Kopieer hem in plaats daarvan.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'De actieve node is gewijzigd en deze portemonnee hoort bij een andere mint. Ga terug en open de portemonnee opnieuw.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Dit account is geïmporteerd vanuit een nsec, dus er is geen herstelzin om de portemonnee van af te leiden. De Cashu-portemonnee heeft een account nodig dat met een herstelzin is aangemaakt.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'Deze token kon niet worden geverifieerd: hij bevat geen bewijs van de handtekening van de mint, dus hij is niet geaccepteerd.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'Het versturen is mislukt en de portemonnee kon niet bevestigen dat het geld terug is. Synchroniseer met de mint voordat je het opnieuw probeert.';
 }

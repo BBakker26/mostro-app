@@ -3839,4 +3839,135 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get attachmentSaveOnly =>
       'Este tipo de archivo solo se puede guardar.';
+
+  @override
+  String get cashuWalletTitle => 'Billetera Cashu';
+
+  @override
+  String get cashuWalletSubtitle => 'Guarda ecash para operar en este nodo';
+
+  @override
+  String get cashuBalanceLabel => 'Saldo';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Sin conexión a un mint';
+
+  @override
+  String get cashuReceiveButton => 'Recibir';
+
+  @override
+  String get cashuSendButton => 'Enviar';
+
+  @override
+  String get cashuReceiveHint => 'Pega o escanea un token Cashu';
+
+  @override
+  String get cashuAmountLabel => 'Monto en sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return 'Recibiste $sats sats';
+  }
+
+  @override
+  String get cashuSyncButton => 'Sincronizar con el mint';
+
+  @override
+  String get cashuSynced => 'Sincronizado con el mint';
+
+  @override
+  String get cashuTokenTitle => 'Tu token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Quien canjee este token se queda con los fondos. Tratalo como efectivo: enviálo una sola vez, a una sola persona.';
+
+  @override
+  String get cashuCopyToken => 'Copiar';
+
+  @override
+  String get cashuTokenCopied => 'Token copiado';
+
+  @override
+  String get cashuWalletExplanation =>
+      'Esta billetera guarda ecash emitido por el mint que usa tu nodo Mostro. Existe para financiar y cobrar operaciones en ese nodo: no es una billetera de uso general.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'Este nodo Mostro no liquida operaciones con Cashu.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'La billetera todavía no está conectada a un mint.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'No se pudo contactar al mint. Revisá tu conexión e intentá de nuevo.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'Al mint de este nodo le faltan funciones que la custodia necesita, así que no se puede operar acá.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'La billetera Cashu todavía no está disponible en la versión web.';
+
+  @override
+  String get cashuErrorAmountZero => 'Ingresá un monto mayor que cero.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'Solo tenés $sats sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'No se pudo canjear ese token. Puede ser de otro mint o ya estar gastado.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'No se pudo crear el token. Puede que no tengas fondos suficientes.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Creá o importá una cuenta antes de usar la billetera.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Algo salió mal con la billetera. Intentá de nuevo.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'Exportaste un token. Es dinero hasta que alguien lo canjee: guardalo hasta estar seguro de que llegó.';
+
+  @override
+  String get cashuShowLastToken => 'Mostrarlo de nuevo';
+
+  @override
+  String get cashuLastTokenDone => 'Ya lo envié';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Este token es demasiado grande para un código QR. Copialo en su lugar.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'El nodo activo cambió y esta billetera está ligada a otro mint. Volvé atrás y abrí la billetera de nuevo.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Esta cuenta se importó desde un nsec, así que no hay frase de recuperación de la que derivar la billetera. La billetera Cashu necesita una cuenta creada a partir de una frase de recuperación.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'No se pudo verificar este token: no trae prueba de la firma del mint, así que no se aceptó.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'El envío falló y la billetera no pudo confirmar que los fondos volvieron. Sincronizá con el mint antes de intentar de nuevo.';
 }

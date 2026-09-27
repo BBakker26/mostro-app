@@ -3863,4 +3863,135 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get attachmentSaveOnly =>
       'Dieser Dateityp kann nur gespeichert werden.';
+
+  @override
+  String get cashuWalletTitle => 'Cashu-Wallet';
+
+  @override
+  String get cashuWalletSubtitle => 'E-Cash für Trades auf diesem Node halten';
+
+  @override
+  String get cashuBalanceLabel => 'Guthaben';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Mit keiner Mint verbunden';
+
+  @override
+  String get cashuReceiveButton => 'Empfangen';
+
+  @override
+  String get cashuSendButton => 'Senden';
+
+  @override
+  String get cashuReceiveHint => 'Cashu-Token einfügen oder scannen';
+
+  @override
+  String get cashuAmountLabel => 'Betrag in Sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return '$sats Sats empfangen';
+  }
+
+  @override
+  String get cashuSyncButton => 'Mit der Mint synchronisieren';
+
+  @override
+  String get cashuSynced => 'Mit der Mint synchronisiert';
+
+  @override
+  String get cashuTokenTitle => 'Dein Token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Wer dieses Token einlöst, behält das Geld. Behandle es wie Bargeld: einmal senden, an eine Person.';
+
+  @override
+  String get cashuCopyToken => 'Kopieren';
+
+  @override
+  String get cashuTokenCopied => 'Token kopiert';
+
+  @override
+  String get cashuWalletExplanation =>
+      'Diese Wallet hält E-Cash der Mint, die dein Mostro-Node verwendet. Sie dient dazu, Trades auf diesem Node zu finanzieren und zu vereinnahmen – sie ist keine Allzweck-Wallet.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'Dieser Mostro-Node wickelt Trades nicht über Cashu ab.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'Die Wallet ist noch mit keiner Mint verbunden.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'Die Mint war nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'Der Mint dieses Nodes fehlen Funktionen, die die Treuhand braucht – hier kann nicht gehandelt werden.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'Die Cashu-Wallet ist in der Web-Version noch nicht verfügbar.';
+
+  @override
+  String get cashuErrorAmountZero => 'Gib einen Betrag größer als null ein.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'Du hast nur $sats Sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'Dieses Token konnte nicht eingelöst werden. Es stammt womöglich von einer anderen Mint oder wurde bereits ausgegeben.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'Das Token konnte nicht erstellt werden. Womöglich reicht dein Guthaben nicht.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Lege ein Konto an oder importiere eines, bevor du die Wallet nutzt.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Mit der Wallet ist etwas schiefgelaufen. Bitte versuche es erneut.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'Du hast ein Token exportiert. Es ist Geld, bis jemand es einlöst — behalte es, bis du sicher bist, dass es angekommen ist.';
+
+  @override
+  String get cashuShowLastToken => 'Erneut anzeigen';
+
+  @override
+  String get cashuLastTokenDone => 'Ich habe es gesendet';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Dieses Token ist zu groß für einen QR-Code. Kopiere es stattdessen.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'Der aktive Node hat gewechselt und diese Wallet ist an eine andere Mint gebunden. Geh zurück und öffne die Wallet erneut.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Dieses Konto wurde aus einem nsec importiert, daher gibt es keine Wiederherstellungsphrase, aus der die Wallet abgeleitet werden kann. Die Cashu-Wallet braucht ein Konto, das aus einer Wiederherstellungsphrase erstellt wurde.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'Dieses Token konnte nicht überprüft werden: Es enthält keinen Nachweis der Mint-Signatur und wurde daher nicht angenommen.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'Das Senden ist fehlgeschlagen und die Wallet konnte nicht bestätigen, dass das Guthaben zurück ist. Synchronisiere mit der Mint, bevor du es erneut versuchst.';
 }

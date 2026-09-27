@@ -3874,4 +3874,136 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get attachmentSaveOnly =>
       'Ce type de fichier peut seulement être enregistré.';
+
+  @override
+  String get cashuWalletTitle => 'Portefeuille Cashu';
+
+  @override
+  String get cashuWalletSubtitle =>
+      'Conservez de l\'ecash pour les échanges sur ce nœud';
+
+  @override
+  String get cashuBalanceLabel => 'Solde';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint : $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Non connecté à un mint';
+
+  @override
+  String get cashuReceiveButton => 'Recevoir';
+
+  @override
+  String get cashuSendButton => 'Envoyer';
+
+  @override
+  String get cashuReceiveHint => 'Collez ou scannez un token Cashu';
+
+  @override
+  String get cashuAmountLabel => 'Montant en sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return '$sats sats reçus';
+  }
+
+  @override
+  String get cashuSyncButton => 'Synchroniser avec la mint';
+
+  @override
+  String get cashuSynced => 'Synchronisé avec la mint';
+
+  @override
+  String get cashuTokenTitle => 'Votre token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Quiconque encaisse ce token garde les fonds. Traitez-le comme des espèces : envoyez-le une seule fois, à une seule personne.';
+
+  @override
+  String get cashuCopyToken => 'Copier';
+
+  @override
+  String get cashuTokenCopied => 'Token copié';
+
+  @override
+  String get cashuWalletExplanation =>
+      'Ce portefeuille contient de l\'ecash émis par le mint qu\'utilise votre nœud Mostro. Il sert à financer et à encaisser des échanges sur ce nœud : ce n\'est pas un portefeuille polyvalent.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'Ce nœud Mostro ne règle pas les échanges avec Cashu.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'Le portefeuille n\'est pas encore connecté à un mint.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'Impossible de joindre le mint. Vérifiez votre connexion et réessayez.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'Il manque au mint de ce nœud des fonctions nécessaires au séquestre ; il n\'est donc pas possible d\'échanger ici.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'Le portefeuille Cashu n\'est pas encore disponible dans la version web.';
+
+  @override
+  String get cashuErrorAmountZero => 'Saisissez un montant supérieur à zéro.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'Vous n\'avez que $sats sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'Ce token n\'a pas pu être encaissé. Il provient peut-être d\'un autre mint, ou il a déjà été dépensé.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'Impossible de créer le token. Vos fonds sont peut-être insuffisants.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Créez ou importez un compte avant d\'utiliser le portefeuille.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Un problème est survenu avec le portefeuille. Veuillez réessayer.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'Vous avez exporté un token. C\'est de l\'argent jusqu\'à ce que quelqu\'un l\'encaisse — gardez-le jusqu\'à confirmation.';
+
+  @override
+  String get cashuShowLastToken => 'Le réafficher';
+
+  @override
+  String get cashuLastTokenDone => 'Je l\'ai envoyé';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Ce token est trop volumineux pour un code QR. Copiez-le à la place.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'Le nœud actif a changé et ce portefeuille est lié à une autre mint. Revenez en arrière et rouvrez le portefeuille.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Ce compte a été importé depuis un nsec, il n\'y a donc pas de phrase de récupération pour en dériver le portefeuille. Le portefeuille Cashu nécessite un compte créé à partir d\'une phrase de récupération.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'Ce token n\'a pas pu être vérifié : il ne contient aucune preuve de la signature de la mint, il n\'a donc pas été accepté.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'L\'envoi a échoué et le portefeuille n\'a pas pu confirmer le retour des fonds. Synchronisez avec la mint avant de réessayer.';
 }

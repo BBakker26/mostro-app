@@ -3811,4 +3811,135 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentSaveOnly => 'This type of file can only be saved.';
+
+  @override
+  String get cashuWalletTitle => 'Cashu wallet';
+
+  @override
+  String get cashuWalletSubtitle => 'Hold ecash for trades on this node';
+
+  @override
+  String get cashuBalanceLabel => 'Balance';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Not connected to a mint';
+
+  @override
+  String get cashuReceiveButton => 'Receive';
+
+  @override
+  String get cashuSendButton => 'Send';
+
+  @override
+  String get cashuReceiveHint => 'Paste or scan a Cashu token';
+
+  @override
+  String get cashuAmountLabel => 'Amount in sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return 'Received $sats sats';
+  }
+
+  @override
+  String get cashuSyncButton => 'Sync with mint';
+
+  @override
+  String get cashuSynced => 'Synced with mint';
+
+  @override
+  String get cashuTokenTitle => 'Your token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Anyone who redeems this token keeps the funds. Treat it like cash: send it once, to one person.';
+
+  @override
+  String get cashuCopyToken => 'Copy';
+
+  @override
+  String get cashuTokenCopied => 'Token copied';
+
+  @override
+  String get cashuWalletExplanation =>
+      'This wallet holds ecash issued by the mint your Mostro node uses. It exists to fund and receive trades on that node — it is not a general-purpose wallet.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'This Mostro node does not settle trades with Cashu.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'The wallet is not connected to a mint yet.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'Could not reach the mint. Check your connection and try again.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'This node\'s mint is missing features the escrow needs, so trading is not possible here.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'The Cashu wallet is not available on the web version yet.';
+
+  @override
+  String get cashuErrorAmountZero => 'Enter an amount greater than zero.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'You only have $sats sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'That token could not be redeemed. It may be from another mint, or already spent.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'Could not create the token. You may not have enough funds.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Create or import an account before using the wallet.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Something went wrong with the wallet. Please try again.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'You exported a token. It is money until someone redeems it — keep it until you are sure it arrived.';
+
+  @override
+  String get cashuShowLastToken => 'Show it again';
+
+  @override
+  String get cashuLastTokenDone => 'I\'ve sent it';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'This token is too large for a QR code. Copy it instead.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'The active node changed and this wallet is bound to another mint. Go back and open the wallet again.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'This account was imported from an nsec, so there is no recovery phrase to derive the wallet from. The Cashu wallet needs an account created from a recovery phrase.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'This token could not be verified: it carries no proof of the mint\'s signature, so it was not accepted.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'The send failed and the wallet could not confirm the funds are back. Sync with the mint before trying again.';
 }

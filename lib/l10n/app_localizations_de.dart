@@ -66,11 +66,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Streitfälle konnten nicht geladen werden. Bitte versuche es erneut.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Streitfall-Nachrichten demnächst verfügbar';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'Dateianhänge demnächst verfügbar';
+  String get disputeSolverNotAssigned =>
+      'Noch hat kein Schlichter diesen Streitfall übernommen. Du kannst schreiben, sobald einer ihn übernimmt.';
 
   @override
   String get disputeNotFound => 'Streitfall nicht gefunden.';
@@ -164,21 +161,21 @@ class AppLocalizationsDe extends AppLocalizations {
       'Du kannst auch dein eigenes Angebot erstellen und warten, bis jemand es annimmt. Lege den Betrag und die bevorzugte Zahlungsmethode fest — Mostro erledigt den Rest.';
 
   @override
-  String get tabBuyBtc => 'BTC KAUFEN';
+  String get tabBuyBtc => 'BTC kaufen';
 
   @override
-  String get tabSellBtc => 'BTC VERKAUFEN';
+  String get tabSellBtc => 'BTC verkaufen';
 
   @override
-  String get filterButtonLabel => 'FILTERN';
+  String get filterButtonLabel => 'Filtern';
 
   @override
-  String offersCount(int count) {
+  String filtersActiveCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count Angebote',
-      one: '1 Angebot',
+      other: '$count Filter aktiv',
+      one: '1 Filter aktiv',
     );
     return '$_temp0';
   }
@@ -187,43 +184,29 @@ class AppLocalizationsDe extends AppLocalizations {
   String get noOrdersAvailable => 'Keine Bestellungen verfügbar';
 
   @override
-  String get justNow => 'Gerade eben';
+  String get justNow => 'gerade eben';
 
   @override
   String minutesAgo(int m) {
-    return 'Vor ${m}m';
+    return 'vor ${m}m';
   }
 
   @override
   String hoursAgo(int h) {
-    return 'Vor ${h}h';
+    return 'vor ${h}h';
   }
 
   @override
   String daysAgo(int d) {
-    return 'Vor ${d}T';
+    return 'vor ${d}T';
   }
 
   @override
-  String get creatingNewOrderTitle => 'NEUE BESTELLUNG ERSTELLEN';
-
-  @override
-  String get youWantToBuyBitcoin => 'Du möchtest Bitcoin kaufen';
-
-  @override
-  String get youWantToSellBitcoin => 'Du möchtest Bitcoin verkaufen';
-
-  @override
-  String get rangeOrderLabel => 'Bereichsbestellung';
-
-  @override
-  String get payLightningInvoiceTitle => 'Lightning-Rechnung bezahlen';
+  String get invoiceRejected =>
+      'Der Node hat diese Rechnung abgelehnt. Prüfe Betrag und Ablauf und füge eine neue hinzu.';
 
   @override
   String get invoiceCopied => 'Rechnung kopiert';
-
-  @override
-  String get addInvoiceTitle => 'Rechnung hinzufügen';
 
   @override
   String get submitButtonLabel => 'Absenden';
@@ -232,51 +215,29 @@ class AppLocalizationsDe extends AppLocalizations {
   String get orderAlreadyTaken => 'Die Bestellung wurde bereits angenommen';
 
   @override
-  String get bondRequired =>
-      'Dieser Node verlangt eine Anti-Missbrauch-Kaution, die noch nicht unterstützt wird';
+  String get nodeProtocolUnsupported =>
+      'Dieser Mostro-Node nutzt eine Protokollversion, die diese App nicht unterstützt. Wähle in den Einstellungen einen anderen Node oder prüfe, ob ein App-Update verfügbar ist';
 
   @override
-  String addInvoiceAmount(String sats) {
-    return 'Zu erhaltender Betrag: $sats sats';
-  }
+  String get nodeCapabilitiesUnknown =>
+      'Es wird noch geprüft, was der ausgewählte Mostro-Node unterstützt. Versuche es gleich noch einmal';
 
   @override
-  String payInvoiceAmount(String sats) {
-    return 'Zu zahlender Betrag: $sats sats';
-  }
+  String get mostroMaintenanceMode =>
+      'Der Mostro-Node, mit dem du verbunden bist, wird gerade gewartet. Versuche es später noch einmal oder verbinde dich in den Einstellungen mit einem anderen Mostro-Node';
+
+  @override
+  String get storageUnavailable =>
+      'Die App kann keine Orders erstellen oder annehmen, solange ihre lokale Datenbank nicht verfügbar ist. Starte die App neu und versuche es erneut';
 
   @override
   String get orderIdCopied => 'Bestell-ID kopiert';
-
-  @override
-  String get orderDetailsTitle => 'BESTELLDETAILS';
-
-  @override
-  String get timeRemainingLabel => 'Verbleibende Zeit:';
-
-  @override
-  String get fiatSentButtonLabel => 'FIAT GESENDET';
-
-  @override
-  String get disputeButtonLabel => 'STREITFALL';
-
-  @override
-  String get contactButtonLabel => 'KONTAKT';
-
-  @override
-  String get rateButtonLabel => 'BEWERTEN';
-
-  @override
-  String get viewDisputeButtonLabel => 'Streitfall anzeigen';
 
   @override
   String get comingSoonMessage => 'Demnächst verfügbar';
 
   @override
   String get tradeStatusActive => 'Aktiv';
-
-  @override
-  String get tradeStatusFiatSent => 'Fiat gesendet';
 
   @override
   String get tradeStatusCompleted => 'Abgeschlossen';
@@ -288,35 +249,27 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeStatusDisputed => 'Strittiger Trade';
 
   @override
-  String get releaseButtonLabel => 'FREIGEBEN';
-
-  @override
   String get accountScreenTitle => 'Konto';
 
   @override
   String get secretWordsTitle => 'Geheime Wörter';
 
   @override
-  String get toRestoreYourAccount => 'Um dein Konto wiederherzustellen';
-
-  @override
   String get privacyCardTitle => 'Datenschutz';
-
-  @override
-  String get controlPrivacySettings =>
-      'Verwalte deine Datenschutzeinstellungen';
 
   @override
   String get reputationMode => 'Reputationsmodus';
 
   @override
-  String get reputationModeSubtitle => 'Standard-Datenschutz mit Reputation';
+  String get reputationModeSubtitle =>
+      'Deine Trades zählen für deine öffentliche Reputation';
 
   @override
   String get fullPrivacyMode => 'Vollständiger Privatsphäre-Modus';
 
   @override
-  String get fullPrivacyModeSubtitle => 'Maximale Anonymität';
+  String get fullPrivacyModeSubtitle =>
+      'Jeder Trade nutzt eine neue Identität, ohne Reputation';
 
   @override
   String get generateNewUserButton => 'Neuen Benutzer generieren';
@@ -335,10 +288,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get continueButtonLabel => 'Weiter';
 
   @override
-  String get importMnemonicDialogTitle => 'Mnemonik importieren';
+  String get importMnemonicDialogTitle => 'Geheime Wörter importieren';
 
   @override
-  String get importMnemonicHintText => 'Gib deine 12- oder 24-Wort-Phrase ein…';
+  String get importMnemonicHintText => 'Gib deine 12 geheimen Wörter ein';
 
   @override
   String get importButtonLabel => 'Importieren';
@@ -354,7 +307,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get hideButtonLabel => 'Verbergen';
 
   @override
-  String get showButtonLabel => 'Anzeigen';
+  String get showWordsButton => 'Wörter anzeigen';
 
   @override
   String get settingsScreenTitle => 'Einstellungen';
@@ -369,41 +322,22 @@ class AppLocalizationsDe extends AppLocalizations {
   String get appearanceDialogTitle => 'Erscheinungsbild';
 
   @override
-  String get defaultFiatCurrencyTitle => 'Standard-Fiat-Währung';
-
-  @override
   String get allCurrencies => 'Alle Währungen';
 
   @override
   String get lightningAddressSettingTitle => 'Lightning-Adresse';
 
   @override
-  String get tapToSetSubtitle => 'Tippen zum Einrichten';
-
-  @override
   String get nwcWalletSettingTitle => 'NWC-Wallet';
-
-  @override
-  String get nwcConnectPrompt => 'Verbinde deine Lightning-Wallet über NWC';
 
   @override
   String get relaysSettingTitle => 'Relays';
 
   @override
-  String get manageRelayConnections => 'Relay-Verbindungen verwalten';
-
-  @override
   String get pushNotificationsSettingTitle => 'Push-Benachrichtigungen';
 
   @override
-  String get manageNotificationPreferences =>
-      'Benachrichtigungseinstellungen verwalten';
-
-  @override
   String get logReportSettingTitle => 'Protokollbericht';
-
-  @override
-  String get viewDiagnosticLogs => 'Diagnoseprotokolle anzeigen';
 
   @override
   String get mostroNodeSettingTitle => 'Mostro-Knoten';
@@ -434,13 +368,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get saveButtonLabel => 'Speichern';
 
   @override
-  String get connectWalletTitle => 'Wallet verbinden';
-
-  @override
   String get scanQrCodeTitle => 'QR-Code scannen';
-
-  @override
-  String get pasteNwcUri => 'NWC-URI einfügen';
 
   @override
   String get selectLanguageTitle => 'Sprache auswählen';
@@ -467,11 +395,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get relayErrorDuplicate => 'Relay bereits in der Liste';
 
   @override
-  String nwcConnectedBalance(String balance) {
-    return 'NWC — Verbunden. Guthaben: $balance';
-  }
-
-  @override
   String get pasteQrCodeHeading => 'QR-Code-Inhalt einfügen';
 
   @override
@@ -484,26 +407,182 @@ class AppLocalizationsDe extends AppLocalizations {
   String get enterValueError => 'Bitte einen Wert eingeben';
 
   @override
-  String get pasteOrScanQrCode => 'QR-Code einfügen oder scannen';
-
-  @override
-  String get mostroNodeTitle => 'Mostro-Knoten';
-
-  @override
-  String get currentNodeLabel => 'Aktueller Knoten';
-
-  @override
   String get trustedBadgeLabel => 'Vertrauenswürdig';
-
-  @override
-  String get useDefaultButtonLabel => 'Standard verwenden';
 
   @override
   String get confirmButtonLabel => 'Bestätigen';
 
   @override
-  String get invalidHexPubkey =>
-      'Muss eine hexadezimale Zeichenfolge mit 64 Zeichen sein';
+  String get selectMostroNode => 'Knoten wählen';
+
+  @override
+  String get addCustomNode => 'Eigenen Knoten hinzufügen';
+
+  @override
+  String get nodePubkeyFieldLabel => 'Öffentlicher Schlüssel';
+
+  @override
+  String get nodePubkeyFieldHint => '64-stelliges Hex oder npub…';
+
+  @override
+  String get nodeNameOptionalLabel => 'Name (optional)';
+
+  @override
+  String get invalidPubkeyFormat =>
+      'Gib einen gültigen öffentlichen Schlüssel ein (64-stelliges Hex oder npub)';
+
+  @override
+  String get privateKeyNotAllowed =>
+      'Das ist ein privater Schlüssel — teile ihn niemals. Gib den öffentlichen Schlüssel des Knotens ein';
+
+  @override
+  String get nodeAlreadyExists => 'Dieser Knoten ist bereits in der Liste';
+
+  @override
+  String get nodeAddedSuccess => 'Knoten hinzugefügt';
+
+  @override
+  String nodeSwitchedSuccess(String nodeName) {
+    return 'Du verwendest jetzt $nodeName';
+  }
+
+  @override
+  String get errorSwitchingNode => 'Knotenwechsel fehlgeschlagen';
+
+  @override
+  String get cannotRemoveActiveNode =>
+      'Der aktive Knoten kann nicht entfernt werden — wechsle zuerst zu einem anderen Knoten';
+
+  @override
+  String get deleteCustomNodeTitle => 'Knoten entfernen';
+
+  @override
+  String get deleteCustomNodeMessage =>
+      'Diesen eigenen Knoten aus deiner Liste entfernen?';
+
+  @override
+  String get deleteCustomNodeConfirm => 'Entfernen';
+
+  @override
+  String get nodeRemovedSuccess => 'Knoten entfernt';
+
+  @override
+  String get nodeStorageUnavailable =>
+      'Die lokale Datenbank ist nicht bereit. Starte die App neu und versuche es erneut';
+
+  @override
+  String nodeSelectorSubtitle(String code) {
+    return 'Aufträge und Währungen für $code, deine Währung';
+  }
+
+  @override
+  String get nodeSelectorSubtitleNoCurrency => 'Offene Aufträge je Knoten';
+
+  @override
+  String nodeMissingCurrencyChip(String code) {
+    return 'OHNE $code';
+  }
+
+  @override
+  String get nodeOrdersNowLabel => 'Aufträge jetzt';
+
+  @override
+  String get nodeNoOrdersLabel => 'keine Aufträge';
+
+  @override
+  String nodeOrdersInCurrency(int count, String code) {
+    return '· $count in $code';
+  }
+
+  @override
+  String get nodeFeeLabel => 'Gebühr';
+
+  @override
+  String get nodeFeeTooltip =>
+      'Mostro teilt die Gebühr zwischen beiden Parteien auf.';
+
+  @override
+  String get nodePerTradeLabel => 'pro Handel';
+
+  @override
+  String get nodeCustodyLightning => 'Lightning-Verwahrung';
+
+  @override
+  String nodeCustodyCashu(String mint) {
+    return 'Cashu-Verwahrung · $mint';
+  }
+
+  @override
+  String get nodeCustodyUnknown => 'Verwahrung —';
+
+  @override
+  String nodeBondPct(String pct) {
+    return 'Kaution $pct%';
+  }
+
+  @override
+  String get nodeBondNone => 'Keine Kaution';
+
+  @override
+  String nodeStatusOnline(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Aufträge',
+      one: '1 Auftrag',
+    );
+    return 'Online · $_temp0';
+  }
+
+  @override
+  String get nodeStatusNoUsefulOrders => 'Keine Aufträge in deinen Währungen';
+
+  @override
+  String nodeStatusUnreachable(String ago) {
+    return 'Antwortet nicht · letztes Signal $ago';
+  }
+
+  @override
+  String get nodeStatusUnreachableNoSignal => 'Antwortet nicht';
+
+  @override
+  String get nodeDisclaimerShort =>
+      'Jeder Knoten wird von einem unabhängigen Dritten betrieben. Mostro haftet weder für dessen Verhalten noch für deine Geschäfte.';
+
+  @override
+  String get nodeVerifyKeyWarning =>
+      'Prüfe den Schlüssel beim Betreiber. Ein gefälschter Knoten kann deine Aufträge sehen.';
+
+  @override
+  String get nodeInvalidPubkeyShort =>
+      'Das ist kein gültiger öffentlicher Schlüssel.';
+
+  @override
+  String get nodeNameFieldHint => 'Lokaler Mostro';
+
+  @override
+  String get nodePubkeyCopied => 'Schlüssel kopiert';
+
+  @override
+  String get nodeNotSelectableOffline => 'Dieser Knoten antwortet nicht';
+
+  @override
+  String get nodeStatsLoading => 'Knotendaten werden geladen';
+
+  @override
+  String get nodeSwitchConfirmTitle => 'Knoten wechseln?';
+
+  @override
+  String nodeSwitchConfirmBody(String currentNode, String newNode) {
+    return 'Du hast einen laufenden Handel auf $currentNode. Er bleibt dort; das Orderbuch zeigt jetzt $newNode.';
+  }
+
+  @override
+  String get nodeSwitchConfirmAction => 'Knoten wechseln';
+
+  @override
+  String get nodeTradesCheckFailed =>
+      'Deine Geschäfte konnten nicht geprüft werden. Versuch es erneut.';
 
   @override
   String get notificationsScreenTitle => 'Benachrichtigungen';
@@ -537,25 +616,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get successfulOrder => 'Erfolgreiche Bestellung';
 
   @override
-  String get submitRatingButton => 'ABSENDEN';
-
-  @override
   String get closeRatingButton => 'SCHLIESSEN';
 
   @override
   String get aboutScreenTitle => 'Über';
 
   @override
-  String get mostroTagline => 'Peer-to-Peer Bitcoin-Handel über Nostr';
-
-  @override
-  String get viewDocumentationButton => 'Dokumentation anzeigen';
-
-  @override
   String get linkCopiedToClipboard => 'Link in die Zwischenablage kopiert';
-
-  @override
-  String get defaultNodeSection => 'Standardknoten';
 
   @override
   String get pubkeyLabel => 'Öffentlicher Schlüssel';
@@ -564,17 +631,21 @@ class AppLocalizationsDe extends AppLocalizations {
   String get relaysLabel => 'Relays';
 
   @override
-  String get pubkeyCopiedToClipboard =>
-      'Öffentlicher Schlüssel in die Zwischenablage kopiert';
-
-  @override
   String get footerTagline => 'Open-Source. Nicht-verwahrt. Privat.';
 
   @override
-  String get drawerTitle => 'MOSTRO';
+  String get drawerTitle => 'Mostro';
 
   @override
-  String get betaBadgeLabel => 'Beta';
+  String get drawerTagline => 'P2P-Handel';
+
+  @override
+  String get drawerStageBadge => 'Alpha';
+
+  @override
+  String drawerVersion(String version) {
+    return 'Version $version';
+  }
 
   @override
   String get drawerAccountMenuItem => 'Konto';
@@ -624,10 +695,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get relayRemoveFailed => 'Relay konnte nicht entfernt werden';
 
   @override
-  String get backupConfirmCheckbox =>
-      'Ich habe meine Wörter aufgeschrieben und sicher gespeichert';
-
-  @override
   String get backupRitualSecondFailureMessage =>
       'Das war erneut falsch. Bitte überprüfe und sichere deine geheimen Wörter und verifiziere dann von vorne.';
 
@@ -637,6 +704,14 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get cancelTradeDialogContent =>
       'Kooperativen Abbruch angefragt. Die andere Partei muss ebenfalls zustimmen, damit der Handel vollständig abgebrochen wird.';
+
+  @override
+  String get cancelTradeDialogContentNotStarted =>
+      'Der Handel hat noch nicht begonnen und wird daher sofort abgebrochen. Die andere Partei muss nicht zustimmen.';
+
+  @override
+  String get cancelTradeDialogContentMaybeStarted =>
+      'Hat der Handel noch nicht begonnen, wird er sofort abgebrochen. Hat er bereits begonnen, muss die andere Partei ebenfalls zustimmen.';
 
   @override
   String get noButtonLabel => 'Nein';
@@ -653,6 +728,36 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get cancelRequestFailed =>
       'Abbrechen fehlgeschlagen. Bitte erneut versuchen.';
+
+  @override
+  String get tradeCardCancelRequestedByMeTitle => 'Stornierung angefragt';
+
+  @override
+  String get tradeCardCancelRequestedByMeMessage =>
+      'Du hast die Stornierung dieses Handels angefragt. Er bleibt offen, bis die Gegenpartei ebenfalls storniert. Antwortet sie nicht, kannst du einen Streitfall eröffnen.';
+
+  @override
+  String get tradeCardCancelRequestedByPeerTitle =>
+      'Die Gegenpartei möchte stornieren';
+
+  @override
+  String get tradeCardCancelRequestedByPeerMessage =>
+      'Sie hat die Stornierung dieses Handels angefragt. Nimm an, um ihn ohne Geldbewegung zu beenden, oder handle weiter.';
+
+  @override
+  String get tradeCancelRequestedByMeNotice =>
+      'Du hast die Stornierung dieses Handels angefragt. Er bleibt offen, bis die Gegenpartei ebenfalls storniert. Antwortet sie nicht, kannst du einen Streitfall eröffnen.';
+
+  @override
+  String get tradeCancelRequestedByPeerNotice =>
+      'Die Gegenpartei hat die Stornierung dieses Handels angefragt. Nimm an, um ihn ohne Geldbewegung zu beenden, oder handle weiter.';
+
+  @override
+  String get acceptCancelButton => 'Stornierung annehmen';
+
+  @override
+  String get cancelTradeDialogContentAccept =>
+      'Die Gegenpartei hat die Stornierung angefragt. Wenn du jetzt stornierst, endet der Handel für beide, ohne dass Geld bewegt wird.';
 
   @override
   String get fiatSentFailed =>
@@ -675,9 +780,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get releaseSatsButton => 'Sats freigeben';
 
   @override
-  String get markFiatSentButton => 'Als gesendet markieren';
-
-  @override
   String get confirmReleaseSatsButton => 'Bestätigen und Sats freigeben';
 
   @override
@@ -690,26 +792,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get orderPillYouAreBuying => 'SIE KAUFEN';
 
   @override
-  String get orderPillSelling => 'VERKAUF';
+  String get myOrderSellTitle => 'Deine Verkaufsorder';
 
   @override
-  String get orderPillBuying => 'KAUF';
-
-  @override
-  String get myOrderSellTitle => 'IHR VERKAUFSANGEBOT';
-
-  @override
-  String get myOrderBuyTitle => 'IHR KAUFANGEBOT';
-
-  @override
-  String get cancelOrderButton => 'Angebot stornieren';
-
-  @override
-  String get cancelOrderDialogTitle => 'Angebot stornieren';
-
-  @override
-  String get cancelOrderDialogContent =>
-      'Bist du sicher, dass du dieses Angebot stornieren möchtest? Diese Aktion kann nicht rückgängig gemacht werden.';
+  String get myOrderBuyTitle => 'Deine Kauforder';
 
   @override
   String get cancelOrderFailed =>
@@ -723,12 +809,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get orderStatusWaitingForTaker => 'Warte auf Taker';
-
-  @override
-  String get orderStatusWaitingBuyerInvoice => 'Warte auf Käufer-Rechnung';
-
-  @override
-  String get orderStatusWaitingPayment => 'Warte auf Zahlung';
 
   @override
   String get orderStatusInProgress => 'In Bearbeitung';
@@ -749,9 +829,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get orderCancelledSuccess => 'Auftrag erfolgreich storniert.';
 
   @override
-  String get aboutAppInfoTitle => 'App-Informationen';
-
-  @override
   String get aboutDocumentationTitle => 'Dokumentation';
 
   @override
@@ -761,37 +838,22 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutVersionLabel => 'Version';
 
   @override
-  String get aboutGithubRepoLabel => 'GitHub-Repository';
-
-  @override
   String get aboutCommitHashLabel => 'Commit-Hash';
 
   @override
   String get aboutLicenseLabel => 'Lizenz';
 
   @override
-  String get aboutLicenseName => 'MIT';
+  String get aboutLicenseName => 'AGPLv3+';
 
   @override
-  String get aboutGithubRepoName => 'mostro-mobile';
-
-  @override
-  String get aboutDocsUsersEnglish => 'Nutzer (Englisch)';
-
-  @override
-  String get aboutDocsUsersSpanish => 'Nutzer (Spanisch)';
-
-  @override
-  String get aboutDocsTechnical => 'Technisch';
-
-  @override
-  String get aboutDocsRead => 'Lesen';
+  String get aboutGithubRepoName => 'MostroP2P/app';
 
   @override
   String get aboutCopiedToClipboard => 'In die Zwischenablage kopiert';
 
   @override
-  String get aboutLicenseDialogTitle => 'MIT-Lizenz';
+  String get aboutLicenseDialogTitle => 'GNU Affero General Public License v3';
 
   @override
   String get aboutNodeLoadingText => 'Knoteninformationen werden geladen…';
@@ -803,28 +865,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutNodeRetry => 'Erneut versuchen';
 
   @override
-  String get aboutGeneralInfoSection => 'Allgemeine Informationen';
-
-  @override
-  String get aboutTechnicalDetailsSection => 'Technische Details';
-
-  @override
   String get aboutLightningNetworkSection => 'Lightning-Netzwerk';
-
-  @override
-  String get aboutMostroPublicKeyLabel => 'Öffentlicher Mostro-Schlüssel';
-
-  @override
-  String get aboutMaxOrderAmountLabel => 'Maximaler Auftragsbetrag';
-
-  @override
-  String get aboutMinOrderAmountLabel => 'Minimaler Auftragsbetrag';
-
-  @override
-  String get aboutOrderLifespanLabel => 'Auftragslaufzeit';
-
-  @override
-  String get aboutServiceFeeLabel => 'Servicegebühr';
 
   @override
   String get aboutFiatCurrenciesLabel => 'Fiat-Währungen';
@@ -834,9 +875,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get aboutMostroCommitLabel => 'Mostro-Commit';
-
-  @override
-  String get aboutOrderExpirationLabel => 'Auftragsablauf';
 
   @override
   String get aboutHoldInvoiceExpLabel => 'Hold-Invoice-Ablauf';
@@ -857,121 +895,19 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutLndVersionLabel => 'LND-Version';
 
   @override
-  String get aboutLndNodePublicKeyLabel => 'Öffentlicher LND-Knotenschlüssel';
-
-  @override
-  String get aboutLndCommitLabel => 'LND-Commit';
-
-  @override
-  String get aboutLndNodeAliasLabel => 'LND-Knotenalias';
-
-  @override
   String get aboutSupportedChainsLabel => 'Unterstützte Chains';
 
   @override
   String get aboutSupportedNetworksLabel => 'Unterstützte Netzwerke';
 
   @override
-  String get aboutLndNodeUriLabel => 'LND-Knoten-URI';
-
-  @override
   String get aboutSatoshisSuffix => 'Satoshis';
-
-  @override
-  String get aboutHoursSuffix => 'Stunden';
-
-  @override
-  String get aboutSecondsSuffix => 'Sekunden';
 
   @override
   String get aboutBlocksSuffix => 'Blöcke';
 
   @override
   String get aboutFiatCurrenciesAll => 'Alle';
-
-  @override
-  String get aboutMostroPublicKeyExplanation =>
-      'Der öffentliche Nostr-Schlüssel des Mostro-Daemons. Alle Aufträge und verschlüsselten Nachrichten dieser Instanz werden von diesem Schlüssel veröffentlicht oder weitergeleitet.';
-
-  @override
-  String get aboutMaxOrderAmountExplanation =>
-      'Der maximale Fiat-Betrag für einen einzelnen Auftrag auf dieser Mostro-Instanz.';
-
-  @override
-  String get aboutMinOrderAmountExplanation =>
-      'Der minimale Fiat-Betrag für einen einzelnen Auftrag auf dieser Mostro-Instanz.';
-
-  @override
-  String get aboutOrderLifespanExplanation =>
-      'Wie lange ein ausstehender Auftrag offen bleibt, bevor er automatisch abläuft, wenn kein Abnehmer gefunden wird.';
-
-  @override
-  String get aboutServiceFeeExplanation =>
-      'Der Prozentsatz des Handelsbetrags, der vom Mostro-Daemon als Servicegebühr erhoben wird.';
-
-  @override
-  String get aboutFiatCurrenciesExplanation =>
-      'Die auf dieser Mostro-Instanz akzeptierten Fiat-Währungen. \'Alle\' bedeutet, dass es keine Einschränkungen gibt.';
-
-  @override
-  String get aboutMostroVersionExplanation =>
-      'Die Version der Mostro-Daemon-Software, die auf dieser Instanz ausgeführt wird.';
-
-  @override
-  String get aboutMostroCommitExplanation =>
-      'Der Git-Commit-Hash des Mostro-Daemon-Builds zur Identifizierung der genauen Software-Revision.';
-
-  @override
-  String get aboutOrderExpirationExplanation =>
-      'Die Zeitüberschreitung in Sekunden, nach der ein auf Aktion wartender Handel (z.B. Rechnung oder Zahlung) automatisch storniert wird.';
-
-  @override
-  String get aboutHoldInvoiceExpExplanation =>
-      'Das Zeitfenster in Sekunden, in dem die Lightning-Hold-Invoice abgerechnet werden muss.';
-
-  @override
-  String get aboutHoldInvoiceCltvExplanation =>
-      'Das CLTV-Delta (Blockanzahl) für Hold-Invoices, das steuert, wie lange der HTLC gesperrt bleiben kann.';
-
-  @override
-  String get aboutInvoiceExpWindowExplanation =>
-      'Das Zeitfenster in Sekunden, in dem der Käufer nach Handelsbeginn eine Lightning-Rechnung einreichen muss.';
-
-  @override
-  String get aboutProofOfWorkExplanation =>
-      'Die minimale Proof-of-Work-Schwierigkeit für Nostr-Events auf dieser Instanz. 0 bedeutet, dass kein PoW erforderlich ist.';
-
-  @override
-  String get aboutMaxOrdersPerResponseExplanation =>
-      'Die maximale Anzahl von Aufträgen in einer einzelnen Relay-Antwort. Begrenzt die Bandbreitennutzung.';
-
-  @override
-  String get aboutLndVersionExplanation =>
-      'Die Version des LND-Knotens (Lightning Network Daemon), der mit dieser Mostro-Instanz verbunden ist.';
-
-  @override
-  String get aboutLndNodePublicKeyExplanation =>
-      'Der öffentliche Schlüssel des LND-Knotens zur Identifizierung und Verifizierung des Lightning-Netzwerk-Knotens.';
-
-  @override
-  String get aboutLndCommitExplanation =>
-      'Der Git-Commit-Hash des LND-Builds zur Identifizierung der genauen Software-Revision des Lightning-Knotens.';
-
-  @override
-  String get aboutLndNodeAliasExplanation =>
-      'Der lesbare Alias des LND-Knotens, wie vom Knotenbetreiber konfiguriert.';
-
-  @override
-  String get aboutSupportedChainsExplanation =>
-      'Die vom LND-Knoten unterstützten Blockchain(s) (z.B. \'bitcoin\').';
-
-  @override
-  String get aboutSupportedNetworksExplanation =>
-      'Die Netzwerke, in denen der LND-Knoten betrieben wird (z.B. \'mainnet\', \'testnet\').';
-
-  @override
-  String get aboutLndNodeUriExplanation =>
-      'Die Verbindungs-URI des LND-Knotens im Format pubkey@host:port. Wird zum Öffnen direkter Zahlungskanäle verwendet.';
 
   @override
   String get aboutAntiAbuseBondSection => 'Anti-Missbrauchs-Kaution';
@@ -989,15 +925,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutBondStatusLabel => 'Kautionsstatus';
 
   @override
-  String get aboutBondStatusExplanation =>
-      'Gibt an, ob diese Mostro-Instanz eine Anti-Missbrauchs-Kaution verlangt: eine kleine Lightning-Hold-Invoice, die für die Dauer des Handels gesperrt und bei regulärem Abschluss wieder freigegeben wird. „Nicht unterstützt“ bedeutet, dass der Daemon älter als diese Funktion ist.';
-
-  @override
   String get aboutBondAppliesToLabel => 'Gilt für';
-
-  @override
-  String get aboutBondAppliesToExplanation =>
-      'Welche Seite eines Handels eine Kaution sperren muss: die annehmende Seite, die erstellende Seite oder beide.';
 
   @override
   String get aboutBondAppliesToTakers => 'Annehmende Seite';
@@ -1012,37 +940,17 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutBondAmountLabel => 'Kautionsbetrag';
 
   @override
-  String get aboutBondAmountExplanation =>
-      'Die Kaution als Prozentsatz des Bestellbetrags. Berechnet wird der höhere Wert aus diesem Prozentsatz und der Mindestkaution.';
-
-  @override
   String get aboutBondBaseAmountLabel => 'Mindestkaution';
-
-  @override
-  String get aboutBondBaseAmountExplanation =>
-      'Die Untergrenze einer Kaution in Satoshi. Sie gilt, wenn der Prozentsatz des Bestellbetrags darunter liegt.';
 
   @override
   String get aboutBondNodeShareLabel => 'Anteil des Knotens beim Einzug';
 
   @override
-  String get aboutBondNodeShareExplanation =>
-      'Der Anteil einer eingezogenen Kaution, den der Knoten behält. Der Rest wird an die betroffene Gegenpartei weitergeleitet.';
-
-  @override
   String get aboutBondSlashOnTimeoutLabel => 'Einzug bei Zeitüberschreitung';
-
-  @override
-  String get aboutBondSlashOnTimeoutExplanation =>
-      'Gibt an, ob die Kaution eingezogen wird, wenn eine Partei einen Wartezustand verstreichen lässt, statt zu handeln.';
 
   @override
   String get aboutBondClaimWindowLabel =>
       'Frist für die Auszahlungsanforderung';
-
-  @override
-  String get aboutBondClaimWindowExplanation =>
-      'Wie lange die betroffene Gegenpartei Zeit hat, eine Lightning-Rechnung einzureichen und ihren Anteil an einer eingezogenen Kaution anzufordern.';
 
   @override
   String aboutBondClaimWindowValue(int count) {
@@ -1060,16 +968,27 @@ class AppLocalizationsDe extends AppLocalizations {
       'Streit konnte nicht eröffnet werden. Bitte erneut versuchen.';
 
   @override
+  String get openDisputeTitle => 'Streitfall eröffnen';
+
+  @override
+  String get openDisputeConfirmation =>
+      'Möchtest du wirklich einen Streitfall eröffnen? Dies eskaliert den Handel an einen Administrator und kann nicht rückgängig gemacht werden.';
+
+  @override
+  String get disputeAlreadyOpen =>
+      'Für diesen Handel ist bereits ein Streit eröffnet.';
+
+  @override
+  String get tradeNotDisputable =>
+      'Ein Streit kann erst eröffnet werden, wenn die Gelder für diesen Handel gesperrt sind.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Sende deine Lightning-Rechnung, damit der Verkäufer die Gelder sperren kann.';
 
   @override
   String get tradeWaitingInvoiceSellerInstruction =>
       'Warte auf die Lightning-Rechnung des Käufers.';
-
-  @override
-  String get tradeWaitingPaymentBuyerInstruction =>
-      'Der Verkäufer bezahlt die Hold-Rechnung. Bitte warten.';
 
   @override
   String get tradeWaitingPaymentSellerInstruction =>
@@ -1083,10 +1002,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeWaitingForHoldInvoice => 'Warte auf Hold-Rechnung...';
 
   @override
-  String get payInvoiceInstruction =>
-      'Bezahle diese Hold-Rechnung, um den Handel zu starten.';
-
-  @override
   String get shareButtonLabel => 'Teilen';
 
   @override
@@ -1097,18 +1012,19 @@ class AppLocalizationsDe extends AppLocalizations {
       'Warte auf Zahlungsbestätigung...';
 
   @override
-  String get payWithLightningWallet => 'Mit Lightning-Wallet bezahlen';
-
-  @override
-  String get noLightningWalletFound =>
-      'Keine Lightning-Wallet auf diesem Gerät gefunden';
-
-  @override
   String get orderNoLongerActive => 'Diese Bestellung ist nicht mehr aktiv';
+
+  @override
+  String get tradeNoLongerYours =>
+      'Du bist nicht mehr an diesem Handel beteiligt';
 
   @override
   String get sessionTimeoutMessage =>
       'Keine Antwort erhalten; prüfe deine Verbindung und versuche es später erneut';
+
+  @override
+  String get noRelayAcceptedMessage =>
+      'Kein Relay hat deine Nachricht angenommen. Prüfe deine Relays in den Einstellungen und versuche es erneut';
 
   @override
   String get noIdentityFoundMessage =>
@@ -1117,14 +1033,6 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get failedToLoadSecretWordsMessage =>
       'Geheime Wörter konnten nicht geladen werden. Bitte versuche es erneut.';
-
-  @override
-  String get failedToConfirmBackupMessage =>
-      'Sicherung konnte nicht bestätigt werden. Bitte versuche es erneut.';
-
-  @override
-  String get secretWordsInfoContent =>
-      'Deine 12 geheimen Wörter sind die einzige Möglichkeit, dein Konto wiederherzustellen. Sichere sie an einem sicheren Ort — teile sie niemals mit jemandem.';
 
   @override
   String get privacyModesInfoTitle => 'Datenschutzmodi';
@@ -1139,11 +1047,10 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get invalidMnemonicMessage =>
-      'Ungültige mnemonische Phrase. Bitte überprüfe deine Wörter und versuche es erneut.';
+      'Ungültige geheime Wörter. Bitte überprüfe deine Wörter und versuche es erneut.';
 
   @override
-  String get enterValidMnemonicError =>
-      'Gib eine gültige 12- oder 24-Wort-Phrase ein.';
+  String get enterValidMnemonicError => 'Gib deine 12 geheimen Wörter ein.';
 
   @override
   String get orderBookRefreshedMessage => 'Orderbuch aktualisiert';
@@ -1193,7 +1100,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get wordsHiddenOnLeaveNote =>
-      'Diese Wörter werden ausgeblendet, wenn du diesen Bildschirm verlässt';
+      'Sie werden ausgeblendet, wenn du diesen Bildschirm verlässt';
 
   @override
   String get wroteThemDownVerifyButton =>
@@ -1216,10 +1123,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Nicht ganz — überprüfe dein Papier und versuche es erneut.';
 
   @override
-  String get allWordsCorrectMessage => 'Alle 3 Wörter richtig!';
+  String get allWordsCorrectMessage => 'Alle 3 Wörter richtig';
 
   @override
-  String get showWordsAgainButton => 'Wörter erneut anzeigen';
+  String get reviewWordsButton => 'Wörter ansehen';
 
   @override
   String get accountBackedUpTitle => 'Dein Konto ist gesichert';
@@ -1254,18 +1161,11 @@ class AppLocalizationsDe extends AppLocalizations {
   String get backupNowButton => 'Jetzt sichern';
 
   @override
-  String get remindMeTomorrowButton => 'Erinnere mich morgen';
+  String get backupLaterButton => 'Mache ich später';
 
   @override
   String get nwcConnectionFailedMessage =>
       'Verbindung fehlgeschlagen. Bitte überprüfe deine NWC-URI und versuche es erneut.';
-
-  @override
-  String get connectWalletDescription =>
-      'Verbinde deine Lightning-Wallet über eine\nNostr Wallet Connect (NWC)-URI.';
-
-  @override
-  String get nwcUriLabel => 'NWC URI';
 
   @override
   String get clipboardInvalidNwcUriMessage =>
@@ -1278,26 +1178,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get connectButtonLabel => 'Verbinden';
 
   @override
-  String get walletConfigurationTitle => 'Wallet-Konfiguration';
-
-  @override
   String get walletDisconnectedMessage => 'Wallet getrennt';
 
   @override
-  String get connectedBadgeLabel => 'Verbunden';
-
-  @override
-  String get balanceLabel => 'Guthaben';
-
-  @override
   String get relayLabel => 'Relay';
-
-  @override
-  String get noWalletConnectedTitle => 'Keine Wallet verbunden';
-
-  @override
-  String get connectWalletPrompt =>
-      'Verbinde eine Wallet, um automatische Lightning-Zahlungen zu aktivieren.';
 
   @override
   String get disconnectButtonLabel => 'Trennen';
@@ -1309,7 +1193,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get chooseNotificationEventsSubtitle =>
-      'Wähle, welche Ereignisse Push-Benachrichtigungen auslösen.';
+      'Wähle, welche Ereignisse eine Benachrichtigung in der App anzeigen.';
 
   @override
   String get notifTradeUpdatesTitle => 'Trade-Updates';
@@ -1346,40 +1230,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get noCurrenciesFoundMessage => 'Keine Währungen gefunden';
 
   @override
-  String get failedToResetNodeMessage =>
-      'Knoten konnte nicht zurückgesetzt werden';
-
-  @override
-  String get invalidPubkeyOrBridgeErrorMessage =>
-      'Ungültiger Public Key oder Bridge-Fehler';
-
-  @override
-  String get currentNodePublicKeyLabel =>
-      'Öffentlicher Schlüssel des aktuellen Knotens';
-
-  @override
-  String get useCustomNodePubkeyLabel => 'Eigenen Knoten-Public-Key verwenden';
-
-  @override
-  String get enterHexPubkeyHint => 'Gib einen 64-stelligen Hex-Public-Key ein';
-
-  @override
   String get shareLogsTooltip => 'Protokolle teilen';
 
   @override
   String get noLogsToShareTooltip => 'Keine Protokolle zum Teilen';
-
-  @override
-  String get disableLoggingTooltip => 'Protokollierung deaktivieren';
-
-  @override
-  String get enableLoggingTooltip => 'Protokollierung aktivieren';
-
-  @override
-  String get loggingEnabledStatus => 'Protokollierung aktiviert';
-
-  @override
-  String get loggingDisabledStatus => 'Protokollierung deaktiviert';
 
   @override
   String get noLogEntriesMessage => 'Keine Protokolleinträge';
@@ -1387,6 +1241,9 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get failedToShareLogsMessage =>
       'Protokolle konnten nicht geteilt werden';
+
+  @override
+  String get logReportShareHeading => 'Mostro-Protokollbericht';
 
   @override
   String get tradeFilterAll => 'Alle';
@@ -1419,9 +1276,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get menuTooltip => 'Menü';
 
   @override
-  String get tradeStatusFilterPrefix => 'Status';
-
-  @override
   String get noTradesTitle => 'Keine Trades';
 
   @override
@@ -1432,50 +1286,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get couldNotLoadTradesMessage => 'Trades konnten nicht geladen werden';
 
   @override
-  String get releaseBitcoinTitle => 'Bitcoin freigeben';
-
-  @override
-  String get releaseBitcoinConfirmation =>
-      'Möchtest du die Satoshis wirklich an den Käufer freigeben?';
-
-  @override
   String get sellingBitcoin => 'Bitcoin verkaufen';
 
   @override
   String get buyingBitcoin => 'Bitcoin kaufen';
-
-  @override
-  String get createdByYou => 'Von dir erstellt';
-
-  @override
-  String get takenByYou => 'Von dir übernommen';
-
-  @override
-  String get timeAgoNow => 'jetzt';
-
-  @override
-  String timeAgoMinutes(int count) {
-    return '${count}Min';
-  }
-
-  @override
-  String timeAgoHours(int count) {
-    return '${count}Std';
-  }
-
-  @override
-  String timeAgoDays(int count) {
-    return '${count}T';
-  }
-
-  @override
-  String get tradeStatusLoading => 'Wird geladen';
-
-  @override
-  String get tradeStatusRate => 'Bewerten';
-
-  @override
-  String get tradeStatusRated => 'Bewertet';
 
   @override
   String get tradeInstructionActiveBuyer =>
@@ -1498,13 +1312,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Ein Streitschlichter wurde zugewiesen. Er wird dich über die App kontaktieren.';
 
   @override
-  String get tradeInstructionPendingRating =>
-      'Der Trade wurde erfolgreich abgeschlossen. Bewerte deine Gegenpartei, um Vertrauen in der Community aufzubauen.';
-
-  @override
-  String get tradeInstructionRated => 'Danke für deine Bewertung!';
-
-  @override
   String get tradeInstructionPending =>
       'Deine Bestellung ist veröffentlicht und wartet auf eine Gegenpartei. Du kannst sie jederzeit stornieren.';
 
@@ -1521,6 +1328,9 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get tradeHeadlinePending =>
       'Warte darauf, dass jemand deine Bestellung annimmt';
+
+  @override
+  String get tradeHeadlineInProgress => 'Der Handel wird vorbereitet';
 
   @override
   String get tradeHeadlineWaitingInvoiceBuyer =>
@@ -1561,78 +1371,27 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeHeadlineDisputed => 'Streitfall läuft';
 
   @override
-  String get tradeHeadlineComplete => 'Trade abgeschlossen!';
-
-  @override
-  String get tradeHeadlineCompleteRated => 'Trade abgeschlossen';
-
-  @override
   String get tradeHeadlineCancelled => 'Bestellung storniert';
 
   @override
   String get tradeHeadlineLoading => 'Trade wird geladen…';
 
   @override
-  String get tradeTimerPendingLabel =>
-      'Zeit, in der diese Bestellung im Buch bleibt';
-
-  @override
   String get tradeTimerPendingConsequence =>
       'Bei Ablauf wird die Bestellung aus dem Buch entfernt. Es wirkt sich nicht auf deine Reputation aus.';
-
-  @override
-  String get tradeTimerWaitingInvoiceLabelBuyer =>
-      'Zeit, deine Rechnung zu teilen';
-
-  @override
-  String get tradeTimerWaitingInvoiceLabelSeller =>
-      'Zeit für den Käufer, eine Rechnung zu teilen';
 
   @override
   String get tradeTimerWaitingInvoiceConsequence =>
       'Bei Ablauf wird der Trade storniert und die Bestellung kehrt ins Buch zurück.';
 
   @override
-  String get tradeTimerWaitingPaymentLabelBuyer =>
-      'Zeit für den Verkäufer, die Sats zu sperren';
-
-  @override
-  String get tradeTimerWaitingPaymentLabelSeller =>
-      'Zeit, die Hold-Invoice zu bezahlen';
-
-  @override
-  String get tradeTimerActiveLabelBuyer => 'Zeit, die Fiat-Zahlung zu senden';
-
-  @override
-  String get tradeTimerActiveLabelSeller =>
-      'Zeit für den Käufer, das Fiat zu senden';
-
-  @override
-  String get tradeTimerActiveConsequence =>
-      'Bei Ablauf kann der Trade storniert werden. Stimmt euch im Chat ab, wenn mehr Zeit nötig ist.';
-
-  @override
-  String get tradeTimerFiatSentLabelBuyer =>
-      'Zeit für den Verkäufer, den Empfang zu bestätigen';
-
-  @override
-  String get tradeTimerFiatSentLabelSeller =>
-      'Zeit, den Empfang zu bestätigen und freizugeben';
-
-  @override
-  String get tradeTimerFiatSentConsequence =>
-      'Wenn etwas nicht stimmt, öffne einen Streitfall über die Schaltfläche unten.';
-
-  @override
   String get tradeStepOrderTaken => 'Bestellung angenommen';
 
   @override
-  String get tradeStepInvoiceBuyer =>
-      'Du teilst eine Rechnung · der Verkäufer sperrt die Sats';
+  String get tradeStepInvoiceBuyer => 'Der Verkäufer sperrt die Sats';
 
   @override
-  String get tradeStepInvoiceSeller =>
-      'Der Käufer teilt eine Rechnung · du sperrst die Sats';
+  String get tradeStepInvoiceSeller => 'Du sperrst die Sats';
 
   @override
   String get tradeStepFiatBuyer => 'Du sendest die Fiat-Zahlung';
@@ -1641,40 +1400,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeStepFiatSeller => 'Der Käufer sendet die Fiat-Zahlung';
 
   @override
-  String get tradeStepReleaseBuyer =>
-      'Der Verkäufer bestätigt und gibt deine Sats frei';
+  String get tradeStepReleaseBuyer => 'Der Verkäufer gibt deine Sats frei';
 
   @override
-  String get tradeStepReleaseSeller =>
-      'Du bestätigst den Empfang und gibst die Sats frei';
+  String get tradeStepReleaseSeller => 'Du bestätigst und gibst die Sats frei';
 
   @override
-  String get tradeStepRate => 'Bewerte deine Gegenpartei';
-
-  @override
-  String get activeTradeTitle => 'AKTIVER TRADE';
-
-  @override
-  String tradeIdShortLabel(String id) {
-    return 'ID $id';
-  }
+  String get tradeStepRate => 'Ihr bewertet den Handel';
 
   @override
   String tradeCreatedAtLabel(String date) {
     return 'erstellt $date';
   }
-
-  @override
-  String get releaseSatsMenuItem => 'Sats freigeben';
-
-  @override
-  String get cancelOrderMenuItem => 'Bestellung stornieren';
-
-  @override
-  String get openDisputeMenuItem => 'Streitfall öffnen';
-
-  @override
-  String get stepDoneLabel => 'FERTIG';
 
   @override
   String stepIndicator(int current, int total) {
@@ -1688,31 +1425,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get viewDisputeButton => 'Streitfall ansehen';
 
   @override
-  String get waitingForBuyer => 'Warte auf den Käufer…';
-
-  @override
-  String get waitingForSeller => 'Warte auf den Verkäufer…';
-
-  @override
-  String get waitingForFiatPayment => 'Warte auf die Fiat-Zahlung…';
-
-  @override
-  String get waitingForCounterpart => 'Warte auf eine Gegenpartei…';
-
-  @override
   String get yourTradeTimelineTitle => 'DEIN TRADE';
-
-  @override
-  String get yourCounterpartFallback => 'deine Gegenpartei';
-
-  @override
-  String secureChatUnread(int count) {
-    return 'Sicherer Chat · $count neue Nachrichten';
-  }
-
-  @override
-  String get secureChatEncrypted =>
-      'Sicherer Chat · Ende-zu-Ende-verschlüsselt';
 
   @override
   String get messageSendFailed =>
@@ -1748,15 +1461,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get disputesTab => 'Streitfälle';
-
-  @override
-  String get activeTradeConversations => 'Deine aktiven Trade-Gespräche';
-
-  @override
-  String get noMessagesAvailable => 'Keine Nachrichten verfügbar';
-
-  @override
-  String get disputesAndAdminChat => 'Streitfälle und Admin-Chat';
 
   @override
   String get tradeInformationTitle => 'Trade-Informationen';
@@ -1801,30 +1505,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Bewahre deinen gemeinsamen Schlüssel sicher auf — er wird für die Streitbeilegung benötigt';
 
   @override
-  String get attachmentLabel => '[Anhang]';
-
-  @override
-  String sellingSatsTo(String handle) {
-    return 'Du verkaufst Sats an $handle';
-  }
-
-  @override
-  String buyingSatsFrom(String handle) {
-    return 'Du kaufst Sats von $handle';
-  }
-
-  @override
-  String youMessagePrefix(String message) {
-    return 'Du: $message';
-  }
-
-  @override
-  String get downloadTooltip => 'Herunterladen';
-
-  @override
-  String get fileDownloadPlaceholder => 'Datei-Download in Phase 10+ verfügbar';
-
-  @override
   String get fileTypeVideo => 'Video';
 
   @override
@@ -1835,12 +1515,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get fileTypeFile => 'Datei';
-
-  @override
-  String get tapToDownload => 'Zum Herunterladen tippen';
-
-  @override
-  String get imageDownloadPlaceholder => 'Bild-Download in Phase 10+ verfügbar';
 
   @override
   String buyingSatsAmount(String sats) {
@@ -1861,6 +1535,14 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get invoiceNoLongerExpected =>
+      'Diese Order wartet nicht mehr auf eine Rechnung. Status wird aktualisiert…';
+
+  @override
+  String get invoiceSubmitInFlight =>
+      'Für diese Order wird bereits eine Rechnung gesendet. Warte auf die Antwort.';
+
+  @override
   String get waitingForTradeAmount =>
       'Warte auf den Trade-Betrag — bitte versuche es gleich noch einmal.';
 
@@ -1871,46 +1553,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get enterInvoiceManually => 'Rechnung manuell eingeben';
 
   @override
-  String get enterLightningInvoiceInstruction =>
-      'Gib eine Lightning-Rechnung ein, um deine Sats zu erhalten';
-
-  @override
-  String get lightningInvoiceLabel => 'Lightning-Rechnung';
-
-  @override
   String get submitButton => 'Absenden';
 
   @override
-  String get sellOrderDetailsTitle => 'DETAILS DER VERKAUFSORDER';
+  String get buyerReputation => 'Reputation des Käufers';
 
   @override
-  String get buyOrderDetailsTitle => 'DETAILS DER KAUFORDER';
-
-  @override
-  String get buyTheseSatsButton => 'DIESE SATS KAUFEN';
-
-  @override
-  String get sellSatsButton => 'SATS VERKAUFEN';
-
-  @override
-  String get someoneSellingSats => 'Jemand verkauft Sats';
-
-  @override
-  String get someoneBuyingSats => 'Jemand kauft Sats';
-
-  @override
-  String get takeOrderForPrefix => 'für ';
-
-  @override
-  String get takeOrderAtMarketPrice => ' zum Marktpreis';
-
-  @override
-  String premiumLabel(String premium) {
-    return 'Aufschlag: $premium%';
-  }
-
-  @override
-  String get creatorReputation => 'Reputation des Erstellers';
+  String get sellerReputation => 'Reputation des Verkäufers';
 
   @override
   String get ratingStatLabel => 'Bewertung';
@@ -1922,62 +1571,19 @@ class AppLocalizationsDe extends AppLocalizations {
   String get daysActiveStatLabel => 'Tage aktiv';
 
   @override
-  String get timeToTakeOrder => 'ZEIT, DIESE ORDER ANZUNEHMEN';
-
-  @override
-  String get orderExpiryRemovedNote =>
-      'Bei Ablauf wird die Order aus dem Buch entfernt. ';
-
-  @override
-  String get orderExpiryNoReputationNote =>
-      'Es wirkt sich nicht auf deine Reputation aus.';
-
-  @override
-  String get minHint => 'Min';
-
-  @override
-  String get maxHint => 'Max';
-
-  @override
-  String get fiatAmountHint => 'Fiat-Betrag';
-
-  @override
-  String get enterAmountForPreview =>
-      'Gib einen Betrag ein, um eine Live-Vorschau zu sehen.';
-
-  @override
-  String get previewLabel => 'VORSCHAU';
-
-  @override
-  String previewBuyMarket(String amount, String price) {
-    return 'Du kaufst BTC für *$amount* zu *$price* · *24 h* aktiv';
+  String timeRemainingLabel(String time) {
+    return 'Verbleibende Zeit: $time';
   }
 
   @override
-  String previewSellMarket(String amount, String price) {
-    return 'Du verkaufst BTC für *$amount* zu *$price* · *24 h* aktiv';
+  String orderAmountOutOfRange(int min, int max) {
+    return 'Der Betrag muss für diesen Mostro-Knoten zwischen $min und $max Sats liegen';
   }
 
   @override
-  String previewReceiveFixed(String sats, String amount) {
-    return 'Du erhältst *$sats Sats* für *$amount* · *24 h* aktiv';
+  String orderAmountOutOfRangeFiat(int min, int max, String currency) {
+    return 'Der Betrag muss für diesen Mostro-Knoten zwischen $min und $max $currency liegen';
   }
-
-  @override
-  String previewSellFixed(String sats, String amount) {
-    return 'Du verkaufst *$sats Sats* für *$amount* · *24 h* aktiv';
-  }
-
-  @override
-  String get marketPriceLabel => 'Marktpreis';
-
-  @override
-  String marketPricePremium(String premium) {
-    return 'Markt $premium%';
-  }
-
-  @override
-  String get priceTypeLabel => 'Preistyp';
 
   @override
   String get priceTypeMarket => 'Markt';
@@ -1992,7 +1598,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get premiumSectionLabel => 'Aufschlag';
 
   @override
-  String get amountInSatsHint => 'Betrag in Sats';
+  String get fixedPriceRangeNotAvailable =>
+      'Festpreis ist für Bereichsangebote nicht verfügbar. Deaktiviere den Bereich, um einen Festpreis zu verwenden.';
 
   @override
   String get priceTypesDialogTitle => 'Preistypen';
@@ -2002,53 +1609,142 @@ class AppLocalizationsDe extends AppLocalizations {
       'Marktpreis: Der Preis deiner Order folgt dem Marktkurs mit einem angewendeten Aufschlag/Abschlag-Prozentsatz.\n\nFestpreis: Du legst einen genauen Preis in Satoshis fest.';
 
   @override
-  String get startFromPreset => 'MIT EINER VORLAGE STARTEN';
+  String get newOrderTitle => 'Neue Order';
 
   @override
-  String get presetExpressTitle => 'Express';
+  String get amountSectionSell => 'Wie viel du verkaufst';
 
   @override
-  String get recommendedTag => 'EMPFOHLEN';
+  String get amountSectionBuy => 'Wie viel du kaufst';
 
   @override
-  String get presetConservativeTitle => 'Konservativ';
+  String get amountModeSingle => 'Einzeln';
 
   @override
-  String get presetConservativeSubtitle =>
-      'Marktpreis · 0% Aufschlag · du wählst Betrag & Methoden';
+  String get amountModeRange => 'Bereich';
 
   @override
-  String get presetCustomTitle => 'Benutzerdefiniert';
+  String get amountMinLabel => 'Minimum';
 
   @override
-  String get presetCustomSubtitle =>
-      'Alle Felder — Betrag, Bereich, Methoden, Aufschlag, Fest- oder Marktpreis';
+  String get amountMaxLabel => 'Maximum';
 
   @override
-  String expressPresetSubtitle(String details) {
-    return 'Wie deine letzte erfolgreiche Order — $details';
+  String paymentMethodsChosenCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count gewählt',
+      one: '1 gewählt',
+      zero: 'keine gewählt',
+    );
+    return '$_temp0';
   }
 
   @override
-  String expressPremiumSuffix(String premium) {
-    return '$premium% Aufschlag';
+  String get paymentMethodAdd => 'Hinzufügen';
+
+  @override
+  String get paymentMethodSearchHint => 'Methoden suchen';
+
+  @override
+  String get customPaymentMethodLabel => 'Eigene Zahlungsmethode';
+
+  @override
+  String get priceSectionTitle => 'Preis';
+
+  @override
+  String premiumSellAbove(String premium) {
+    return 'Du verkaufst $premium% über dem Marktpreis';
+  }
+
+  @override
+  String premiumSellBelow(String premium) {
+    return 'Du verkaufst $premium% unter dem Markt';
+  }
+
+  @override
+  String premiumBuyBelow(String premium) {
+    return 'Du zahlst $premium% weniger als der Markt';
+  }
+
+  @override
+  String premiumBuyAbove(String premium) {
+    return 'Du zahlst $premium% mehr';
+  }
+
+  @override
+  String get premiumExactMarket => 'Exakter Marktpreis';
+
+  @override
+  String get fixedPriceNote =>
+      'Bei Festpreis folgt die Order nicht dem Markt: der Sats-Betrag bleibt genau so, wie du ihn eingibst.';
+
+  @override
+  String get previewHintNoAmount =>
+      'Gib einen Betrag ein und du siehst hier, wie die Order aussieht.';
+
+  @override
+  String previewSellMarket(String amount, String premium, String active) {
+    return 'Du verkaufst BTC für $amount zum Marktpreis $premium$active';
+  }
+
+  @override
+  String previewSellMarketExact(String amount, String active) {
+    return 'Du verkaufst BTC für $amount zum Marktpreis$active';
+  }
+
+  @override
+  String previewBuyMarket(String amount, String premium, String active) {
+    return 'Du kaufst BTC für $amount zum Marktpreis $premium$active';
+  }
+
+  @override
+  String previewBuyMarketExact(String amount, String active) {
+    return 'Du kaufst BTC für $amount zum Marktpreis$active';
+  }
+
+  @override
+  String previewSellFixed(String sats, String amount, String active) {
+    return 'Du verkaufst $sats für $amount zum Festpreis$active';
+  }
+
+  @override
+  String previewBuyFixed(String sats, String amount, String active) {
+    return 'Du kaufst $sats für $amount zum Festpreis$active';
+  }
+
+  @override
+  String previewActiveSuffix(String hours) {
+    return ' · $hours aktiv';
+  }
+
+  @override
+  String get publishOrder => 'Order veröffentlichen';
+
+  @override
+  String removePaymentMethod(String method) {
+    return '$method entfernen';
+  }
+
+  @override
+  String get satsUnitLabel => 'Sats';
+
+  @override
+  String satsAmount(String amount) {
+    return '$amount sats';
+  }
+
+  @override
+  String durationHours(int hours) {
+    return '$hours h';
   }
 
   @override
   String get paymentMethodsLabel => 'Zahlungsmethoden';
 
   @override
-  String get addPaymentMethod => 'Zahlungsmethode hinzufügen';
-
-  @override
   String get customPaymentMethodHint => 'Eigene Zahlungsmethode...';
-
-  @override
-  String get customMethodAppendedNote =>
-      'Die eigene Methode wird zur Auswahl hinzugefügt';
-
-  @override
-  String get selectPaymentMethodsTitle => 'Zahlungsmethoden auswählen';
 
   @override
   String amountRangeError(String min, String max) {
@@ -2131,31 +1827,99 @@ class AppLocalizationsDe extends AppLocalizations {
   String get changeButton => 'Ändern';
 
   @override
-  String get buyLabel => 'Kaufen';
-
-  @override
-  String get sellLabel => 'Verkaufen';
-
-  @override
   String get unableToOpenNotification =>
       'Benachrichtigungsdetails können nicht geöffnet werden.';
 
   @override
-  String get reasonBestPremium => '⚡ Beste Prämie';
+  String get reasonBestPremium => 'Beste Prämie';
 
   @override
-  String get reasonMostReputable => '⭐ Am angesehensten';
-
-  @override
-  String get reasonJustPublished => '🆕 Gerade veröffentlicht';
+  String get reasonMostReputable => 'Am angesehensten';
 
   @override
   String get marketPriceCaption => 'Marktpreis';
 
   @override
-  String orderReputationStats(int trades, int days) {
-    return ' · $trades Trades · $days Tage';
+  String reputationTradesLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Trades',
+      one: 'Trade',
+    );
+    return '$_temp0';
   }
+
+  @override
+  String reputationDaysLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Tage',
+      one: 'Tag',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sortNewest => 'Neueste';
+
+  @override
+  String ordersCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Orders',
+      one: '1 Order',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sortBestPremium => 'Beste Prämie';
+
+  @override
+  String get sortBestReputation => 'Beste Reputation';
+
+  @override
+  String get sortSheetTitle => 'Sortieren nach';
+
+  @override
+  String get orderCardPremiumCaption => 'Prämie';
+
+  @override
+  String orderFixedAmount(String sats) {
+    return 'Fester Betrag · für $sats';
+  }
+
+  @override
+  String get reputationNew => 'Neu';
+
+  @override
+  String get reputationNoTrades => 'keine Trades';
+
+  @override
+  String get bottomNavBook => 'Orderbuch';
+
+  @override
+  String get bottomNavTrades => 'Trades';
+
+  @override
+  String get fabDismissHint => 'Zum Schließen außerhalb tippen';
+
+  @override
+  String get addOrderFabLabel => 'Order erstellen';
+
+  @override
+  String get ordersEmptyHint =>
+      'Neue Orders erscheinen hier, sobald sie veröffentlicht werden.';
+
+  @override
+  String get ordersEmptyFilteredHint =>
+      'Keine Orders entsprechen Ihren Filtern.';
+
+  @override
+  String get clearFiltersButton => 'Filter entfernen';
 
   @override
   String get hideEarlierEvents => 'Frühere Ereignisse ausblenden';
@@ -2216,11 +1980,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get avatarIconLabel => 'Avatar-Symbol';
 
   @override
-  String marketPricePremiumLabel(String premium) {
-    return 'Marktpreis ($premium%)';
-  }
-
-  @override
   String get disputeDescResolvedBuyerFavour =>
       'Streitfall zugunsten des Käufers entschieden';
 
@@ -2276,7 +2035,20 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get lightningInvoiceQrLabel => 'QR-Code der Lightning-Rechnung';
+  String get bondSlashedViewPolicy => 'Richtlinie ansehen';
+
+  @override
+  String get bondSlashedViewTrade => 'Handel ansehen';
+
+  @override
+  String bondSlashedTradeNoticeDispute(String sats) {
+    return 'Der Node hat deine Einlage von $sats Sats in diesem Streitfall eingezogen.';
+  }
+
+  @override
+  String bondSlashedTradeNoticeTimeout(String sats) {
+    return 'Der Node hat deine Einlage von $sats Sats eingezogen, weil ein Schritt abgelaufen ist.';
+  }
 
   @override
   String get bondSlashedTitle => 'Kaution eingezogen';
@@ -2330,25 +2102,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintUrlExplanation =>
-      'Die Cashu-Mint, die dieser Node für jede Treuhand verwendet. Das für einen Handel gesperrte E-Cash stammt von dieser Mint; pro Order gibt es keine Wahl.';
-
-  @override
   String get aboutCashuMintNotAdvertised => 'Nicht angegeben';
 
   @override
   String get aboutCashuLocktimeLabel => 'Treuhand-Sperrfrist';
 
   @override
-  String get aboutCashuLocktimeExplanation =>
-      'Wie lange das E-Cash des Verkäufers in der Treuhand gesperrt bleibt. Nach Ablauf kann der Verkäufer die Mittel ohne Zutun des Nodes zurückholen.';
-
-  @override
   String get aboutCashuSettlementMarginLabel => 'Abwicklungspuffer';
-
-  @override
-  String get aboutCashuSettlementMarginExplanation =>
-      'Wie lange vor Ablauf der Treuhand dieser Node „Fiat gesendet“ nicht mehr annimmt, damit kein Handel mit zu wenig verbleibender Zeit abgewickelt wird.';
 
   @override
   String get escrowModeLightning => 'Lightning';
@@ -2390,6 +2150,1721 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get settingsEscrowCashuUnavailable =>
+      'Cashu funktioniert ohne Mint nicht – unten eine festlegen.';
+
+  @override
+  String get tradeStatusPayoutPending => 'Auszahlung ausstehend';
+
+  @override
+  String get tradeHeadlinePayoutPending =>
+      'Warten auf die Auszahlung an den Käufer';
+
+  @override
+  String get tradeInstructionPayoutPending =>
+      'Der Verkäufer hat die Treuhandmittel freigegeben. Die Lightning-Zahlung an den Käufer steht noch aus.';
+
+  @override
+  String get tradeScreenTitle => 'Dein Handel';
+
+  @override
+  String get tradeChipWaiting => 'WARTEN';
+
+  @override
+  String get tradeChipActive => 'AKTIV';
+
+  @override
+  String get tradeChipYourTurn => 'DU BIST DRAN';
+
+  @override
+  String get tradeChipDispute => 'STREITFALL';
+
+  @override
+  String get tradeChatLockedNote =>
+      'Noch kein Chat: Bis der Handel aktiv ist, weiß keine Seite, wer die andere ist.';
+
+  @override
+  String get tradeChatEncrypted => 'Ende-zu-Ende-verschlüsselter Chat';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyer =>
+      'Der Verkäufer bezahlt die Hold-Rechnung. Sobald die Sats gesperrt sind, bist du mit der Fiat-Zahlung dran.';
+
+  @override
+  String tradeBodyActiveSeller(String method) {
+    return 'Teile deine $method-Daten im Chat oben.';
+  }
+
+  @override
+  String tradeBodyActiveBuyer(String method) {
+    return 'Per $method, mit den Daten aus dem Chat. Sobald du gezahlt hast, bestätige es unten.';
+  }
+
+  @override
+  String tradeBodyFiatSentSeller(String method) {
+    return 'Der Käufer hat die Zahlung als gesendet markiert. Prüfe dein $method-Konto, bevor du freigibst.';
+  }
+
+  @override
+  String get tradeReleaseIrreversible =>
+      'Das Freigeben der Sats lässt sich nicht rückgängig machen.';
+
+  @override
+  String get tradeTimerYouHave => 'Du hast noch';
+
+  @override
+  String get tradeTimerTheyHave => 'Gegenseite hat noch';
+
+  @override
+  String get tradeTimerOrderHas => 'Verbleibend';
+
+  @override
+  String get tradeTimerNoteCoordinate =>
+      'Wenn ihr mehr Zeit braucht, sprecht es im Chat ab, bevor sie abläuft.';
+
+  @override
+  String get tradeRoleBuyer => 'Käufer';
+
+  @override
+  String get tradeRoleSeller => 'Verkäufer';
+
+  @override
+  String reputationTradesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Handel',
+      one: '1 Handel',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String reputationDaysOnMostro(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Tage bei Mostro',
+      one: '1 Tag bei Mostro',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get tradeFiatSentAction => 'Ich habe bezahlt';
+
+  @override
+  String get tradeCloseAction => 'Schließen';
+
+  @override
+  String get tradeSendRatingAction => 'Bewertung senden';
+
+  @override
+  String get tradeCompletedTitle => 'Handel abgeschlossen';
+
+  @override
+  String tradeRatedCounterpart(String alias, String score) {
+    return 'Du hast $alias mit $score bewertet';
+  }
+
+  @override
+  String get tradeIdLabel => 'ID';
+
+  @override
+  String tradeCreatedTodayLabel(String time) {
+    return 'erstellt heute $time';
+  }
+
+  @override
+  String get releaseSheetTitle => 'Sats freigeben?';
+
+  @override
+  String get releaseSheetBody =>
+      'Das lässt sich nicht rückgängig machen. Gib nur frei, wenn das Geld bereits auf deinem Konto ist.';
+
+  @override
+  String get releaseSheetConfirm => 'Ja, freigeben';
+
+  @override
+  String get releaseSheetBack => 'Zurück';
+
+  @override
+  String get orderSideChipSell => 'Du verkaufst BTC';
+
+  @override
+  String get orderSideChipBuy => 'Du kaufst BTC';
+
+  @override
+  String orderDetailMarketPremium(String premium) {
+    return 'Marktpreis · $premium Aufschlag';
+  }
+
+  @override
+  String myOrderWaitingNote(String ago) {
+    return 'Veröffentlicht $ago. Wir sagen dir Bescheid, sobald jemand sie annimmt: Du kannst diesen Bildschirm schließen.';
+  }
+
+  @override
+  String get orderStatusTakenWaitingInvoice =>
+      'Angenommen · warte auf Rechnung';
+
+  @override
+  String get orderStatusTakenWaitingPayment => 'Angenommen · warte auf Zahlung';
+
+  @override
+  String get orderDetailCreatedLabel => 'Erstellt';
+
+  @override
+  String get orderDetailIdLabel => 'ID';
+
+  @override
+  String paymentMethodsMore(String first, int count) {
+    return '$first +$count';
+  }
+
+  @override
+  String get paymentMethodsSheetTitle => 'Zahlungsmethoden';
+
+  @override
+  String get cancelOrderSheetTitle => 'Order abbrechen?';
+
+  @override
+  String get cancelOrderSheetBody =>
+      'Sie wird aus dem Orderbuch entfernt; das lässt sich nicht rückgängig machen.';
+
+  @override
+  String get goBackButtonLabel => 'Zurück';
+
+  @override
+  String get takeOrderYouPay => 'Du zahlst';
+
+  @override
+  String get takeOrderYouReceive => 'Du erhältst';
+
+  @override
+  String get takeOrderYouSend => 'Du sendest';
+
+  @override
+  String takeOrderSatsFrom(String sats) {
+    return 'ab $sats';
+  }
+
+  @override
+  String takeOrderMarketFooter(String premium) {
+    return 'Marktpreis · $premium Aufschlag. Der endgültige Betrag wird beim Annehmen festgelegt.';
+  }
+
+  @override
+  String takeOrderFixedFooterSeller(String sats) {
+    return 'Fester Betrag · der Verkäufer verlangt $sats';
+  }
+
+  @override
+  String takeOrderFixedFooterBuyer(String sats) {
+    return 'Fester Betrag · der Käufer bietet $sats';
+  }
+
+  @override
+  String get counterpartySeller => 'Verkäufer';
+
+  @override
+  String get counterpartyBuyer => 'Käufer';
+
+  @override
+  String counterpartyTrades(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Handel',
+      one: '$count Handel',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String counterpartyDaysOnMostro(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Tage bei Mostro',
+      one: '$count Tag bei Mostro',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get takeOrderPayWithLabel => 'Du zahlst mit';
+
+  @override
+  String get takeOrderPaidWithLabel => 'Du wirst bezahlt mit';
+
+  @override
+  String get takeOrderPublishedLabel => 'Veröffentlicht';
+
+  @override
+  String get takeOrderNoteBuyer =>
+      'Wenn du sie annimmst, sperrt der Verkäufer die Sats in Mostro. Du zahlst erst, wenn sie gesperrt sind.';
+
+  @override
+  String get takeOrderNoteSeller =>
+      'Wenn du sie annimmst, sperrst du die Sats in Mostro. Der Käufer zahlt danach.';
+
+  @override
+  String get takeOrderButton => 'Order annehmen';
+
+  @override
+  String get takeOrderTaking => 'Wird angenommen…';
+
+  @override
+  String get takeOrderUnavailable => 'Nicht mehr verfügbar';
+
+  @override
+  String get takeOrderClosed => 'Geschlossen';
+
+  @override
+  String get easterEggWhitepaper =>
+      '31. Oktober 2008: neun Seiten, niemandes Erlaubnis. Frohes Halloween.';
+
+  @override
+  String get easterEggGenesis =>
+      'The Times 03/Jan/2009 Chancellor on brink of second bailout for banks';
+
+  @override
+  String get easterEggPizzaDay =>
+      '22. Mai 2010: 10.000 BTC für zwei Pizzen. Hoffentlich haben sie geschmeckt.';
+
+  @override
+  String get settingsGroupApp => 'Anwendung';
+
+  @override
+  String get settingsGroupPayments => 'Zahlungen';
+
+  @override
+  String get settingsGroupNetwork => 'Netzwerk';
+
+  @override
+  String get settingsGroupHelp => 'Hilfe';
+
+  @override
+  String get fiatCurrencySettingTitle => 'Fiat-Währung';
+
+  @override
+  String notificationsEnabledOfTotal(int count, int total) {
+    return '$count von $total';
+  }
+
+  @override
+  String get notificationsAllOff => 'Aus';
+
+  @override
+  String get lightningAddressUnset => 'Nicht eingerichtet';
+
+  @override
+  String get nwcWalletNotConnected => 'Nicht verbunden';
+
+  @override
+  String relaysConnectedOfTotal(int connected, int total) {
+    return '$connected von $total verbunden';
+  }
+
+  @override
+  String get relaysSummaryHealthy =>
+      'Du empfängst Orders und Nachrichten wie gewohnt';
+
+  @override
+  String get relaysSummaryAtRisk =>
+      'Du siehst möglicherweise keine neuen Orders mehr';
+
+  @override
+  String get relayStatusConnected => 'Verbunden';
+
+  @override
+  String get relayStatusOffline => 'Keine Verbindung';
+
+  @override
+  String get addRelayButtonLabel => 'Relay hinzufügen';
+
+  @override
+  String get relaysFootnote =>
+      'Relays übertragen deine Orders und Nachrichten. Mit weniger als zwei verbundenen siehst du möglicherweise keine neuen Orders mehr.';
+
+  @override
+  String get lastRelayBlockedMessage =>
+      'Lass mindestens ein Relay aktiv: Ohne Relays kannst du keine Orders sehen oder veröffentlichen.';
+
+  @override
+  String get nwcExplainerTitle => 'Wallet verbinden';
+
+  @override
+  String get nwcExplainerSubtitle => 'Mit Nostr Wallet Connect';
+
+  @override
+  String get nwcExplainerBody =>
+      'Mostro zieht und zahlt die Rechnungen deiner Trades aus dieser Wallet, sodass du keine Rechnung mehr von Hand kopieren musst.';
+
+  @override
+  String get nwcUriFieldLabel => 'Verbindungs-URI';
+
+  @override
+  String get nwcUriPlaceholder => 'nostr+walletconnect://…';
+
+  @override
+  String get nwcStorageFootnote =>
+      'Die URI wird nur auf diesem Gerät gespeichert und nie auf Nostr veröffentlicht.';
+
+  @override
+  String get walletConnectedMessage => 'Wallet verbunden';
+
+  @override
+  String get nwcConnectedStatus => 'Verbunden';
+
+  @override
+  String nwcBalanceSats(String sats) {
+    return '$sats Sats';
+  }
+
+  @override
+  String get notificationsSystemDenied =>
+      'Benachrichtigungen sind in den Systemeinstellungen deaktiviert.';
+
+  @override
+  String get openSystemSettingsAction => 'Einstellungen öffnen';
+
+  @override
+  String get notificationsPrivacyFootnote =>
+      'Benachrichtigungen enthalten keine Beträge und keine Gegenparteien. Ein Push läuft über die Server von Google oder Apple und sagt nur, dass es etwas zu sehen gibt.';
+
+  @override
+  String get pushMasterToggleTitle => 'Push-Benachrichtigungen';
+
+  @override
+  String get pushMasterToggleSubtitle =>
+      'Weckt die App, wenn ein Trade-Update oder eine Nachricht eintrifft. Die Benachrichtigung selbst enthält nichts.';
+
+  @override
+  String get pushStatusOff => 'Aus – nichts ist beim Push-Server registriert';
+
+  @override
+  String pushStatusCleanupPending(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Aus — $count Push-Registrierungen müssen noch entfernt werden',
+      one: 'Aus — 1 Push-Registrierung muss noch entfernt werden',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get pushStatusNoToken => 'Warten auf das Push-Token dieses Geräts';
+
+  @override
+  String get pushStatusIdle => 'An – keine offenen Trades zu registrieren';
+
+  @override
+  String pushStatusRegistered(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Für $count Trades registriert',
+      one: 'Für 1 Trade registriert',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String pushStatusLastRegistered(String ago) {
+    return 'Letzte Registrierung: $ago';
+  }
+
+  @override
+  String get pushStatusUnreachable =>
+      'Push-Server nicht erreichbar – neuer Versuch läuft';
+
+  @override
+  String get pushStatusNodeRefused =>
+      'Dieser Mostro-Node wird vom Push-Server nicht akzeptiert';
+
+  @override
+  String get pushStatusRateLimited =>
+      'Push-Anfragelimit erreicht – gleich neuer Versuch';
+
+  @override
+  String get pushUnsupportedPlatform =>
+      'Push-Benachrichtigungen sind auf dieser Plattform nicht verfügbar';
+
+  @override
+  String get pushToggleSaveFailed =>
+      'Push-Benachrichtigungen konnten nicht geändert werden';
+
+  @override
+  String get pushNewMessageBody => 'Du hast eine neue Nachricht';
+
+  @override
+  String get notificationPrefSaveFailed =>
+      'Einstellung konnte nicht gespeichert werden';
+
+  @override
+  String get logsScreenTitle => 'Protokolle';
+
+  @override
+  String get logFilterAll => 'Alle';
+
+  @override
+  String get logFilterRelays => 'Relays';
+
+  @override
+  String get logFilterOrders => 'Orders';
+
+  @override
+  String get logFilterPayments => 'Zahlungen';
+
+  @override
+  String get verboseLoggingTitle => 'Ausführliches Protokoll';
+
+  @override
+  String get verboseLoggingSubtitle => 'Mehr Detail, mehr Verbrauch';
+
+  @override
+  String get newLogsChipLabel => 'Neue Einträge';
+
+  @override
+  String get noLogsForFilter => 'Keine Einträge für diesen Filter';
+
+  @override
+  String get aboutAppSection => 'Anwendung';
+
+  @override
+  String get aboutSourceCodeLabel => 'Quellcode';
+
+  @override
+  String get aboutUserGuideLabel => 'Benutzerhandbuch';
+
+  @override
+  String get aboutTechnicalDocsLabel => 'Technische Dokumentation';
+
+  @override
+  String get aboutLanguageSpanish => 'Spanisch';
+
+  @override
+  String get aboutLanguageEnglish => 'Englisch';
+
+  @override
+  String get aboutConnectedNodeTitle => 'Verbundener Knoten';
+
+  @override
+  String get aboutMinOrderCell => 'Min. Auftrag';
+
+  @override
+  String get aboutMaxOrderCell => 'Max. Auftrag';
+
+  @override
+  String get aboutFeeCell => 'Gebühr';
+
+  @override
+  String aboutFeeValue(String value) {
+    return '$value %';
+  }
+
+  @override
+  String get aboutLimitsFootnote => 'Limits in Satoshis pro Auftrag';
+
+  @override
+  String get aboutNodeTechnicalDataRow => 'Technische Knotendaten';
+
+  @override
+  String aboutFieldCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Felder',
+      one: '$count Feld',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get aboutTechnicalDataTitle => 'Technische Daten';
+
+  @override
+  String get aboutPublicKeyLabel => 'Öffentlicher Schlüssel';
+
+  @override
+  String get aboutOrderExpiryLabel => 'Auftragsablauf';
+
+  @override
+  String get aboutWaitingTimeoutLabel => 'Warte-Timeout';
+
+  @override
+  String aboutHoursShort(int count) {
+    return '$count h';
+  }
+
+  @override
+  String aboutSecondsShort(int count) {
+    return '$count s';
+  }
+
+  @override
+  String get aboutAliasLabel => 'Alias';
+
+  @override
+  String get aboutNodePublicKeyLabel => 'Öffentlicher Knotenschlüssel';
+
+  @override
+  String get aboutNodeUriLabel => 'Knoten-URI';
+
+  @override
+  String get aboutCommitLabel => 'Commit';
+
+  @override
+  String get aboutChainNetworkLabel => 'Chain und Netzwerk';
+
+  @override
+  String get aboutTechnicalFootnote =>
+      'Diese Daten identifizieren den Knoten, mit dem du handelst. Nützlich für den Support oder um ihn zu prüfen, bevor du Geld sendest.';
+
+  @override
+  String get aboutCopyAllData => 'Alle Daten kopieren';
+
+  @override
+  String get tradesGroupNeedsAction => 'Brauchen dich';
+
+  @override
+  String get tradesGroupInProgress => 'Laufend';
+
+  @override
+  String get tradesGroupClosed => 'Abgeschlossen';
+
+  @override
+  String get tradesDirectionSell => 'Du verkaufst';
+
+  @override
+  String get tradesDirectionBondClaim => 'Einlage-Anspruch';
+
+  @override
+  String get tradesDirectionBuy => 'Du kaufst';
+
+  @override
+  String tradesCounterpartyTo(String handle) {
+    return 'an $handle';
+  }
+
+  @override
+  String tradesCounterpartyFrom(String handle) {
+    return 'von $handle';
+  }
+
+  @override
+  String get tradeListChipYourTurn => 'Du bist dran';
+
+  @override
+  String get tradeListChipPublished => 'Veröffentlicht';
+
+  @override
+  String get tradeListChipInProgress => 'Laufend';
+
+  @override
+  String get tradeListChipWaitingInvoice => 'Warte auf Rechnung';
+
+  @override
+  String get tradeListChipWaitingPayment => 'Warte auf Zahlung';
+
+  @override
+  String get tradeListChipWaitingSats => 'Warte auf Sats';
+
+  @override
+  String get tradeListChipDispute => 'Im Streitfall';
+
+  @override
+  String get tradeListChipCompleted => 'Abgeschlossen';
+
+  @override
+  String get tradeListChipCancelled => 'Storniert';
+
+  @override
+  String get tradeListChipExpired => 'Abgelaufen';
+
+  @override
+  String get tradeVerbAddInvoice => 'Rechnung hinzufügen';
+
+  @override
+  String get tradeVerbPayBond => 'Einlage zahlen';
+
+  @override
+  String get tradeHeadlineWaitingBond =>
+      'Sperre deine Einlage, um fortzufahren';
+
+  @override
+  String get tradeInstructionWaitingBond =>
+      'Der Node hält diese Annahme zurück, bis die rückzahlbare Einlage bezahlt ist. Die Order bleibt derweil für andere offen.';
+
+  @override
+  String get takeOrderBondNotice =>
+      'Dieser Node verlangt von Annehmenden zuerst eine rückzahlbare Einlage; sie kommt zurück, wenn der Handel ehrlich endet.';
+
+  @override
+  String takeOrderBondNoticeEstimate(String sats) {
+    return 'Dieser Node verlangt von Annehmenden zuerst eine rückzahlbare Einlage von ≈ $sats Sats; sie kommt zurück, wenn der Handel ehrlich endet.';
+  }
+
+  @override
+  String get tradeVerbPayInvoice => 'Rechnung bezahlen';
+
+  @override
+  String get tradeVerbSendPayment => 'Zahlung senden';
+
+  @override
+  String get tradeVerbReleaseSats => 'Sats freigeben';
+
+  @override
+  String get tradeVerbRate => 'Bewerten';
+
+  @override
+  String get tradeListFilterAll => 'Alle';
+
+  @override
+  String get tradeListFilterActive => 'Aktiv';
+
+  @override
+  String get tradeListFilterCompleted => 'Abgeschlossen';
+
+  @override
+  String get tradeListFilterCancelled => 'Storniert';
+
+  @override
+  String get tradeListFilterTitle => 'Trades anzeigen';
+
+  @override
+  String get relativeTimeNow => 'jetzt';
+
+  @override
+  String relativeTimeMinutes(int count) {
+    return 'vor $count Min.';
+  }
+
+  @override
+  String relativeTimeHours(int count) {
+    return 'vor $count Std.';
+  }
+
+  @override
+  String get relativeTimeYesterday => 'gestern';
+
+  @override
+  String satsFigureEstimate(String sats) {
+    return '≈ $sats Sats';
+  }
+
+  @override
+  String satsFigureExact(String sats) {
+    return '$sats Sats';
+  }
+
+  @override
+  String get chatGroupActive => 'Aktive Trades';
+
+  @override
+  String chatContextSellActive(String amount, String currency) {
+    return 'Du verkaufst $amount $currency';
+  }
+
+  @override
+  String chatContextBuyActive(String amount, String currency) {
+    return 'Du kaufst $amount $currency';
+  }
+
+  @override
+  String chatContextSellClosed(String amount, String currency) {
+    return 'Du hast $amount $currency verkauft';
+  }
+
+  @override
+  String chatContextBuyClosed(String amount, String currency) {
+    return 'Du hast $amount $currency gekauft';
+  }
+
+  @override
+  String get chatTurnAddInvoice => 'du fügst die Rechnung hinzu';
+
+  @override
+  String get chatTurnPayBond => 'du zahlst die Einlage';
+
+  @override
+  String get chatTurnPayInvoice => 'du zahlst die Rechnung';
+
+  @override
+  String get chatTurnSendPayment => 'du zahlst';
+
+  @override
+  String get chatTurnRelease => 'du gibst frei';
+
+  @override
+  String get chatTurnRate => 'du bewertest';
+
+  @override
+  String get chatYouLabel => 'Du:';
+
+  @override
+  String get chatListFootnote =>
+      'Jede Unterhaltung gehört zu einem Trade und ist Ende-zu-Ende-verschlüsselt. Nach dem Trade bleibt sie hier lesbar.';
+
+  @override
+  String get chatListEmptyTitle => 'Noch keine Unterhaltungen';
+
+  @override
+  String get chatListEmptyBody =>
+      'Der Chat öffnet sich, sobald ein Trade aktiv wird.';
+
+  @override
+  String get chatClosedNotice =>
+      'Der Trade ist beendet. Die Unterhaltung bleibt hier lesbar.';
+
+  @override
+  String disputeOpenedByYou(String time) {
+    return 'Von dir eröffnet, $time';
+  }
+
+  @override
+  String disputeOpenedByPeer(String time) {
+    return 'Von der Gegenseite eröffnet, $time';
+  }
+
+  @override
+  String get invoiceReceiveTitle => 'Deine Sats erhalten';
+
+  @override
+  String get invoiceLockTitle => 'Deine Sats sperren';
+
+  @override
+  String get bondTitle => 'Sicherheitseinlage';
+
+  @override
+  String get bondRefundableLabel => 'RÜCKZAHLBARE EINLAGE';
+
+  @override
+  String get bondComesBack => 'kommt beim Abschluss zu dir zurück';
+
+  @override
+  String bondFiatComesBack(String fiat) {
+    return '≈ $fiat · kommt beim Abschluss zu dir zurück';
+  }
+
+  @override
+  String bondPaySemantics(String sats) {
+    return 'Rückzahlbare Einlage von $sats Sats';
+  }
+
+  @override
+  String bondReleasesIn(String time) {
+    return 'Die Order wird freigegeben, wenn du nicht in $time zahlst';
+  }
+
+  @override
+  String bondRowHeld(String bold) {
+    return 'Die Sats bleiben $bold, sie werden nicht ausgegeben';
+  }
+
+  @override
+  String get bondRowHeldBold => 'in deiner Wallet gehalten';
+
+  @override
+  String bondRowReleased(String bold) {
+    return 'Endet der Handel gut, $bold';
+  }
+
+  @override
+  String get bondRowReleasedBold => 'wird sie von selbst freigegeben';
+
+  @override
+  String bondRowLost(String bold) {
+    return 'Du verlierst sie nur bei einem Streitfall, und $bold';
+  }
+
+  @override
+  String bondRowLostTimeout(String bold) {
+    return 'Du verlierst sie, wenn du einen Schritt verstreichen lässt oder bei einem Streitfall, und $bold';
+  }
+
+  @override
+  String get bondRowLostBold => 'du ihn verlierst';
+
+  @override
+  String get bondWhyTitle => 'Warum Mostro eine Einlage verlangt';
+
+  @override
+  String get bondWhyCustody =>
+      'Mostro verwahrt keine Gelder und kann daher niemanden bestrafen, der einen Handel abbricht; das übernimmt die Einlage, und sie schützt alle Nutzer vor Betrügern.';
+
+  @override
+  String bondWhyHold(String hold) {
+    return 'Es ist eine $hold-Rechnung: deine Wallet reserviert die Sats, ohne sie zu senden; beim Abschluss wird die Reservierung von selbst aufgehoben.';
+  }
+
+  @override
+  String get bondWhyDispute =>
+      'Wenn du einen Streitfall eröffnest und gewinnst, bekommst du sie ebenfalls zurück. Sie wird nur eingezogen, wenn du einen Streitfall verlierst.';
+
+  @override
+  String get bondWhyDisputeTimeout =>
+      'Wenn du einen Streitfall eröffnest und gewinnst, bekommst du sie ebenfalls zurück. Sie wird nur eingezogen, wenn du einen Streitfall verlierst oder einen Schritt verstreichen lässt.';
+
+  @override
+  String get bondReadDocs => 'Dokumentation lesen';
+
+  @override
+  String get bondContextOrder => 'Order';
+
+  @override
+  String bondContextBuy(String fiat) {
+    return 'Du kaufst $fiat';
+  }
+
+  @override
+  String bondContextSell(String fiat) {
+    return 'Du verkaufst $fiat';
+  }
+
+  @override
+  String get bondContextEquals => 'Einlage entspricht';
+
+  @override
+  String bondContextPercent(String pct) {
+    return '$pct % des Betrags';
+  }
+
+  @override
+  String get bondDontPublish => 'Order nicht veröffentlichen';
+
+  @override
+  String get bondAbandoned =>
+      'Order verworfen. Nichts wurde veröffentlicht und nichts berechnet.';
+
+  @override
+  String bondPublishesIn(String time) {
+    return 'Noch nicht veröffentlicht: die Order verfällt, wenn du nicht innerhalb von $time zahlst';
+  }
+
+  @override
+  String get bondInvoiceMissingMaker =>
+      'Dieses Gerät hat keine Kopie der Einlage-Rechnung, und der Node sendet sie für eine von dir erstellte Order nicht erneut. Verwirf die Order und erstelle sie neu.';
+
+  @override
+  String get bondExpiredBodyMaker =>
+      'Sie wurde nicht rechtzeitig bezahlt: die Order wurde nie veröffentlicht und keine Sats haben deine Wallet verlassen.';
+
+  @override
+  String get bondExpiredNoticeMaker =>
+      'Die Einlage-Rechnung ist abgelaufen; die Order wurde nicht veröffentlicht';
+
+  @override
+  String get orderStatusWaitingBond =>
+      'Warte auf deine Einlage — noch nicht veröffentlicht';
+
+  @override
+  String get bondAlreadyLocked =>
+      'Deine Einlage wurde bereits bezahlt, die Order ist veröffentlicht. Storniere sie auf dem Order-Bildschirm.';
+
+  @override
+  String get bondCancelRefusedTitle =>
+      'Der Node hat die Einlage nicht storniert';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Dieser Mostro-Node unterstützt das Stornieren einer unbezahlten Einlage vielleicht noch nicht, oder deine Einlage wurde gerade bezahlt. Wenn du sie nicht bezahlt hast, kannst du die Order von diesem Gerät entfernen. Wird die Rechnung später bezahlt, wird die Order trotzdem veröffentlicht.';
+
+  @override
+  String get bondRemoveFromDevice => 'Von diesem Gerät entfernen';
+
+  @override
+  String get bondKeepWaiting => 'Weiter warten';
+
+  @override
+  String createOrderBondNoticeEstimate(String sats) {
+    return 'Dieser Node verlangt eine rückzahlbare Einlage von ≈ $sats Sats, bevor die Order veröffentlicht wird; sie kommt zurück, wenn der Handel ehrlich endet.';
+  }
+
+  @override
+  String get createOrderBondNotice =>
+      'Dieser Node verlangt eine rückzahlbare Einlage, bevor die Order veröffentlicht wird; sie kommt zurück, wenn der Handel ehrlich endet.';
+
+  @override
+  String get bondClaimTitle => 'Deinen Anteil einfordern';
+
+  @override
+  String get bondClaimShareLabel => 'DEIN ANTEIL';
+
+  @override
+  String bondClaimShareSemantics(String sats) {
+    return 'Anteil von $sats Sats einzufordern';
+  }
+
+  @override
+  String bondClaimContext(String context) {
+    return 'Aus dem Handel über $context';
+  }
+
+  @override
+  String bondClaimDeadline(String date) {
+    return 'Fordere es vor dem $date ein';
+  }
+
+  @override
+  String get bondClaimExplainer =>
+      'Die Einlage der Gegenseite ist zu deinen Gunsten verfallen. Füge eine Rechnung über genau diesen Betrag hinzu und der Node zahlt ihn dir aus.';
+
+  @override
+  String get bondClaimFieldLabel => 'Lightning-Rechnung';
+
+  @override
+  String get bondClaimFieldHint => 'lnbc… über genau den Anteil';
+
+  @override
+  String get bondClaimSubmit => 'Rechnung senden';
+
+  @override
+  String get bondClaimSent => 'Rechnung an den Node gesendet';
+
+  @override
+  String get bondClaimSubmittedTitle => 'Rechnung gesendet';
+
+  @override
+  String get bondClaimSubmittedBody => 'Warte auf die Bestätigung des Nodes.';
+
+  @override
+  String get bondClaimAcknowledgedTitle => 'Auszahlung läuft';
+
+  @override
+  String get bondClaimAcknowledgedBody =>
+      'Der Node hat deine Rechnung angenommen und zahlt sie. Kann sie nicht geroutet werden, wirst du um eine neue gebeten.';
+
+  @override
+  String get bondClaimCompletedTitle => 'Bezahlt';
+
+  @override
+  String bondClaimCompletedBody(String sats) {
+    return '$sats Sats sind in deiner Wallet angekommen.';
+  }
+
+  @override
+  String get bondClaimExpiredTitle => 'Das Zeitfenster ist abgelaufen';
+
+  @override
+  String bondClaimExpiredBody(String date) {
+    return 'Es endete am $date. Der Anteil kann nicht mehr eingefordert werden.';
+  }
+
+  @override
+  String get bondClaimMissing => 'Kein Anspruch für diese Order gefunden.';
+
+  @override
+  String get bondClaimErrorAmount =>
+      'Die Rechnung muss über genau den angezeigten Anteil lauten.';
+
+  @override
+  String get bondClaimErrorExpired =>
+      'Das Zeitfenster ist abgelaufen; der Anteil kann nicht mehr eingefordert werden.';
+
+  @override
+  String get bondClaimErrorRejected =>
+      'Der Node hat die Rechnung nicht angenommen. Versuche eine andere.';
+
+  @override
+  String get bondClaimErrorNotClaimable =>
+      'Dieser Anspruch nimmt gerade keine Rechnung an.';
+
+  @override
+  String get bondClaimErrorNoKey =>
+      'Dieses Gerät hat keinen Schlüssel für diesen Handel und kann den Anteil nicht einfordern.';
+
+  @override
+  String get tradeVerbClaimPayout => 'Auszahlung einfordern';
+
+  @override
+  String get chatTurnClaimPayout => 'du forderst die Auszahlung ein';
+
+  @override
+  String get tradeBadgePayoutPending => 'Auszahlung ausstehend';
+
+  @override
+  String get tradeBadgePayoutInProgress => 'Auszahlung läuft';
+
+  @override
+  String get tradeBadgePayoutPaid => 'Auszahlung erhalten';
+
+  @override
+  String bondBannerPendingTitle(String sats) {
+    return '$sats Sats warten darauf, zu dir zurückzukommen';
+  }
+
+  @override
+  String bondBannerPendingBody(String sats) {
+    return 'Die Einlage der Gegenseite ist zu deinen Gunsten verfallen. Füge eine Lightning-Rechnung über $sats Sats hinzu, um sie einzufordern.';
+  }
+
+  @override
+  String get bondBannerAddInvoice => 'Auszahlungsrechnung hinzufügen';
+
+  @override
+  String get bondBannerView => 'Anspruch ansehen';
+
+  @override
+  String get bondBannerInProgressTitle => 'Auszahlung läuft';
+
+  @override
+  String bondBannerInProgressBody(String sats) {
+    return 'Der Node zahlt deinen Anteil von $sats Sats aus.';
+  }
+
+  @override
+  String get bondBannerPaidTitle => 'Auszahlung erhalten';
+
+  @override
+  String bondBannerPaidBody(String sats, String date) {
+    return '$sats Sats wurden dir am $date ausgezahlt.';
+  }
+
+  @override
+  String bondBannerExpired(String date) {
+    return 'Der Anspruch auf die Einlage der Gegenseite endete am $date.';
+  }
+
+  @override
+  String get bondClaimNewTitle => 'Einlage-Auszahlung einzufordern';
+
+  @override
+  String bondClaimNewMessage(String sats) {
+    return 'Du kannst $sats Sats aus einer verfallenen Einlage einfordern. Füge eine Lightning-Rechnung hinzu, um sie zu erhalten.';
+  }
+
+  @override
+  String get bondClaimPaidTitle => 'Einlage-Auszahlung erhalten';
+
+  @override
+  String bondClaimPaidMessage(String sats) {
+    return 'Einlage-Auszahlung von $sats Sats erhalten.';
+  }
+
+  @override
+  String get bondDontTake => 'Order nicht annehmen';
+
+  @override
+  String get bondLockedNowEscrow =>
+      'Einlage gesperrt. Sperre jetzt den Handelsbetrag.';
+
+  @override
+  String get bondLostRace =>
+      'Ein anderer Nutzer hat diese Order angenommen, bevor deine Einlage bezahlt war';
+
+  @override
+  String get bondMakerCanceled => 'Der Ersteller hat diese Order storniert';
+
+  @override
+  String get bondExpiredNotice =>
+      'Die Einlage-Rechnung ist abgelaufen; die Order ist zurück im Orderbuch';
+
+  @override
+  String get bondExpiredTitle => 'Die Einlage-Rechnung ist abgelaufen';
+
+  @override
+  String get bondExpiredBody =>
+      'Sie wurde nicht rechtzeitig bezahlt: Die Order ist zurück im Orderbuch, und keine Sats haben deine Wallet verlassen.';
+
+  @override
+  String get bondInvoiceMissing =>
+      'Dieses Gerät hat keine Kopie der Einlage-Rechnung. Fordere sie erneut vom Node an, um die Order weiter anzunehmen.';
+
+  @override
+  String get bondRequestAgain => 'Rechnung erneut anfordern';
+
+  @override
+  String get bondRequestFailed =>
+      'Der Node hat die Einlage-Rechnung nicht erneut gesendet';
+
+  @override
+  String get invoiceOrderIdCopied => 'Order-ID kopiert';
+
+  @override
+  String get invoiceYouReceiveLabel => 'Du erhältst';
+
+  @override
+  String get invoiceToPayLabel => 'Zu zahlen';
+
+  @override
+  String invoiceReceiveSemantics(String sats) {
+    return '$sats Satoshis zu erhalten';
+  }
+
+  @override
+  String invoicePaySemantics(String sats) {
+    return '$sats Satoshis zu zahlen';
+  }
+
+  @override
+  String invoiceFeeIncluded(String sats) {
+    return 'Inklusive $sats Sats Mostro-Gebühr';
+  }
+
+  @override
+  String invoiceTimeToSend(String time) {
+    return 'Du hast $time, um sie zu senden';
+  }
+
+  @override
+  String invoiceExpiresIn(String time) {
+    return 'Die Rechnung läuft in $time ab';
+  }
+
+  @override
+  String get invoiceFieldLabel => 'Lightning-Rechnung oder -Adresse';
+
+  @override
+  String get invoiceFieldHint => 'lnbc… oder nutzer@domain';
+
+  @override
+  String get invoiceFieldPromptLabel => 'Rechnung hier einfügen';
+
+  @override
+  String get invoiceFieldFilledLabel => 'Lightning-Rechnung';
+
+  @override
+  String get invoiceFieldAddressLabel => 'Lightning-Adresse';
+
+  @override
+  String get invoiceScanButton => 'Scannen';
+
+  @override
+  String get invoiceReplaceButton => 'Ersetzen';
+
+  @override
+  String get invoiceFieldSemantics =>
+      'Lightning-Rechnung oder -Adresse, erforderlich';
+
+  @override
+  String invoiceFilledSemantics(String sats) {
+    return 'Lightning-Rechnung über $sats Sats';
+  }
+
+  @override
+  String get invoiceValidAddress =>
+      'Gültige Adresse · die Rechnung wird beim Senden angefordert';
+
+  @override
+  String invoiceValidInvoice(String sats) {
+    return 'Gültige Rechnung · $sats Sats';
+  }
+
+  @override
+  String invoiceErrorWrongAmount(String actual, String expected) {
+    return 'Die Rechnung lautet auf $actual Sats, es müssen $expected sein';
+  }
+
+  @override
+  String get invoiceErrorExpired => 'Die Rechnung ist bereits abgelaufen';
+
+  @override
+  String invoiceErrorExpiresTooSoon(String minutes) {
+    return 'Die Rechnung läuft in weniger als $minutes Minuten ab, der Node braucht mehr Zeit zum Bezahlen';
+  }
+
+  @override
+  String get invoiceErrorMalformed =>
+      'Diese Rechnung ist unvollständig oder falsch kopiert';
+
+  @override
+  String get invoiceErrorUnrecognized =>
+      'Weder eine Rechnung (lnbc…) noch eine Lightning-Adresse (nutzer@domain)';
+
+  @override
+  String get invoiceSellerLabel => 'Verkäufer';
+
+  @override
+  String get invoiceBuyerLabel => 'Käufer';
+
+  @override
+  String get invoiceYouPayLabel => 'Du zahlst';
+
+  @override
+  String get invoiceYouGetLabel => 'Du erhältst';
+
+  @override
+  String get invoiceNoTrades => 'keine Trades';
+
+  @override
+  String get invoiceSendButton => 'Rechnung senden';
+
+  @override
+  String get invoiceCancelTrade => 'Handel abbrechen';
+
+  @override
+  String get invoiceOpenWallet => 'In meiner Wallet öffnen';
+
+  @override
+  String invoiceHoldNote(String hold) {
+    return 'Das ist eine $hold-Rechnung: Die Sats werden zurückgehalten und verlassen deine Wallet erst, wenn du die Zahlung des Käufers bestätigst.';
+  }
+
+  @override
+  String invoiceQrSemantics(String invoice) {
+    return 'QR-Code der Lightning-Rechnung: $invoice';
+  }
+
+  @override
+  String get invoiceExpiredTitle => 'Die Rechnung ist abgelaufen';
+
+  @override
+  String get invoiceExpiredBody =>
+      'Sie wurde nicht rechtzeitig bezahlt: Mostro bricht den Handel ab, und keine Sats haben deine Wallet verlassen.';
+
+  @override
+  String get invoiceBackToBook => 'Zurück zum Orderbuch';
+
+  @override
+  String get invoiceTimeUpTitle => 'Die Zeit ist abgelaufen';
+
+  @override
+  String get invoiceTimeUpBody =>
+      'Die Rechnung wurde nicht rechtzeitig gesendet: Mostro bricht den Handel ab. Auf deiner Seite wurde nichts gebunden.';
+
+  @override
+  String invoiceErrorWrongNetwork(String invoice, String node) {
+    return 'Die Rechnung ist für $invoice, der Node nutzt $node';
+  }
+
+  @override
+  String invoiceCountdownHours(String hours, String minutes) {
+    return '$hours Std. $minutes';
+  }
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceTitle =>
+      'Warte auf die Rechnung des Käufers';
+
+  @override
+  String get tradeCardWaitingBuyerInvoiceMessage =>
+      'Der Handel geht weiter, sobald der Käufer eine Lightning-Rechnung hinzufügt.';
+
+  @override
+  String get tradeCardWaitingPaymentTitle =>
+      'Warte auf die Zahlung des Verkäufers';
+
+  @override
+  String get tradeCardWaitingPaymentMessage =>
+      'Der Handel geht weiter, sobald der Verkäufer die Hold-Rechnung bezahlt.';
+
+  @override
+  String get tradeCardWaitingTakerBondTitle => 'Kautionszahlung ausstehend';
+
+  @override
+  String get tradeCardWaitingTakerBondMessage =>
+      'Die Anti-Missbrauchs-Kaution des Nehmers muss vor Handelsbeginn bezahlt werden.';
+
+  @override
+  String get tradeCardActiveTitle => 'Handel aktiv';
+
+  @override
+  String get tradeCardActiveMessage =>
+      'Die Sats sind gesperrt. Der Käufer kann jetzt die Fiat-Zahlung senden.';
+
+  @override
+  String get tradeCardFiatSentTitle => 'Fiat als gesendet markiert';
+
+  @override
+  String get tradeCardFiatSentMessage =>
+      'Der Käufer hat die Fiat-Zahlung als gesendet markiert.';
+
+  @override
+  String get tradeCardSettledHoldInvoiceTitle => 'Sats freigegeben';
+
+  @override
+  String get tradeCardSettledHoldInvoiceMessage =>
+      'Der Verkäufer hat die Sats freigegeben. Die Auszahlung an den Käufer ist unterwegs.';
+
+  @override
+  String get tradeCardSuccessTitle => 'Handel abgeschlossen';
+
+  @override
+  String get tradeCardSuccessMessage =>
+      'Der Handel wurde erfolgreich abgeschlossen.';
+
+  @override
+  String get tradeCardCanceledTitle => 'Handel storniert';
+
+  @override
+  String get tradeCardCanceledMessage => 'Der Handel wurde storniert.';
+
+  @override
+  String get tradeCardExpiredTitle => 'Order abgelaufen';
+
+  @override
+  String get tradeCardExpiredMessage =>
+      'Die Order ist abgelaufen, bevor der Handel weitergehen konnte.';
+
+  @override
+  String get tradeCardCooperativelyCanceledTitle =>
+      'Handel einvernehmlich storniert';
+
+  @override
+  String get tradeCardCooperativelyCanceledMessage =>
+      'Beide Parteien haben der Stornierung des Handels zugestimmt.';
+
+  @override
+  String get tradeCardDisputeTitle => 'Streitfall eröffnet';
+
+  @override
+  String get tradeCardDisputeMessage =>
+      'Zu diesem Handel wurde ein Streitfall eröffnet.';
+
+  @override
+  String get tradeCardCanceledByAdminTitle => 'Vom Schlichter storniert';
+
+  @override
+  String get tradeCardCanceledByAdminMessage =>
+      'Der Streitschlichter hat den Handel storniert.';
+
+  @override
+  String get tradeCardSettledByAdminTitle => 'Vom Schlichter beigelegt';
+
+  @override
+  String get tradeCardSettledByAdminMessage =>
+      'Der Streitschlichter hat die Sats an den Käufer freigegeben.';
+
+  @override
+  String get tradeCardCompletedByAdminTitle => 'Vom Schlichter abgeschlossen';
+
+  @override
+  String get tradeCardCompletedByAdminMessage =>
+      'Der Streitschlichter hat den Handel abgeschlossen.';
+
+  @override
+  String get tradeCardUpdatedTitle => 'Handel aktualisiert';
+
+  @override
+  String get tradeCardUpdatedMessage =>
+      'Der Status dieses Handels hat sich geändert.';
+
+  @override
+  String get tradeCardCanceledByMakerMessage =>
+      'Der Ersteller hat die Order storniert.';
+
+  @override
+  String get tradeCardCanceledBondLostRaceMessage =>
+      'Ein anderer Nutzer hat diese Order genommen, bevor die Kaution bezahlt wurde.';
+
+  @override
+  String get tradeCardCanceledBondExpiredMessage =>
+      'Die Kautionsrechnung ist unbezahlt abgelaufen.';
+
+  @override
+  String get chatCardTitle => 'Neue Nachrichten';
+
+  @override
+  String get chatCardSolverTitle => 'Nachrichten vom Schlichter';
+
+  @override
+  String chatCardMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count neue Nachrichten von deinem Handelspartner',
+      one: '1 neue Nachricht von deinem Handelspartner',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String chatCardSolverMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count neue Nachrichten vom Streitschlichter',
+      one: '1 neue Nachricht vom Streitschlichter',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get invalidTradeIndexError =>
+      'Dein Konto ist nicht mit diesem Mostro-Knoten synchronisiert, daher wurde die Order abgelehnt. Versuche es gleich noch einmal';
+
+  @override
+  String get recoveringTradesMessage =>
+      'Konto importiert. Deine Trades werden von Mostro wiederhergestellt…';
+
+  @override
+  String recoveredTradesMessage(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Konto importiert. $count Trades wiederhergestellt',
+      one: 'Konto importiert. 1 Trade wiederhergestellt',
+      zero: 'Konto importiert. Du hattest keine laufenden Trades',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get recoverTradesFailedMessage =>
+      'Konto importiert, aber Mostro hat nicht geantwortet, daher wurden deine laufenden Trades nicht wiederhergestellt';
+
+  @override
+  String get paymentMethodsChosenLabel => 'Ausgewählt';
+
+  @override
+  String paymentMethodsSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Methoden ausgewählt',
+      one: '1 Methode ausgewählt',
+      zero: 'Wähle mindestens eine Methode',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get paymentMethodsConfirm => 'Methoden bestätigen';
+
+  @override
+  String get paymentMethodAddCustom => 'Eigene Zahlungsmethode hinzufügen';
+
+  @override
+  String get paymentMethodsDiscardTitle => 'Änderungen verwerfen?';
+
+  @override
+  String get paymentMethodsDiscardConfirm => 'Verwerfen';
+
+  @override
+  String get paymentMethodsKeepEditing => 'Weiter bearbeiten';
+
+  @override
+  String get fundsAtRiskTitle => 'Dieser Benutzer hat noch Sats im Spiel';
+
+  @override
+  String get fundsAtRiskBody =>
+      'Wenn du fortfährst, werden die Schlüssel dieses Benutzers ersetzt, und nichts von dem hier Aufgeführten kann von diesem Gerät aus abgeschlossen oder wiederhergestellt werden. Das wird nicht empfohlen: Du kannst diese Sats verlieren.';
+
+  @override
+  String get fundsAtRiskSellerEscrow =>
+      'Sats für einen Verkauf treuhänderisch gesperrt';
+
+  @override
+  String get fundsAtRiskBondLocked => 'Kaution gesperrt';
+
+  @override
+  String get fundsAtRiskPayoutClaim => 'Kautionsauszahlung noch nicht abgeholt';
+
+  @override
+  String get fundsAtRiskTradeInProgress => 'Handel läuft';
+
+  @override
+  String get fundsAtRiskBondInvoicePending => 'Kautionsrechnung noch zahlbar';
+
+  @override
+  String get fundsAtRiskKeep => 'Diesen Benutzer behalten';
+
+  @override
+  String get fundsAtRiskContinue => 'Trotzdem fortfahren';
+
+  @override
+  String get restoreSheetTitle => 'Dein Konto wird wiederhergestellt';
+
+  @override
+  String get restoreSheetWaiting => 'Das kann ein paar Sekunden dauern';
+
+  @override
+  String restoreSheetLoading(int done, int total) {
+    return '$done von $total Orders wiederhergestellt';
+  }
+
+  @override
+  String get restoreStageConnecting => 'Verbindung zum Mostro-Node';
+
+  @override
+  String get restoreStageConnected => 'Mit dem Mostro-Node verbunden';
+
+  @override
+  String get restoreStageRequesting => 'Deine Orders werden angefragt';
+
+  @override
+  String restoreStageFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Orders gefunden',
+      one: '1 Order gefunden',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get restoreStageLoading => 'Details werden geladen';
+
+  @override
+  String get restoreStageNoResponse => 'Keine Antwort';
+
+  @override
+  String restoreLoadingCountSemantics(int done, int total) {
+    return '$done von $total Orders';
+  }
+
+  @override
+  String get restoreFailedTitle =>
+      'Deine Orders konnten nicht wiederhergestellt werden';
+
+  @override
+  String get restoreFailedSubtitle => 'Dein Konto wurde trotzdem importiert';
+
+  @override
+  String restoreFailedBody(String place) {
+    return 'Prüfe deine Verbindung und versuche es erneut. Du kannst es jederzeit unter $place wiederholen.';
+  }
+
+  @override
+  String get restoreContinueWithout => 'Ohne Wiederherstellung fortfahren';
+
+  @override
+  String get restoreDoneTitle => 'Konto wiederhergestellt';
+
+  @override
+  String get restoreDoneSubtitle =>
+      'Alles, was der Node hatte, ist wiederhergestellt';
+
+  @override
+  String get restoreDoneEmptySubtitle =>
+      'Dieses Konto hatte keine Orders auf dem Node';
+
+  @override
+  String get restoreSummaryOrders => 'Orders';
+
+  @override
+  String get restoreSummaryInProgress => 'Laufend';
+
+  @override
+  String restoreActionNotice(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count aktive Orders warten auf dich',
+      one: '1 aktive Order wartet auf dich',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String restorePartialNotice(int missing, int total) {
+    return '$missing von $total Orders konnten nicht geladen werden';
+  }
+
+  @override
+  String get attachSheetTitle => 'Datei senden';
+
+  @override
+  String get attachSheetBody =>
+      'Die Datei wird auf deinem Gerät verschlüsselt. Nur dein Handelspartner kann sie öffnen.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Die Datei wird auf deinem Gerät verschlüsselt. Nur der Schlichter kann sie öffnen.';
+
+  @override
+  String get attachSourcePhoto => 'Foto';
+
+  @override
+  String get attachSourceCamera => 'Kamera';
+
+  @override
+  String get attachSourcePdf => 'PDF-Dokument';
+
+  @override
+  String get attachConfirmTitle => 'Diese Datei senden?';
+
+  @override
+  String attachConfirmBody(String fileName, String size) {
+    return '$fileName ($size)';
+  }
+
+  @override
+  String get attachmentTooLarge => 'Dateien dürfen höchstens 25 MB groß sein.';
+
+  @override
+  String get attachmentUnsupported =>
+      'Nur JPEG-, PNG- und PDF-Dateien können gesendet werden.';
+
+  @override
+  String get attachmentInvalidImage =>
+      'Dieses Bild konnte nicht gelesen werden.';
+
+  @override
+  String get attachmentReadFailed => 'Die Datei konnte nicht gelesen werden.';
+
+  @override
+  String get attachmentPeerUnknown =>
+      'Du kannst Dateien senden, sobald jemand die Order angenommen hat.';
+
+  @override
+  String get attachmentUploadFailed =>
+      'Das Hochladen ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.';
+
+  @override
+  String get attachmentSendFailed => 'Die Datei konnte nicht gesendet werden.';
+
+  @override
+  String get attachmentDownloadFailed =>
+      'Die Datei konnte nicht heruntergeladen werden.';
+
+  @override
+  String get attachmentDecryptFailed =>
+      'Diese Datei konnte nicht entschlüsselt werden.';
+
+  @override
+  String get attachmentUploading => 'Wird gesendet…';
+
+  @override
+  String get attachmentDiscard => 'Verwerfen';
+
+  @override
+  String get attachmentSave => 'Speichern';
+
+  @override
+  String get attachmentSaved => 'Datei gespeichert';
+
+  @override
+  String get attachmentSaveFailed =>
+      'Die Datei konnte nicht gespeichert werden.';
+
+  @override
+  String attachmentImageSemantics(String fileName) {
+    return 'Bild: $fileName';
+  }
+
+  @override
+  String get attachmentOpenImage => 'Bild öffnen';
+
+  @override
+  String get attachmentOpenWith => 'Öffnen mit…';
+
+  @override
+  String get attachmentShare => 'Teilen';
+
+  @override
+  String get attachmentMoreActions => 'Weitere Optionen';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'Keine App auf diesem Gerät kann diese Datei öffnen.';
+
+  @override
+  String get attachmentOpenFailed => 'Die Datei konnte nicht geöffnet werden.';
+
+  @override
+  String get attachmentShareFailed => 'Die Datei konnte nicht geteilt werden.';
+
+  @override
+  String get attachmentSaveOnly =>
+      'Dieser Dateityp kann nur gespeichert werden.';
+
+  @override
   String get cashuWalletTitle => 'Cashu-Wallet';
 
   @override
@@ -2424,15 +3899,10 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String cashuReclaimed(int sats) {
-    return '$sats Sats zurückgeholt';
-  }
+  String get cashuSyncButton => 'Mit der Mint synchronisieren';
 
   @override
-  String get cashuNothingToReclaim => 'Nichts zurückzuholen';
-
-  @override
-  String get cashuCheckProofsButton => 'Nach nicht eingelösten Token suchen';
+  String get cashuSynced => 'Mit der Mint synchronisiert';
 
   @override
   String get cashuTokenTitle => 'Dein Token';
@@ -2496,8 +3966,34 @@ class AppLocalizationsDe extends AppLocalizations {
       'Mit der Wallet ist etwas schiefgelaufen. Bitte versuche es erneut.';
 
   @override
-  String get settingsEscrowCashuUnavailable =>
-      'Cashu funktioniert ohne Mint nicht – unten eine festlegen.';
+  String get cashuLastTokenPending =>
+      'Du hast ein Token exportiert. Es ist Geld, bis jemand es einlöst — behalte es, bis du sicher bist, dass es angekommen ist.';
+
+  @override
+  String get cashuShowLastToken => 'Erneut anzeigen';
+
+  @override
+  String get cashuLastTokenDone => 'Ich habe es gesendet';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Dieses Token ist zu groß für einen QR-Code. Kopiere es stattdessen.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'Der aktive Node hat gewechselt und diese Wallet ist an eine andere Mint gebunden. Geh zurück und öffne die Wallet erneut.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Dieses Konto wurde aus einem nsec importiert, daher gibt es keine Wiederherstellungsphrase, aus der die Wallet abgeleitet werden kann. Die Cashu-Wallet braucht ein Konto, das aus einer Wiederherstellungsphrase erstellt wurde.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'Dieses Token konnte nicht überprüft werden: Es enthält keinen Nachweis der Mint-Signatur und wurde daher nicht angenommen.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'Das Senden ist fehlgeschlagen und die Wallet konnte nicht bestätigen, dass das Guthaben zurück ist. Synchronisiere mit der Mint, bevor du es erneut versuchst.';
 
   @override
   String get lockEscrowTitle => 'Treuhand sperren';
@@ -2556,16 +4052,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String lockEscrowLocktime(int days) {
     return 'Von dir rückholbar nach $days Tagen';
   }
-
-  @override
-  String get cashuLastTokenPending =>
-      'Du hast ein Token exportiert. Es ist Geld, bis jemand es einlöst — behalte es, bis du sicher bist, dass es angekommen ist.';
-
-  @override
-  String get cashuShowLastToken => 'Erneut anzeigen';
-
-  @override
-  String get cashuLastTokenDone => 'Ich habe es gesendet';
 
   @override
   String get lockEscrowRequestMissing =>

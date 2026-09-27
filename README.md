@@ -4,7 +4,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-blue?logo=flutter)](https://flutter.dev)
 [![Rust](https://img.shields.io/badge/Rust-1.94+-orange?logo=rust)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20iOS%20%7C%20Web%20%7C%20macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#supported-platforms)
 
 ---
@@ -34,11 +34,11 @@ Mostro App is the official cross-platform client for the [Mostro](https://mostro
 **Key features:**
 
 - **Non-custodial** — Your keys stay on your device. No exchange holds your funds.
-- **Privacy-first** — End-to-end encrypted over Nostr: NIP-44 direct messages with the Mostro daemon, NIP-59 Gift Wrap for peer-to-peer chat. Optional privacy mode hides reputation data.
+- **Privacy-first** — End-to-end encrypted over Nostr: NIP-44 direct messages with the Mostro daemon, and a signed kind-14 envelope for peer-to-peer and dispute chat. Optional privacy mode hides reputation data.
 - **Lightning-native** — All BTC settlements happen via Lightning invoices (BOLT 11). Supports [Nostr Wallet Connect (NWC)](https://nwc.dev) for automated invoice generation.
 - **Censorship-resistant** — Built on the Nostr network; no central server or domain to block.
 - **Multi-platform** — Single codebase targets Android, iOS, Web (PWA), macOS, Windows, and Linux.
-- **Open source** — MIT licensed. Fully auditable, no proprietary components.
+- **Open source** — AGPLv3 licensed. Fully auditable, no proprietary components.
 
 ---
 
@@ -109,7 +109,7 @@ The Mostro protocol is a message-passing specification built on top of [Nostr](h
 |---------|-------------|
 | **Order Book** | Mostro daemons publish pending orders as Nostr events of [Kind 38383](https://mostro.network/protocol/list_orders.html) — parameterized replaceable events. |
 | **Trade Messages** | All trade actions (take order, add invoice, confirm fiat sent, release funds) are sent as NIP-44-encrypted direct messages — signed Kind 14 events authored by the per-trade key and directed to the Mostro node pubkey (Mostro protocol v2). |
-| **P2P Chat** | Direct messages between buyer and seller (and dispute–admin chat) use [NIP-59 Gift Wrap](https://github.com/nostr-protocol/nips/blob/master/59.md) (Kind 1059) directed to the peer's pubkey. |
+| **P2P Chat** | Direct messages between buyer and seller (and dispute–admin chat) ride the [chat envelope](https://mostro.network/protocol/chat.html): a Kind 14 event signed with `K_sign` and `p`-tagged to `pub(K_conv)`, both derived from the trade-key ECDH secret, carrying a NIP-44 encrypted Kind 1 inner event signed by the sender's trade key. |
 | **Hold Invoices** | The seller pays a Lightning hold invoice when taking a buy order. Funds are locked until the buyer confirms fiat receipt, then the daemon releases the HTLC. |
 | **Reputation** | Each trade can result in a mutual star rating, published as a Nostr event by the daemon. |
 | **Disputes** | Either party can open a dispute, escalating to a human Mostro operator for resolution. |
@@ -138,14 +138,27 @@ Both parties rate each other (optional)
 |------|-------------|
 | `38383` | Public order book (published by Mostro daemon) |
 | `14` | NIP-44 direct DM — encrypted trade messages to/from the daemon, signed by the trade key (Mostro protocol v2) |
-| `1059` | NIP-59 Gift Wrap — P2P chat between peers and dispute–admin chat |
 
 ### Protocol Reference
 
 - Full spec: [mostro.network/protocol](https://mostro.network/protocol)
 - NIP-44 Encrypted Payloads: [github.com/nostr-protocol/nips/blob/master/44.md](https://github.com/nostr-protocol/nips/blob/master/44.md)
-- NIP-59 Gift Wrap: [github.com/nostr-protocol/nips/blob/master/59.md](https://github.com/nostr-protocol/nips/blob/master/59.md)
 - Order Kind 38383: [mostro.network/protocol/list_orders.html](https://mostro.network/protocol/list_orders.html)
+
+#### Supported NIPs & BUDs
+
+| Spec | Used for |
+|------|----------|
+| [NIP-06](https://github.com/nostr-protocol/nips/blob/master/06.md) | Key derivation from a BIP-39 mnemonic (`rust/src/crypto/keys.rs`) |
+| [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) | Proof-of-work mining on outgoing events, to the daemon's required difficulty (`rust/src/mostro/pow.rs`) |
+| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted payloads — daemon messages and the peer/dispute chat envelope (`rust/src/crypto/ecdh.rs`, `rust/src/nostr/transport.rs`) |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect, for paying invoices from a connected wallet (`rust/src/nwc/client.rs`) |
+| [NIP-69](https://github.com/nostr-protocol/nips/blob/master/69.md) | Public order-book status (`s` tag on Kind 38383) |
+| [BUD-01](https://github.com/hzrd149/blossom/blob/master/buds/01.md) | Blob retrieval (`GET /<sha256>`) for encrypted file attachments (`rust/src/nostr/blossom.rs`) |
+
+**Not used:** NIP-59 (gift wrap) was dropped from peer and dispute chat in #246/#254 — this client neither reads nor writes Kind 1059. Chat instead rides a custom Kind-14 envelope (see "P2P Chat" above), which is *not* NIP-17 despite sharing its kind number.
+
+**Partial / known gap:** file uploads are not BUD-02 compliant as written — `try_upload` in `rust/src/nostr/blossom.rs` sends `PUT /{sha256}` instead of BUD-02's `PUT /upload`. Tracked in #341. The Kind-24242 authorization event is implemented correctly (that mechanism is [BUD-11](https://github.com/hzrd149/blossom/blob/master/buds/11.md), not BUD-02 — the code comment mislabels this too, also noted in #341); only the upload path itself is wrong. File content encryption (ChaCha20-Poly1305) happens application-side before upload and is not part of any BUD.
 
 ---
 
@@ -153,7 +166,7 @@ Both parties rate each other (optional)
 
 Mostro App uses a **split-architecture** model: all cryptography, protocol logic, and network I/O live in a Rust core; the UI shell is written in Flutter/Dart.
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │               Flutter / Dart UI             │
 │  Riverpod state · GoRouter · Material 3     │
@@ -163,8 +176,8 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 ┌──────────────────▼──────────────────────────┐
 │                  Rust Core                  │
 │                                             │
-│  nostr-sdk 0.44   →  relay pool, NIP-44/59  │
-│  mostro-core 0.13.1 →  protocol FSM, types,   │
+│  nostr-sdk 0.45   →  relay pool, NIP-44     │
+│  mostro-core 0.14.6 →  protocol FSM, types,   │
 │                      transport              │
 │  bip32 / bip39    →  HD key derivation      │
 │  k256             →  secp256k1 ECDH         │
@@ -192,8 +205,8 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 | Rust–Dart Bridge | flutter_rust_bridge | 2.11.1 |
 | State Management | Riverpod | 2.6.1 |
 | Routing | GoRouter | 14.8.1 |
-| Nostr Protocol | nostr-sdk | 0.44 |
-| Mostro Types / FSM / Transport | mostro-core | 0.13.1 |
+| Nostr Protocol | nostr-sdk | 0.45 |
+| Mostro Types / FSM / Transport | mostro-core | 0.14.6 |
 | UI-layer Persistence | Sembast | 3.8.2 |
 | Protocol Persistence (native) | SQLite via sqlx | 0.8 |
 | Protocol Persistence (web) | IndexedDB | 0.4 |
@@ -211,7 +224,7 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 | Platform | Status |
 |----------|--------|
 | Android 5.0+ | Supported |
-| iOS 13+ | Supported |
+| iOS 14+ | Supported |
 | Web (PWA) | Supported (WASM) |
 | macOS 10.15+ | Supported |
 | Windows 10+ | Supported |
@@ -270,6 +283,7 @@ Make sure the following tools are installed on your system:
 | wasm-pack | latest | `cargo install wasm-pack` |
 | Rust nightly + `rust-src` (web only) | — | `rustup toolchain install nightly && rustup component add rust-src --toolchain nightly` |
 | flutter_rust_bridge CLI | 2.11.1 | `cargo install flutter_rust_bridge_codegen --version 2.11.1 --locked` |
+| Linux desktop toolchain (Debian/Ubuntu) | — | `sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-dev lld` |
 | Xcode (macOS / iOS only) | 15+ | Mac App Store |
 | Android Studio / NDK (Android only) | latest | [developer.android.com](https://developer.android.com/studio) |
 
@@ -462,7 +476,7 @@ If you modify any `#[frb]`-annotated Rust function in `rust/src/api/`:
 
 This wraps `flutter_rust_bridge_codegen generate` and refuses to run when your local codegen CLI does not match the version pinned in `pubspec.yaml` — generating with a mismatched CLI produces bindings that fail to compile. Pass `--check` to verify without generating.
 
-> **Do not hand-edit** files under `lib/src/rust/` — they are auto-generated and will be overwritten on the next codegen run. They are gitignored and regenerated on the fly, both locally and in CI, so there is nothing to commit.
+> **Do not hand-edit** files under `lib/src/rust/` — they are auto-generated and will be overwritten on the next codegen run. They are **committed**: commit the regenerated files in the same commit as the `rust/src/api/` change, and CI fails if they drift. See [CONTRIBUTING.md → Generated code](CONTRIBUTING.md#generated-code), which also covers resolving conflicts in them.
 
 ---
 
@@ -486,7 +500,7 @@ app/
 │   │   ├── about/              #     Mostro node info
 │   │   └── settings/           #     Relays, wallet, preferences
 │   ├── shared/                 #   Cross-feature providers, widgets, utils
-│   ├── l10n/                   #   Localization strings (EN, ES, IT, FR, DE)
+│   ├── l10n/                   #   Localization strings (EN, ES, IT, FR, DE, NL)
 │   └── src/rust/               #   Auto-generated Rust bridge (DO NOT EDIT)
 │
 ├── rust/                       # Rust core
@@ -495,7 +509,7 @@ app/
 │       ├── crypto/             #   BIP-32/39 derivation, ECDH, file encryption
 │       ├── db/                 #   SQLite (native) / IndexedDB (WASM)
 │       ├── mostro/             #   Protocol FSM & state machine
-│       ├── nostr/              #   Relay pool, gift wrap, event parsers
+│       ├── nostr/              #   Relay pool, message envelopes, event parsers
 │       ├── nwc/                #   Nostr Wallet Connect client
 │       └── queue/              #   Offline outbound message queue
 │
@@ -563,7 +577,7 @@ Contributions are welcome. Please read this section before opening an issue or p
 
 ### Development Notes
 
-- **Bridge changes:** Any modification to `rust/src/api/` requires re-running `./scripts/frb-generate.sh`. The generated files are gitignored — there is nothing to commit.
+- **Bridge changes:** Any modification to `rust/src/api/` requires re-running `./scripts/frb-generate.sh` and committing the regenerated files with the change. For conflicts in them, see [CONTRIBUTING.md → Generated code](CONTRIBUTING.md#generated-code).
 - **Serde conventions:** `mostro-core` uses `#[serde(rename_all = "kebab-case")]` — all protocol status strings on the wire are kebab-case (e.g., `"waiting-buyer-invoice"`, `"fiat-sent"`, `"in-progress"`).
 - **`pub` vs `pub(crate)`:** Only types that must be exposed to the Dart bridge should be `pub`. Internal helpers and types wrapping `nostr-sdk` structs should be `pub(crate)` to prevent broken FRB stub generation.
 - **Key derivation:** Per-trade keys follow BIP-32 path `m/44'/1237'/38383'/0/N`. Never reuse the master identity key for trade-level messages.
@@ -586,13 +600,21 @@ The app is localized in:
 | Italian | `it` | `lib/l10n/app_it.arb` |
 | French | `fr` | `lib/l10n/app_fr.arb` |
 | German | `de` | `lib/l10n/app_de.arb` |
+| Dutch | `nl` | `lib/l10n/app_nl.arb` |
 
 To add a new language:
 
 1. Copy `lib/l10n/app_en.arb` to `lib/l10n/app_<code>.arb`
 2. Translate all string values (keep the `"@@locale"` key correct)
 3. Run `flutter gen-l10n` to regenerate the Dart localizations — it auto-detects the new `.arb` file (no `l10n.yaml` change needed)
-4. Open a PR — translation contributions are always welcome
+4. Register the language in the places that keep their own list:
+   - `lib/features/settings/widgets/language_selector.dart`: the English and native name in `languageNames` (the picker already lists every `.arb` file; without a name it shows the bare code)
+   - `rust/src/api/settings.rs`: the code in `SUPPORTED_LOCALES`, then `./scripts/frb-generate.sh`
+   - `web/push_worker_logic.js`: the locale's `pushNewMessageBody` in `CHAT_WAKE_BODIES` (a service worker cannot read `.arb` files)
+   - `lib/features/walkthrough/utils/highlight_config.dart`: the locale's wording of each highlighted onboarding phrase
+   - `specs/006-announcement-channel/spec.md`: the locales every announcement must carry, in the rule and in the JSON example
+5. Run `flutter test` and `cargo test`: `test/l10n/locale_lists_test.dart` checks the picker names, the Rust list, the push worker and spec 006 against the `.arb` files, and `highlight_config_test.dart` checks the walkthrough phrases per locale, so a place missed in step 4 fails there
+6. Open a PR — translation contributions are always welcome
 
 ---
 
@@ -610,7 +632,7 @@ We aim to acknowledge reports within 72 hours and provide a fix within 30 days f
 ### Security Model
 
 - **Keys never leave the device** — the BIP-39 seed is stored in platform secure storage (`flutter_secure_storage`, backed by Android Keystore / iOS Keychain / Linux SecretService).
-- **End-to-end encrypted trade messages** — all communication between the app and the Mostro daemon uses NIP-44 encrypted direct messages (secp256k1 ECDH + ChaCha20 + HMAC-SHA256). Peer-to-peer and dispute chat use NIP-59 Gift Wrap.
+- **End-to-end encrypted trade messages** — all communication between the app and the Mostro daemon uses NIP-44 encrypted direct messages (secp256k1 ECDH + ChaCha20 + HMAC-SHA256). Peer-to-peer and dispute chat use the signed kind-14 chat envelope, whose author is pinned to the conversation key so third parties cannot inject messages.
 - **Per-trade ephemeral keys** — a new BIP-32 child key is derived for each trade, preventing cross-trade correlation even if a single trade key is compromised.
 - **The Mostro daemon never sees plaintext** — all messages are encrypted to the daemon's public key; only the holder of the corresponding private key can decrypt them.
 - **No telemetry** — the app does not collect analytics, crash reports, or any usage data.
@@ -619,7 +641,7 @@ We aim to acknowledge reports within 72 hours and provide a fix within 30 days f
 
 ## License
 
-MIT License
+GNU Affero General Public License v3.0 or later
 
 See [LICENSE](LICENSE) for the full text.
 

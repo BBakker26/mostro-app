@@ -2,7 +2,7 @@
 ///
 /// Public orders use Kind 38383 (replaceable parameterised events).
 /// **The Mostro node** (daemon) is the author/publisher of these events —
-/// makers send a `new-order` NIP-59 gift-wrap to the daemon, and the daemon
+/// makers send a `new-order` daemon message (transport v2) to the daemon, and it
 /// responds by publishing the order as a Kind 38383 event signed with its own
 /// key.  Clients therefore filter by `author = mostro_pubkey` to get the
 /// orders belonging to a specific Mostro instance.
@@ -48,7 +48,17 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     };
     let status = parse_status(&get("s")?)?;
     let fiat_code = get("f")?;
-    let payment_method = get("pm").unwrap_or_default();
+    // The `pm` tag carries one value per accepted payment method
+    // (`["pm", "Revolut", "Zelle"]` — mostro's `nip33` splits the order's
+    // comma-separated methods into tag values), so it cannot go through
+    // `get`, which only reads the first value. Re-join with commas: the Dart
+    // payment filter tokenizes this string on `,`.
+    let payment_method = event
+        .tags
+        .iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("pm"))
+        .map(|t| t.as_slice()[1..].join(", "))
+        .unwrap_or_default();
     let premium: f64 = get("premium")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.0);
@@ -66,14 +76,19 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     let amount_sats: Option<u64> = get("amt").and_then(|v| v.parse().ok());
     // creator_pubkey is the Mostro node's pubkey (the event author).
     let creator_pubkey = event.pubkey.to_hex();
-    let created_at = event.created_at.as_secs() as i64;
+    let created_at = order_created_at(
+        event,
+        get("published_at").or_else(|| get("created_at")).as_deref(),
+    );
     let expires_at: Option<i64> = get("expiration").and_then(|v| v.parse().ok());
 
     // is_mine is always false for Kind 38383 events: the event author is the
     // Mostro node, not the maker. Ownership is confirmed later via incoming
-    // trade messages (gift-wrap response from the daemon).
+    // trade messages (the daemon's kind-14 response).
     let is_mine = false;
     let _ = my_pubkey; // unused — kept in signature for future use
+
+    let (rating, total_reviews, days_active) = parse_rating_tag(get("rating").as_deref());
 
     Some(OrderInfo {
         id,
@@ -90,7 +105,76 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
         created_at,
         expires_at,
         is_mine,
+        rating,
+        total_reviews,
+        days_active,
     })
+}
+
+/// When the order was created, as opposed to when this revision was published.
+///
+/// Order events are addressable, so the event's own `created_at` moves on every
+/// revision: a taken-then-reverted order would read as brand new and jump to
+/// the top of the book. The NIP-69 `published_at` tag (MostroP2P/mostro#1000)
+/// carries the creation time and stays put. Daemon builds between
+/// MostroP2P/mostro#971 and #1000 sent it as `created_at`, which is read when
+/// `published_at` is absent. Nodes that predate both, or send a value that does
+/// not parse, fall back to the event's time.
+///
+/// Capped at the event's time: an order cannot have been created after a
+/// revision of it was published, and without the cap a node could pin its
+/// orders to the top of a newest-first book with a future date.
+fn order_created_at(event: &Event, tag: Option<&str>) -> i64 {
+    let revision_at = event.created_at.as_secs() as i64;
+    tag.and_then(|v| v.parse::<i64>().ok())
+        .filter(|&t| t > 0)
+        .map_or(revision_at, |t| t.min(revision_at))
+}
+
+/// Parse the `rating` tag value into `(total_rating, total_reviews, days)`.
+///
+/// The daemon publishes the maker's reputation snapshot on each order event:
+/// `"none"` for full-privacy makers, otherwise a JSON object
+/// `{"total_reviews":47,"total_rating":4.9,"last_rating":5,"max_rate":5,
+/// "min_rate":1,"days":312}` (mostro-core `Rating`). Some deployments wrap it
+/// as `["rating", {…}]` — v1 accepts both shapes, so we do too. Missing tag or
+/// malformed JSON degrades to zeros rather than dropping the order.
+fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32) {
+    const EMPTY: (f64, u32, u32) = (0.0, 0, 0);
+    let Some(raw) = value else { return EMPTY };
+    if raw == "none" {
+        return EMPTY;
+    }
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) else {
+        log::debug!("[parse] unparseable rating tag: {raw:?}");
+        return EMPTY;
+    };
+    let obj = match &parsed {
+        serde_json::Value::Object(map) => map,
+        serde_json::Value::Array(arr)
+            if arr.len() > 1 && arr[0].as_str() == Some("rating") && arr[1].is_object() =>
+        {
+            arr[1].as_object().expect("checked is_object above")
+        }
+        _ => return EMPTY,
+    };
+    // Validate ranges instead of blindly casting: total_rating is defined as
+    // 0–5, and counts must be non-negative whole numbers that fit u32. Any
+    // out-of-range value falls back to that field's zero default.
+    (
+        obj.get("total_rating")
+            .and_then(|v| v.as_f64())
+            .filter(|rating| (0.0..=5.0).contains(rating))
+            .unwrap_or(0.0),
+        obj.get("total_reviews")
+            .and_then(|v| v.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
+        obj.get("days")
+            .and_then(|v| v.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
+    )
 }
 
 /// Parse the `s` tag value into an [`OrderStatus`].
@@ -159,6 +243,37 @@ pub fn all_orders_filter(mostro_pubkey: &PublicKey) -> Filter {
         .author(*mostro_pubkey)
 }
 
+/// How far back the recent-changes order filter reaches.
+///
+/// Mirrors v1 (`orderFilterDurationHours = 48` in MostroP2P/mobile): the
+/// daemon's default order lifetime is 24 h, so a 48 h window covers every
+/// order that could still be transitioning out of `pending` when the client
+/// comes back after a long time offline. Anything older is either still
+/// `pending` (covered by [`pending_orders_filter`]) or no longer of interest.
+pub const RECENT_ORDERS_WINDOW_SECS: u64 = 48 * 3600;
+
+/// Filter for **every currently pending** order on a Mostro node.
+///
+/// This is the query that must be complete regardless of relay history size:
+/// relays cap the number of stored events they replay per REQ
+/// (`relay.mostro.network` stops at 300 and, with no `limit`, hands back the
+/// *oldest* 300 — none of them pending once the node has published a few
+/// hundred orders). Scoping by the NIP-69 `s` tag keeps the reply to the
+/// live book, which is orders of magnitude below any such cap.
+pub fn pending_orders_filter(mostro_pubkey: &PublicKey) -> Filter {
+    all_orders_filter(mostro_pubkey).custom_tag(SingleLetterTag::LOWERCASE_S, "pending")
+}
+
+/// Filter for **all recent** order events (any status) since `since`.
+///
+/// Complements [`pending_orders_filter`]: it delivers the `in-progress` /
+/// `canceled` / `success` updates that take an order *out* of the book, which
+/// the pending-only filter would never see. Bounded by `since` so it stays
+/// under relay replay caps.
+pub fn recent_orders_filter(mostro_pubkey: &PublicKey, since: Timestamp) -> Filter {
+    all_orders_filter(mostro_pubkey).since(since)
+}
+
 /// Build a Nostr filter for a **single** Kind 38383 order by `d`-tag (order ID).
 ///
 /// Unlike `all_orders_filter`, this filter is scoped to a single order ID and
@@ -169,7 +284,17 @@ pub fn trade_order_filter(mostro_pubkey: &PublicKey, order_id: &str) -> Filter {
     Filter::new()
         .kind(Kind::from(KIND_ORDER))
         .author(*mostro_pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), order_id)
+        .custom_tag(SingleLetterTag::LOWERCASE_D, order_id)
+}
+
+/// [`trade_order_filter`] for several orders at once: one REQ follows every
+/// order we created or took. Relays cap concurrent REQs per connection
+/// (nos.lol: "too many concurrent REQs"), and one per order filled the cap.
+pub fn watched_orders_filter(mostro_pubkey: &PublicKey, order_ids: &[String]) -> Filter {
+    Filter::new()
+        .kind(Kind::from(KIND_ORDER))
+        .author(*mostro_pubkey)
+        .custom_tags(SingleLetterTag::LOWERCASE_D, order_ids.iter().cloned())
 }
 
 #[cfg(test)]
@@ -194,8 +319,82 @@ mod tests {
                 Tag::parse(fa_tag).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
+    }
+
+    /// An order event whose revision was published at `revision_at`, with
+    /// extra `(name, value)` tags.
+    fn order_event_tagged(revision_at: u64, extra: &[(&str, &str)]) -> Event {
+        let keys = Keys::generate();
+        let mut tags = vec![
+            Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+            Tag::parse(["k", "sell"]).unwrap(),
+            Tag::parse(["s", "pending"]).unwrap(),
+            Tag::parse(["f", "USD"]).unwrap(),
+            Tag::parse(["fa", "20"]).unwrap(),
+            Tag::parse(["z", "order"]).unwrap(),
+        ];
+        for (name, value) in extra {
+            tags.push(Tag::parse([*name, *value]).unwrap());
+        }
+        EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags(tags)
+            .custom_created_at(Timestamp::from_secs(revision_at))
+            .finalize(&keys)
+            .unwrap()
+    }
+
+    /// An order event published at `revision_at`, with an optional
+    /// `published_at` tag.
+    fn order_event_created(revision_at: u64, published_tag: Option<&str>) -> Event {
+        match published_tag {
+            Some(value) => order_event_tagged(revision_at, &[("published_at", value)]),
+            None => order_event_tagged(revision_at, &[]),
+        }
+    }
+
+    /// A later revision (published at 5_000) keeps the order's creation time
+    /// from the tag, not the revision's.
+    #[test]
+    fn created_at_comes_from_the_tag_not_the_revision() {
+        let order = parse_order_event(&order_event_created(5_000, Some("1000")), None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// Nodes that predate the tag keep working, with the event's time.
+    #[test]
+    fn created_at_falls_back_to_the_event_without_a_usable_tag() {
+        for tag in [None, Some("soon"), Some("0"), Some("-5")] {
+            let order = parse_order_event(&order_event_created(5_000, tag), None).unwrap();
+            assert_eq!(order.created_at, 5_000, "tag {tag:?}");
+        }
+    }
+
+    /// Daemon builds between MostroP2P/mostro#971 and #1000 named the tag
+    /// `created_at`; it is still read when `published_at` is absent.
+    #[test]
+    fn created_at_reads_the_legacy_created_at_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// With both tags present, `published_at` is the one that counts.
+    #[test]
+    fn created_at_prefers_published_at_over_the_legacy_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "2000"), ("published_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// A creation time later than the revision is impossible; capping it
+    /// stops a node from pinning its orders to the top of the book.
+    #[test]
+    fn created_at_is_capped_at_the_revision_time() {
+        let order =
+            parse_order_event(&order_event_created(5_000, Some("9999999999")), None).unwrap();
+        assert_eq!(order.created_at, 5_000);
     }
 
     #[test]
@@ -204,6 +403,32 @@ mod tests {
         assert_eq!(order.fiat_amount, Some(20.0));
         assert_eq!(order.fiat_amount_min, None);
         assert_eq!(order.fiat_amount_max, None);
+        // Single-method order: the sole `pm` value comes through unchanged.
+        assert_eq!(order.payment_method, "cashapp");
+    }
+
+    /// The `pm` tag carries one value per payment method and every one must
+    /// survive parsing (regression: only the first value was read, so the
+    /// book showed one method and the payment filter missed the rest).
+    #[test]
+    fn parses_all_payment_methods_from_multi_value_pm_tag() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags([
+                Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", "pending"]).unwrap(),
+                Tag::parse(["f", "USD"]).unwrap(),
+                Tag::parse(["pm", "Revolut", "Zelle", "Strike"]).unwrap(),
+                Tag::parse(["premium", "1"]).unwrap(),
+                Tag::parse(["amt", "0"]).unwrap(),
+                Tag::parse(["fa", "20"]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.payment_method, "Revolut, Zelle, Strike");
     }
 
     #[test]
@@ -230,6 +455,143 @@ mod tests {
         assert_eq!(order.fiat_amount_max, None);
     }
 
+    /// Build a signed Kind 38383 event carrying the given `rating` tag value.
+    fn order_event_with_rating(rating_value: &str) -> Event {
+        let keys = Keys::generate();
+        EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags([
+                Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", "pending"]).unwrap(),
+                Tag::parse(["f", "USD"]).unwrap(),
+                Tag::parse(["fa", "20"]).unwrap(),
+                Tag::parse(["rating", rating_value]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap()
+    }
+
+    #[test]
+    fn parses_rating_tag_object_form() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":47,"total_rating":4.9,"last_rating":5,"max_rate":5,"min_rate":1,"days":312}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.9);
+        assert_eq!(order.total_reviews, 47);
+        assert_eq!(order.days_active, 312);
+    }
+
+    #[test]
+    fn parses_rating_tag_array_wrapped_form() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"["rating",{"total_reviews":11,"total_rating":4.8,"days":203}]"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.8);
+        assert_eq!(order.total_reviews, 11);
+        assert_eq!(order.days_active, 203);
+    }
+
+    #[test]
+    fn full_privacy_rating_none_yields_zeros() {
+        let order = parse_order_event(&order_event_with_rating("none"), None).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn malformed_rating_json_degrades_to_zeros_without_dropping_order() {
+        let order = parse_order_event(&order_event_with_rating("{not json"), None).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+        // The order itself must survive a bad rating tag.
+        assert_eq!(order.fiat_amount, Some(20.0));
+    }
+
+    #[test]
+    fn out_of_range_rating_values_fall_back_to_zeros() {
+        // total_rating above 5, negative reviews, fractional days: each
+        // invalid field independently degrades to its zero default.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":-3,"total_rating":9.7,"days":2.5}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn boundary_rating_values_are_accepted() {
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":0,"total_rating":5.0,"days":0}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 5.0);
+
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":1,"total_rating":0.0,"days":1}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 1);
+        assert_eq!(order.days_active, 1);
+    }
+
+    #[test]
+    fn review_count_larger_than_u32_falls_back_to_zero() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":4294967296,"total_rating":4.0,"days":10}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 10);
+    }
+
+    #[test]
+    fn order_info_json_without_reputation_fields_deserializes_with_zeros() {
+        // Rows persisted before the reputation fields existed (orders table,
+        // trades JSON) must keep loading after an app upgrade.
+        let legacy = r#"{
+            "id":"308e1272-d5f4-47e6-bd97-3504baea9c23",
+            "kind":"Buy","status":"Pending","amount_sats":null,
+            "fiat_amount":100.0,"fiat_amount_min":null,"fiat_amount_max":null,
+            "fiat_code":"USD","payment_method":"Bank","premium":0.0,
+            "creator_pubkey":"","created_at":0,"expires_at":null,"is_mine":false
+        }"#;
+        let order: OrderInfo = serde_json::from_str(legacy).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn missing_rating_tag_yields_zeros() {
+        let order = parse_order_event(&order_event(&["20"]), None).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
     #[test]
     fn missing_fa_tag_yields_no_amounts() {
         let keys = Keys::generate();
@@ -240,11 +602,129 @@ mod tests {
                 Tag::parse(["s", "pending"]).unwrap(),
                 Tag::parse(["f", "USD"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let order = parse_order_event(&event, None).unwrap();
         assert_eq!(order.fiat_amount, None);
         assert_eq!(order.fiat_amount_min, None);
         assert_eq!(order.fiat_amount_max, None);
+    }
+
+    #[test]
+    fn pending_orders_filter_is_author_pinned_and_status_scoped() {
+        let mostro = Keys::generate().public_key();
+
+        let filter = pending_orders_filter(&mostro);
+
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        let s_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::LOWERCASE_S)
+            .expect("filter must carry an `s` tag");
+        assert_eq!(s_values.iter().cloned().collect::<Vec<_>>(), vec!["pending".to_string()]);
+        assert_eq!(filter.since, None, "the pending book must not be time-windowed");
+        assert_eq!(filter.limit, None, "a limit silently truncates the book");
+    }
+
+    #[test]
+    fn recent_orders_filter_is_windowed_and_status_agnostic() {
+        let mostro = Keys::generate().public_key();
+        let since = Timestamp::from(1_700_000_000);
+
+        let filter = recent_orders_filter(&mostro, since);
+
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        assert_eq!(filter.since, Some(since));
+        assert!(
+            !filter.generic_tags.contains_key(&SingleLetterTag::LOWERCASE_S),
+            "status changes of every kind must flow through this filter"
+        );
+        assert_eq!(filter.limit, None);
+    }
+
+    #[test]
+    fn trade_order_filter_is_unwindowed_so_the_stale_sweep_can_reconcile() {
+        // `fetch_public_order_status` (api::orders) leans on this: it is the
+        // only path that can see a terminal status older than
+        // `RECENT_ORDERS_WINDOW_SECS`, so a `since` or `limit` here would
+        // strand trades whose cancellation arrived while the app was offline.
+        let mostro = Keys::generate().public_key();
+
+        let filter = trade_order_filter(&mostro, "order-1");
+
+        assert_eq!(filter.since, None, "a window would hide long-past terminal statuses");
+        assert_eq!(filter.limit, None);
+        let d_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::LOWERCASE_D)
+            .expect("filter must carry a `d` tag");
+        assert_eq!(d_values.iter().cloned().collect::<Vec<_>>(), vec!["order-1".to_string()]);
+    }
+
+    /// One REQ follows every order we created or took — a REQ per order
+    /// filled nos.lol's per-connection cap — and, like the single-order
+    /// filter, it is unwindowed so each order's latest revision is replayed.
+    #[test]
+    fn watched_orders_filter_follows_every_order_unwindowed() {
+        // Arrange
+        let mostro = Keys::generate().public_key();
+        let ids = ["order-1".to_string(), "order-2".to_string()];
+
+        // Act
+        let filter = watched_orders_filter(&mostro, &ids);
+
+        // Assert
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        assert_eq!(filter.since, None);
+        assert_eq!(filter.limit, None);
+        let d_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::LOWERCASE_D)
+            .expect("filter must carry a `d` tag");
+        assert_eq!(
+            d_values.iter().cloned().collect::<Vec<_>>(),
+            vec!["order-1".to_string(), "order-2".to_string()]
+        );
+    }
+
+    #[test]
+    fn recent_orders_window_covers_the_daemon_default_order_lifetime_twice() {
+        assert_eq!(RECENT_ORDERS_WINDOW_SECS, 2 * 24 * 3600);
+    }
+
+    /// Live check of the relay behaviour these filters exist for. Run with
+    /// `cargo test -- --ignored live_relay_serves_the_pending_book`.
+    #[tokio::test]
+    #[ignore = "requires network access to the default Mostro relay"]
+    async fn live_relay_serves_the_pending_book() {
+        let mostro = PublicKey::from_hex(crate::config::DEFAULT_MOSTRO_PUBKEY).unwrap();
+        let client = Client::default();
+        client.add_relay("wss://relay.mostro.network").await.unwrap();
+        client.connect().await;
+        let timeout = std::time::Duration::from_secs(15);
+
+        let pending = client.fetch_events(pending_orders_filter(&mostro)).timeout(timeout).await.unwrap();
+        let unbounded = client.fetch_events(all_orders_filter(&mostro)).timeout(timeout).await.unwrap();
+
+        let is_pending = |e: &Event| {
+            e.tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("s")
+                && t.as_slice().get(1).map(|s| s.as_str()) == Some("pending"))
+        };
+        let pending_in_unbounded = unbounded.iter().filter(|e| is_pending(e)).count();
+        eprintln!(
+            "pending filter: {} events; unbounded filter: {} events of which {} pending",
+            pending.len(),
+            unbounded.len(),
+            pending_in_unbounded
+        );
+        assert!(!pending.is_empty(), "the pending filter must return the live book");
+        assert!(pending.iter().all(is_pending));
+        assert!(
+            pending.len() >= pending_in_unbounded,
+            "the status-scoped query must never see fewer pending orders than the unbounded one"
+        );
     }
 }

@@ -26,13 +26,20 @@ void main() {
       expect(helper.ids(), ['buy']);
     });
 
-    test('own orders show regardless of the active tab', () async {
+    test('own orders follow the same tab split as everyone else', () async {
+      // Issue #290: own orders used to show in both tabs, which read as
+      // duplication. A sell order lives in BUY BTC, a buy order in SELL
+      // BTC — same as third-party orders.
       final helper = await bookWith([
         fakeOrder(id: 'mine-buy', kind: 'buy', isMine: true),
-        fakeOrder(id: 'other-buy', kind: 'buy'),
+        fakeOrder(id: 'mine-sell', kind: 'sell', isMine: true),
+        fakeOrder(id: 'other-sell', kind: 'sell'),
       ]);
-      helper.setTab(OrderType.buy); // buy tab targets sell orders
 
+      helper.setTab(OrderType.buy); // targets sell orders
+      expect(helper.ids(), ['mine-sell', 'other-sell']);
+
+      helper.setTab(OrderType.sell); // targets buy orders
       expect(helper.ids(), ['mine-buy']);
     });
 
@@ -52,7 +59,7 @@ void main() {
         fakeOrder(id: 'eur', kind: 'sell', fiatCode: 'EUR'),
       ]);
       helper.setTab(OrderType.buy);
-      helper.container.read(currencyFilterProvider.notifier).state = ['EUR'];
+      await helper.filter(const OrderFilters(currencies: ['EUR']));
 
       expect(helper.ids(), ['eur']);
     });
@@ -63,10 +70,37 @@ void main() {
         fakeOrder(id: 'cash', kind: 'sell', paymentMethod: 'Cash'),
       ]);
       helper.setTab(OrderType.buy);
-      helper.container.read(paymentMethodFilterProvider.notifier).state =
-          ['revolut'];
+      await helper.filter(const OrderFilters(paymentMethods: ['revolut']));
 
       expect(helper.ids(), ['multi']);
+    });
+
+    test('payment method filter ignores case and padding', () async {
+      // Arrange
+      final helper = await bookWith([
+        fakeOrder(id: 'padded', kind: 'sell', paymentMethod: ' wire ,Revolut'),
+        fakeOrder(id: 'cash', kind: 'sell', paymentMethod: 'Cash'),
+      ]);
+
+      // Act
+      await helper.filter(const OrderFilters(paymentMethods: ['WIRE']));
+
+      // Assert
+      expect(helper.ids(), ['padded']);
+    });
+
+    test('an order splits its payment methods once, not per filter pass', () {
+      // Arrange
+      final order = fakeOrder(
+        id: 'multi',
+        kind: 'sell',
+        paymentMethod: 'Wire, Revolut',
+      );
+
+      // Act / Assert: the filter runs over the whole book on every emission
+      // and every filter change; the tokens of an order never change.
+      expect(order.paymentTokens, {'wire', 'revolut'});
+      expect(identical(order.paymentTokens, order.paymentTokens), isTrue);
     });
 
     test('rating range excludes orders outside the bounds', () async {
@@ -75,8 +109,7 @@ void main() {
         fakeOrder(id: 'high', kind: 'sell', rating: 4.5),
       ]);
       helper.setTab(OrderType.buy);
-      helper.container.read(ratingFilterProvider.notifier).state =
-          (min: 4.0, max: 5.0);
+      await helper.filter(const OrderFilters(rating: (min: 4.0, max: 5.0)));
 
       expect(helper.ids(), ['high']);
     });
@@ -87,8 +120,7 @@ void main() {
         fakeOrder(id: 'pricey', kind: 'sell', premium: 8.0),
       ]);
       helper.setTab(OrderType.buy);
-      helper.container.read(premiumRangeFilterProvider.notifier).state =
-          (min: 5.0, max: 10.0);
+      await helper.filter(const OrderFilters(premium: (min: 5.0, max: 10.0)));
 
       expect(helper.ids(), ['pricey']);
     });

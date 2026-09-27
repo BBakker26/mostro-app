@@ -1,74 +1,147 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
+import 'package:mostro/core/backup_palette.dart';
+import 'package:mostro/core/services/identity_scoped_state.dart';
 import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/features/account/providers/backup_reminder_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
+import 'package:mostro/features/account/restore/restore_run.dart';
+import 'package:mostro/features/account/restore/restore_sheet.dart';
 import 'package:mostro/features/account/widgets/backup_trigger_sheet.dart';
+import 'package:mostro/features/account/widgets/backup_widgets.dart';
+import 'package:mostro/features/account/widgets/funds_at_risk_dialog.dart';
 import 'package:mostro/l10n/app_localizations.dart';
-import 'package:mostro/shared/providers/session_provider.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
+import 'package:mostro/shared/widgets/redesign_app_bar.dart';
+import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
+import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
+import 'package:mostro/src/rust/api/types.dart' show FundsAtRisk;
 
-/// Account screen — Route `/key_management`.
+/// Account — Route `/key_management` (`design_handoff_cuenta_respaldo`,
+/// 15a not backed up · 15b backed up).
 ///
-/// Shows: Secret Words card, Privacy card, Generate New User,
-/// Import User, and Refresh User buttons.
+/// The amber banner and the secret-words card are two roads to one task, so
+/// exactly one renders: the banner until the words are backed up (it opens
+/// the 15c sheet), the card afterwards. The words stay masked until the user
+/// taps `Show words` and are masked again when the screen is left; revealing
+/// them asks for no confirmation, since the backup flow already took it.
 class AccountScreen extends ConsumerStatefulWidget {
-  const AccountScreen({super.key});
+  const AccountScreen({
+    super.key,
+    @visibleForTesting this.debugWords,
+    @visibleForTesting this.debugPublicKey,
+    @visibleForTesting this.debugRegenerate,
+    @visibleForTesting this.debugImport,
+    @visibleForTesting this.debugRecover,
+    @visibleForTesting this.debugFundsAtRisk,
+    @visibleForTesting this.debugRestoreRun,
+    @visibleForTesting this.debugPrivacyMode,
+    @visibleForTesting this.debugRestartOrders,
+  });
+
+  /// Test-only word source for `Show words`, so widget tests do not reach the
+  /// Rust bridge. Never set in production.
+  final List<String>? debugWords;
+
+  /// Test seam: the public key the readout shows, instead of the bridge's.
+  final Future<String?> Function()? debugPublicKey;
+
+  /// Test seam: the identity swaps, instead of [IdentityService]'s
+  /// bridge-backed ones. Never set in production.
+  final Future<void> Function()? debugRegenerate;
+  final Future<void> Function(List<String> words)? debugImport;
+  final Future<RecoveryOutcome> Function()? debugRecover;
+  final Future<List<FundsAtRisk>> Function()? debugFundsAtRisk;
+
+  /// Test seam: the restore the sheet follows (20a–20d), instead of one
+  /// against the core, and the privacy mode that decides whether there is
+  /// anything to restore.
+  final RestoreRun Function()? debugRestoreRun;
+  final Future<bool> Function()? debugPrivacyMode;
+
+  /// Test seam: the book re-subscription behind `Actualizar`.
+  final Future<void> Function()? debugRestartOrders;
 
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
 }
 
 class _AccountScreenState extends ConsumerState<AccountScreen> {
-  // Secret words state
-  bool _wordsVisible = false;
-  bool _showBackupCheckbox = false;
+  /// The identity's public key, read out for automation only: the design
+  /// shows no key card, but the contract keeps `keys.public_key`.
+  String? _publicKey;
+
+  /// The revealed mnemonic; null while masked.
   List<String>? _words;
   bool _loadingWords = false;
+  bool _copied = false;
+  Timer? _copiedTimer;
 
-  /// All 12 words are hidden until the user explicitly taps "Show".
-  String _fullyMaskedPhrase() => List.filled(12, '•••').join(' ');
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPublicKey());
+  }
 
-  Future<void> _loadAndRevealWords() async {
+  Future<void> _loadPublicKey() async {
+    try {
+      final key =
+          widget.debugPublicKey != null
+              ? await widget.debugPublicKey!()
+              : (await identity_api.getIdentity())?.publicKey;
+      if (!mounted) return;
+      setState(() => _publicKey = key);
+    } catch (e) {
+      debugPrint('[account] public key unavailable: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _copiedTimer?.cancel();
+    // Drop the mnemonic from memory as soon as the screen is left.
+    _words = null;
+    super.dispose();
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _revealWords() async {
     if (_loadingWords) return;
     setState(() => _loadingWords = true);
     final l10n = AppLocalizations.of(context);
-
     try {
-      final words = await IdentityService.getMnemonicWords();
-
+      final words =
+          widget.debugWords ?? await IdentityService.getMnemonicWords();
       if (!mounted) return;
       if (words.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.noIdentityFoundMessage),
-          ),
-        );
+        _showMessage(l10n.noIdentityFoundMessage);
         return;
       }
-      final backupPending = ref.read(backupReminderProvider);
-      setState(() {
-        _wordsVisible = true;
-        _showBackupCheckbox = backupPending;
-        _words = words;
-      });
-      // Backup is NOT confirmed here — user must tick the checkbox explicitly.
+      setState(() => _words = words);
     } catch (e) {
-      debugPrint('[account] _loadAndRevealWords error: $e');
+      // Never log the words themselves; the error alone is safe.
+      debugPrint('[account] reveal words error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              kDebugMode
-                  ? 'Failed to load secret words: $e'
-                  : l10n.failedToLoadSecretWordsMessage,
-            ),
-          ),
+        _showMessage(
+          kDebugMode
+              ? 'Failed to load secret words: $e'
+              : l10n.failedToLoadSecretWordsMessage,
         );
       }
     } finally {
@@ -76,171 +149,73 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     }
   }
 
-  Future<void> _confirmBackup() async {
-    final l10n = AppLocalizations.of(context);
-    try {
-      await ref.read(backupReminderProvider.notifier).confirmBackupComplete();
-      await ref.read(backupCompletedProvider.notifier).markCompleted();
-      if (mounted) setState(() => _showBackupCheckbox = false);
-    } catch (e) {
-      debugPrint('[account] _confirmBackup error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              kDebugMode
-                  ? 'Failed to confirm backup: $e'
-                  : l10n.failedToConfirmBackupMessage,
-            ),
-          ),
-        );
-      }
-      // Rethrow so _BackupConfirmRowState._handleConfirm sees the failure
-      // and leaves the checkbox unchecked for retry.
-      rethrow;
-    }
+  void _hideWords() {
+    _copiedTimer?.cancel();
+    setState(() {
+      _words = null;
+      _copied = false;
+    });
+  }
+
+  Future<void> _copyWords() async {
+    final words = _words;
+    if (words == null) return;
+    await Clipboard.setData(ClipboardData(text: words.join(' ')));
+    if (!mounted) return;
+    _copiedTimer?.cancel();
+    setState(() => _copied = true);
+    _copiedTimer = Timer(backupCopyFeedback, () {
+      if (mounted) setState(() => _copied = false);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.extension<AppColors>();
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final inputBg = colors?.backgroundInput ?? const Color(0xFF252A3A);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
     final l10n = AppLocalizations.of(context);
+    final backedUp = ref.watch(backupCompletedProvider);
     final privacyMode = ref.watch(privacyModeProvider);
-    final backupPending = ref.watch(backupReminderProvider);
-    final backupDone = ref.watch(backupCompletedProvider);
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.accountScreenTitle)),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        children: [
-          // ── Backup ritual banner — entry point for the 3-step backup
-          // flow while the backup reminder is active.
-          if (backupPending) ...[
-            _BackupRitualBanner(
-              onTap: () => showBackupTriggerSheet(context),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-          ],
-
-          // ── Secret Words Card ──────────────────────────────────────────
-          _SectionCard(
-            color: cardBg,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _CardHeader(
-                  icon: Icons.key,
-                  iconColor: green,
-                  title: l10n.secretWordsTitle,
-                  badge: backupDone ? _BackedUpBadge(green: green) : null,
-                  onInfo:
-                      () => _showInfoDialog(
-                        context,
-                        l10n.secretWordsTitle,
-                        l10n.secretWordsInfoContent,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  l10n.toRestoreYourAccount,
-                  style: theme.textTheme.bodySmall!.copyWith(color: textSec),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: inputBg,
-                    borderRadius: BorderRadius.circular(AppRadius.input),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _wordsVisible && _words != null
-                          ? SelectableText(
-                            _words!.join(' '),
-                            style: theme.textTheme.bodyMedium!.copyWith(
-                              fontFamily: 'monospace',
-                              height: 1.6,
-                            ),
-                          )
-                          : Text(
-                            _fullyMaskedPhrase(),
-                            style: theme.textTheme.bodyMedium!.copyWith(
-                              fontFamily: 'monospace',
-                              height: 1.6,
-                            ),
-                          ),
-                      const SizedBox(height: AppSpacing.sm),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child:
-                            _loadingWords
-                                ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                                : TextButton.icon(
-                                  onPressed:
-                                      _wordsVisible
-                                          ? () => setState(() {
-                                            _wordsVisible = false;
-                                            _showBackupCheckbox = false;
-                                          })
-                                          : _loadAndRevealWords,
-                                  icon: Icon(
-                                    _wordsVisible
-                                        ? Icons.visibility_off_outlined
-                                        : Icons.visibility_outlined,
-                                    size: 16,
-                                    color: green,
-                                  ),
-                                  label: Text(
-                                    _wordsVisible ? l10n.hideButtonLabel : l10n.showButtonLabel,
-                                    style: TextStyle(color: green),
-                                  ),
-                                ),
-                      ),
-                      // Backup confirmation checkbox — appears when words are
-                      // visible and backup has not yet been confirmed.
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeInOut,
-                        child:
-                            _showBackupCheckbox
-                                ? _BackupConfirmRow(
-                                  green: green,
-                                  onConfirm: _confirmBackup,
-                                )
-                                : const SizedBox.shrink(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-
-          // ── Privacy Card ───────────────────────────────────────────────
-          _SectionCard(
-            color: cardBg,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _CardHeader(
-                  icon: Icons.shield_outlined,
-                  iconColor: green,
-                  title: l10n.privacyCardTitle,
+      backgroundColor: OrderBookPalette.of(context).bg,
+      appBar: redesignAppBar(
+        context,
+        title: l10n.accountScreenTitle,
+        onBack:
+            () => context.canPop() ? context.pop() : context.go(AppRoute.home),
+      ),
+      // #267: SafeArea keeps the Import/Refresh row clear of the system
+      // navigation bar.
+      body: SafeArea(
+        top: false,
+        // The public-key readout is automation-only: the design shows no
+        // key card, but the contract keeps `keys.public_key`. It sits over
+        // the viewport, not in its spaced block list (which would move
+        // every card down by the gap), paints nothing, and exists only once
+        // the key is loaded — a driver that finds it reads the full key,
+        // never an empty label.
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            BackupFillViewport(
+              gap: 11,
+              blocks: [
+                if (backedUp)
+                  _SecretWordsCard(
+                    words: _words,
+                    loading: _loadingWords,
+                    copied: _copied,
+                    onReveal: _revealWords,
+                    onHide: _hideWords,
+                    onCopy: _copyWords,
+                  )
+                else
+                  _BackupBanner(onTap: () => showBackupTriggerSheet(context)),
+                _PrivacyCard(
+                  privacyMode: privacyMode,
+                  onSelect:
+                      (enabled) => ref
+                          .read(privacyModeProvider.notifier)
+                          .setPrivacyMode(enabled),
                   onInfo:
                       () => _showInfoDialog(
                         context,
@@ -248,172 +223,200 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         l10n.privacyModesInfoContent,
                       ),
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  l10n.controlPrivacySettings,
-                  style: theme.textTheme.bodySmall!.copyWith(color: textSec),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _PrivacyOption(
-                      title: l10n.reputationMode,
-                      subtitle: l10n.reputationModeSubtitle,
-                      selected: !privacyMode,
-                      green: green,
-                      onTap:
-                          () => ref
-                              .read(privacyModeProvider.notifier)
-                              .setPrivacyMode(false),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    _PrivacyOption(
-                      title: l10n.fullPrivacyMode,
-                      subtitle: l10n.fullPrivacyModeSubtitle,
-                      selected: privacyMode,
-                      green: green,
-                      onTap:
-                          () => ref
-                              .read(privacyModeProvider.notifier)
-                              .setPrivacyMode(true),
-                    ),
-                  ],
-                ),
               ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xl),
-
-          // ── Generate New User ──────────────────────────────────────────
-          FilledButton.icon(
-            onPressed: () => _confirmGenerateNewUser(context),
-            icon: const Icon(Icons.person_add_outlined),
-            label: Text(l10n.generateNewUserButton),
-            style: FilledButton.styleFrom(
-              backgroundColor: green,
-              foregroundColor: Colors.black,
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.button),
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-
-          // ── Import + Refresh buttons ───────────────────────────────────
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showImportDialog(context),
-                  icon: const Icon(Icons.download_outlined),
-                  label: Text(l10n.importMostroUserButton),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: green,
-                    side: BorderSide(color: green),
-                    minimumSize: const Size(0, 48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.button),
+              footer: _AccountActions(
+                onGenerate:
+                    () => _guardedIdentitySwap(
+                      context,
+                      () => _confirmGenerateNewUser(context),
                     ),
-                  ),
-                ),
+                onImport:
+                    () => _guardedIdentitySwap(
+                      context,
+                      () => _showImportDialog(context),
+                    ),
+                onRefresh: () => _confirmRefresh(context),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              OutlinedButton(
-                onPressed: () => _confirmRefresh(context),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: green,
-                  side: BorderSide(color: green),
-                  minimumSize: const Size(48, 48),
-                  padding: EdgeInsets.zero,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.button),
-                  ),
-                ),
-                child: const Icon(Icons.refresh_outlined),
+            ),
+            if (_publicKey case final key?)
+              Positioned(
+                left: 0,
+                top: 0,
+                // One pixel, not zero: a zero-size box has no semantics node.
+                child: const SizedBox(
+                  width: 1,
+                  height: 1,
+                ).withAutomationId(AutomationIds.keysPublicKey, label: key),
               ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   void _showInfoDialog(BuildContext context, String title, String content) {
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            title: Text(title),
-            content: Text(content),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(AppLocalizations.of(context).okButtonLabel),
-              ),
-            ],
+          (dialogContext) => MostroDialog(
+            title: title,
+            body: content,
+            primary: ModalAction(
+              label: AppLocalizations.of(context).okButtonLabel,
+              onPressed: () => Navigator.pop(dialogContext),
+            ),
           ),
     );
   }
 
+  /// Mask the old words, move the backup state to what the new identity
+  /// deserves, then go home.
+  ///
+  /// A generated mnemonic is, by definition, not backed up: the reminder
+  /// re-arms and the backed-up flag clears. An imported one came from words
+  /// the user already holds ([alreadyBackedUp]) — there is nothing to ask
+  /// them to write down, so the reminder is cleared instead, and cleared
+  /// actively: the walkthrough or the replaced identity may have armed it
+  /// already (#530).
+  ///
+  /// The identity has already been replaced when this runs, so a write that
+  /// fails is reported as a backup-status failure, not as a failed generation
+  /// or import, and never keeps the other write from running.
+  ///
+  /// Runs through [swap], not this screen: the screen may be gone by now.
+  Future<void> _finishIdentitySwap(
+    _IdentitySwap swap, {
+    required bool alreadyBackedUp,
+  }) async {
+    _copiedTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _words = null;
+        _copied = false;
+      });
+    }
+    final reminder = swap.container.read(backupReminderProvider.notifier);
+    final completed = swap.container.read(backupCompletedProvider.notifier);
+
+    final writes =
+        alreadyBackedUp
+            ? [reminder.markAlreadyBackedUp, completed.markCompleted]
+            : [reminder.showBackupReminder, completed.reset];
+
+    var resetFailed = false;
+    for (final write in writes) {
+      try {
+        await write();
+      } catch (e) {
+        debugPrint('[account] backup state write error: $e');
+        resetFailed = true;
+      }
+    }
+
+    if (resetFailed) {
+      swap.messenger.showSnackBar(
+        SnackBar(content: Text(swap.l10n.failedToSaveBackupStatusMessage)),
+      );
+    }
+    swap.router.go(AppRoute.home);
+  }
+
+  /// Run [proceed] — the generate or import flow — unless the current
+  /// identity still has something in flight and the user backs out of the
+  /// warning (issue #533). Asked before anything is written: before the new
+  /// mnemonic, before `delete_identity`.
+  ///
+  /// A check that fails must not lock the user out of rotating a possibly
+  /// compromised identity, so it reads as "nothing found" and is logged.
+  Future<void> _guardedIdentitySwap(
+    BuildContext context,
+    VoidCallback proceed,
+  ) async {
+    var risks = const <FundsAtRisk>[];
+    try {
+      risks =
+          await (widget.debugFundsAtRisk?.call() ??
+              identity_api.fundsAtRisk());
+    } catch (e) {
+      debugPrint('[account] fundsAtRisk error: $e');
+    }
+    if (!context.mounted) return;
+    if (risks.isNotEmpty &&
+        !await confirmIdentitySwapDespiteRisk(context, risks)) {
+      return;
+    }
+    if (!context.mounted) return;
+    proceed();
+  }
+
+  /// Empty the Dart-side state of the identity that was just replaced, so
+  /// the new one starts as a fresh install would (issue #533). Rust already
+  /// wiped the rows in `delete_identity`. Never throws: the swap has
+  /// happened, and stale state on screen must not be reported as a failed
+  /// generation or import.
+  ///
+  /// Through the app's container, never this screen's `ref`: the screen can
+  /// be disposed while the bridge call runs, and the reset then failed with
+  /// "Cannot use ref after the widget was disposed", leaving the previous
+  /// user on screen until a restart.
+  Future<void> _forgetPreviousIdentity(_IdentitySwap swap) async {
+    try {
+      await resetIdentityScopedState(swap.container);
+    } catch (e) {
+      debugPrint('[account] identity-scoped reset error: $e');
+    }
+  }
+
   void _confirmGenerateNewUser(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            title: Text(l10n.generateNewUserDialogTitle),
-            content: Text(l10n.generateNewUserDialogContent),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () async {
+          (dialogContext) => MostroDialog(
+            title: l10n.generateNewUserDialogTitle,
+            body: l10n.generateNewUserDialogContent,
+            secondary: ModalAction(
+              label: l10n.cancel,
+              onPressed: () => Navigator.pop(dialogContext),
+              automationId: AutomationIds.keysGenerateCancel,
+            ),
+            primary: ModalAction(
+              label: l10n.continueButtonLabel,
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.keysGenerateConfirm,
+              onPressed: () async {
+                  final swap = _IdentitySwap.of(context);
                   Navigator.pop(dialogContext);
                   try {
                     // Atomically replaces the stored identity: new mnemonic is
                     // written before old data is cleared, so there is no window
                     // where the user is left without a valid identity.
-                    await IdentityService.regenerate();
-                    ref.read(sessionProvider.notifier).clearSession();
-                    await ref
-                        .read(backupReminderProvider.notifier)
-                        .showBackupReminder();
-                    await ref.read(backupCompletedProvider.notifier).reset();
-                    // Only clear UI state and navigate once the new identity exists.
-                    if (!context.mounted) return;
-                    setState(() {
-                      _wordsVisible = false;
-                      _showBackupCheckbox = false;
-                      _words = null;
-                    });
-                    context.go(AppRoute.home);
+                    await (widget.debugRegenerate?.call() ??
+                        IdentityService.regenerate());
                   } catch (e) {
                     debugPrint('[account] generateNewUser error: $e');
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    swap.messenger.showSnackBar(
                       SnackBar(
                         content: Text(
                           kDebugMode
                               ? 'Failed to generate identity: $e'
-                              : l10n.failedToGenerateIdentityMessage,
+                              : swap.l10n.failedToGenerateIdentityMessage,
                         ),
                       ),
                     );
+                    return;
                   }
-                },
-                child: Text(l10n.continueButtonLabel),
-              ),
-            ],
+                  // Only reset and navigate once the new identity exists.
+                  await _forgetPreviousIdentity(swap);
+                  await _finishIdentitySwap(swap, alreadyBackedUp: false);
+              },
+            ),
           ),
     );
   }
 
   void _showImportDialog(BuildContext context) {
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
           (dialogContext) => _ImportMnemonicDialog(
@@ -423,52 +426,126 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   }
 
   Future<void> _importIdentity(BuildContext context, List<String> words) async {
-    final l10n = AppLocalizations.of(context);
+    final swap = _IdentitySwap.of(context);
+    final l10n = swap.l10n;
     try {
-      await IdentityService.importAndStore(words);
-      ref.read(sessionProvider.notifier).clearSession();
-      await ref.read(backupReminderProvider.notifier).showBackupReminder();
-      await ref.read(backupCompletedProvider.notifier).reset();
-      if (!context.mounted) return;
-      setState(() {
-        _wordsVisible = false;
-        _showBackupCheckbox = false;
-        _words = null;
-      });
-      context.go(AppRoute.home);
+      await (widget.debugImport?.call(words) ??
+          IdentityService.importAndStore(words));
     } catch (e) {
       debugPrint('[account] importIdentity error: $e');
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      swap.messenger.showSnackBar(
         SnackBar(
           content: Text(
-            kDebugMode
-                ? 'Import failed: $e'
-                : l10n.invalidMnemonicMessage,
+            kDebugMode ? 'Import failed: $e' : l10n.invalidMnemonicMessage,
           ),
         ),
+      );
+      return;
+    }
+    // Before the recovery below, not after: what it brings back belongs to
+    // the imported identity and must survive.
+    await _forgetPreviousIdentity(swap);
+    // A seed that already traded must learn its trades and trade index from
+    // the daemon before its first new order (InvalidTradeIndex otherwise).
+    await _restoreOrders(swap);
+    // The user restored from words they already had: nothing to back up.
+    await _finishIdentitySwap(swap, alreadyBackedUp: true);
+  }
+
+  /// Ask the node for the imported account's orders, in the restore sheet
+  /// (design 20a–20d) while this screen is up. Resolves once the user closes
+  /// it.
+  ///
+  /// `Cancelar` closes the sheet without stopping the core: the request is
+  /// already out, and its answer raises the trade-key index the account's
+  /// next order is signed with (#217, #328) — abandoning it would reuse a
+  /// key a recovered trade owns.
+  ///
+  /// The swap can outlive this screen (see [_IdentitySwap]); then there is no
+  /// sheet to show, and the restore runs headless with the snackbars.
+  Future<void> _restoreOrders(_IdentitySwap swap) async {
+    if (!mounted) return _restoreOrdersHeadless(swap);
+    final bool privacy;
+    try {
+      privacy = await _privacyMode();
+    } catch (e) {
+      debugPrint('[account] privacy mode unavailable: $e');
+      return _restoreOrdersHeadless(swap);
+    }
+    // Privacy mode has no account on the node to restore.
+    if (privacy) return;
+    if (!mounted) return _restoreOrdersHeadless(swap);
+    await _openRestoreSheet();
+  }
+
+  /// Whether `Actualizar` should run the restore after the book refreshed:
+  /// not in privacy mode, and not when that cannot be told — a failed check
+  /// must not turn the refresh that already succeeded into a failure.
+  Future<bool> _refreshRestores() async {
+    try {
+      return !await _privacyMode();
+    } catch (e) {
+      debugPrint('[account] privacy mode unavailable: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _privacyMode() =>
+      widget.debugPrivacyMode?.call() ?? reputation_api.getPrivacyMode();
+
+  Future<void> _openRestoreSheet() => showRestoreSheet(
+    context,
+    run: widget.debugRestoreRun?.call() ?? RestoreRun.core(),
+  );
+
+  Future<void> _restoreOrdersHeadless(_IdentitySwap swap) async {
+    final l10n = swap.l10n;
+    final messenger = swap.messenger;
+    messenger.showSnackBar(
+      SnackBar(content: Text(l10n.recoveringTradesMessage)),
+    );
+    final outcome =
+        await (widget.debugRecover?.call() ??
+            IdentityService.recoverAfterImport());
+    messenger.hideCurrentSnackBar();
+    if (outcome.isRecovered) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.recoveredTradesMessage(outcome.count!))),
+      );
+    } else if (outcome.isFailed) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.recoverTradesFailedMessage)),
       );
     }
   }
 
   void _confirmRefresh(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    showDialog<void>(
+    showMostroDialog<void>(
       context: context,
       builder:
-          (dialogContext) => AlertDialog(
-            title: Text(l10n.refreshUserDialogTitle),
-            content: Text(l10n.refreshUserDialogContent),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(l10n.cancel),
-              ),
-              FilledButton(
-                onPressed: () async {
+          (dialogContext) => MostroDialog(
+            title: l10n.refreshUserDialogTitle,
+            body: l10n.refreshUserDialogContent,
+            secondary: ModalAction(
+              label: l10n.cancel,
+              onPressed: () => Navigator.pop(dialogContext),
+            ),
+            primary: ModalAction(
+              label: l10n.refreshButtonLabel,
+              onPressed: () async {
                   Navigator.pop(dialogContext);
                   try {
-                    await orders_api.restartOrdersSubscription();
+                    await (widget.debugRestartOrders?.call() ??
+                        orders_api.restartOrdersSubscription());
+                    // `Actualizar` promises the account's trades too, and the
+                    // failed restore (20c) sends the user here to retry: the
+                    // same restore sheet, unless privacy mode has no account
+                    // on the node to restore.
+                    if (await _refreshRestores() && mounted) {
+                      await _openRestoreSheet();
+                      return;
+                    }
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text(l10n.orderBookRefreshedMessage)),
@@ -486,138 +563,98 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                       ),
                     );
                   }
-                },
-                child: Text(l10n.refreshButtonLabel),
-              ),
-            ],
+              },
+            ),
           ),
     );
   }
 }
 
-// ── Internal widgets ──────────────────────────────────────────────────────────
+/// What an identity swap needs from the app once it has started, taken from
+/// the Account screen's context before the first await (issue #533).
+///
+/// The swap outlives the screen: the bridge calls take long enough for the
+/// screen to be disposed underneath them, and its `ref` and `context` die
+/// with it. The container, the router and the root messenger belong to the
+/// app, so the reset, the backup state and the trip home still happen.
+class _IdentitySwap {
+  _IdentitySwap.of(BuildContext context)
+    : container = ProviderScope.containerOf(context, listen: false),
+      router = GoRouter.of(context),
+      messenger = ScaffoldMessenger.of(context),
+      l10n = AppLocalizations.of(context);
 
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.child, required this.color});
-
-  final Widget child;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: child,
-    );
-  }
+  final ProviderContainer container;
+  final GoRouter router;
+  final ScaffoldMessengerState messenger;
+  final AppLocalizations l10n;
 }
 
-class _CardHeader extends StatelessWidget {
-  const _CardHeader({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.onInfo,
-    this.badge,
-  });
+// ── 15a · Banner ──────────────────────────────────────────────────────────────
 
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final VoidCallback onInfo;
-
-  /// Optional badge shown right after the title (e.g. "Backed up").
-  final Widget? badge;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: iconColor, size: 20),
-        const SizedBox(width: AppSpacing.sm),
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium!.copyWith(fontWeight: FontWeight.w600),
-        ),
-        if (badge != null) ...[
-          const SizedBox(width: AppSpacing.sm),
-          badge!,
-        ],
-        const Spacer(),
-        IconButton(
-          onPressed: onInfo,
-          icon: const Icon(Icons.info_outline, size: 18),
-          tooltip: AppLocalizations.of(context).moreInformationTooltip,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Backup ritual banner + badge ──────────────────────────────────────────────
-
-/// Banner shown while the backup reminder is active. Tapping it opens the
-/// backup ritual trigger sheet.
-class _BackupRitualBanner extends StatelessWidget {
-  const _BackupRitualBanner({required this.onTap});
+/// `Secure your reputation`, shown until the words are backed up. Opens the
+/// 15c sheet.
+class _BackupBanner extends StatelessWidget {
+  const _BackupBanner({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.extension<AppColors>();
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final amber = colors?.warningAmber ?? const Color(0xFFE89C3C);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
+    final book = OrderBookPalette.of(context);
+    final pal = BackupPalette.of(context);
     final l10n = AppLocalizations.of(context);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+      side: BorderSide(color: pal.amberBorder),
+    );
 
-    return Material(
-      color: cardBg,
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        child: Container(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            border: Border.all(color: amber.withValues(alpha: 0.5)),
-            borderRadius: BorderRadius.circular(AppRadius.card),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.shield_outlined, color: amber, size: 24),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l10n.backupBannerTitle,
-                      style: theme.textTheme.bodyMedium!.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: amber,
+    return Semantics(
+      button: true,
+      child: Material(
+        color: pal.amberFill,
+        shape: shape,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: shape,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+            child: Row(
+              children: [
+                Icon(Icons.shield_outlined, size: 20, color: pal.amber),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.backupBannerTitle,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: pal.amberTitle,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      l10n.backupBannerSubtitle,
-                      style:
-                          theme.textTheme.bodySmall!.copyWith(color: textSec),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        l10n.backupBannerSubtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.4,
+                          color: book.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const Icon(Icons.chevron_right, size: 20),
-            ],
+                const SizedBox(width: 12),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 16,
+                  color: book.textSecondary,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -625,32 +662,132 @@ class _BackupRitualBanner extends StatelessWidget {
   }
 }
 
-/// Small green "Backed up" chip shown in the Secret Words card header once
-/// the backup ritual (or legacy checkbox) has been completed.
-class _BackedUpBadge extends StatelessWidget {
-  const _BackedUpBadge({required this.green});
+// ── 15b · Secret words ────────────────────────────────────────────────────────
 
-  final Color green;
+class _SecretWordsCard extends StatelessWidget {
+  const _SecretWordsCard({
+    required this.words,
+    required this.loading,
+    required this.copied,
+    required this.onReveal,
+    required this.onHide,
+    required this.onCopy,
+  });
+
+  /// Null while masked.
+  final List<String>? words;
+  final bool loading;
+  final bool copied;
+  final VoidCallback onReveal;
+  final VoidCallback onHide;
+  final VoidCallback onCopy;
 
   @override
   Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    final pal = BackupPalette.of(context);
+    final l10n = AppLocalizations.of(context);
+
+    return _Card(
+      padding: const EdgeInsets.all(14),
+      gap: 9,
+      children: [
+        _CardHeader(
+          icon: Icons.key_rounded,
+          title: l10n.secretWordsTitle,
+          trailing: const _BackedUpChip(),
+        ),
+        BackupWordGrid(words: words),
+        if (words == null)
+          Material(
+            color: pal.revealFill,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(13),
+              side: BorderSide(color: pal.revealBorder),
+            ),
+            child: InkWell(
+              onTap: loading ? null : onReveal,
+              borderRadius: BorderRadius.circular(13),
+              child: Padding(
+                padding: const EdgeInsets.all(11),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (loading)
+                      SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: book.limeText,
+                        ),
+                      )
+                    else
+                      Icon(
+                        Icons.visibility_outlined,
+                        size: 15,
+                        color: book.limeText,
+                      ),
+                    const SizedBox(width: 7),
+                    Text(
+                      l10n.showWordsButton,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: book.limeText,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ).withAutomationId(AutomationIds.keysSeedReveal)
+        else
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _WordsLink(
+                icon: Icons.visibility_off_outlined,
+                label: l10n.hideButtonLabel,
+                onTap: onHide,
+              ),
+              const SizedBox(width: 18),
+              _WordsLink(
+                icon: copied ? Icons.check_rounded : Icons.copy_rounded,
+                label: l10n.copyButtonLabel,
+                onTap: onCopy,
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _BackedUpChip extends StatelessWidget {
+  const _BackedUpChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    final pal = BackupPalette.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: green.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(AppRadius.chip),
+        color: pal.chipFill,
+        borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.check, size: 12, color: green),
-          const SizedBox(width: 3),
+          Icon(Icons.check_rounded, size: 11, color: pal.accent),
+          const SizedBox(width: 4),
           Text(
             AppLocalizations.of(context).backedUpBadgeLabel,
             style: TextStyle(
-              color: green,
               fontSize: 11,
               fontWeight: FontWeight.w600,
+              color: book.limeInk,
             ),
           ),
         ],
@@ -659,75 +796,97 @@ class _BackedUpBadge extends StatelessWidget {
   }
 }
 
-// ── Backup confirmation checkbox ──────────────────────────────────────────────
+/// `Hide` / `Copy` under the revealed grid.
+class _WordsLink extends StatelessWidget {
+  const _WordsLink({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
-class _BackupConfirmRow extends StatefulWidget {
-  const _BackupConfirmRow({required this.green, required this.onConfirm});
-
-  final Color green;
-  final Future<void> Function() onConfirm;
-
-  @override
-  State<_BackupConfirmRow> createState() => _BackupConfirmRowState();
-}
-
-class _BackupConfirmRowState extends State<_BackupConfirmRow> {
-  bool _checked = false;
-  bool _pending = false;
-
-  Future<void> _handleConfirm() async {
-    if (_checked || _pending) return;
-    setState(() => _pending = true);
-    try {
-      await widget.onConfirm();
-      if (mounted) setState(() => _checked = true);
-    } catch (_) {
-      // Parent already shows a SnackBar; leave checkbox unchecked so
-      // the user can retry.
-    } finally {
-      if (mounted) setState(() => _pending = false);
-    }
-  }
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final interactive = !_checked && !_pending;
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.md),
-      child: InkWell(
-        onTap: interactive ? _handleConfirm : null,
-        borderRadius: BorderRadius.circular(4),
+    final color = OrderBookPalette.of(context).textMuted;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child:
-                  _pending
-                      ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                      : Checkbox(
-                        value: _checked,
-                        activeColor: widget.green,
-                        onChanged: interactive ? (_) => _handleConfirm() : null,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Text(
-                AppLocalizations.of(context).backupConfirmCheckbox,
-                style: Theme.of(context).textTheme.bodySmall,
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color,
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Privacy ───────────────────────────────────────────────────────────────────
+
+class _PrivacyCard extends StatelessWidget {
+  const _PrivacyCard({
+    required this.privacyMode,
+    required this.onSelect,
+    required this.onInfo,
+  });
+
+  final bool privacyMode;
+  final ValueChanged<bool> onSelect;
+  final VoidCallback onInfo;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    final l10n = AppLocalizations.of(context);
+
+    return _Card(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+      gap: 12,
+      children: [
+        _CardHeader(
+          icon: Icons.shield_outlined,
+          title: l10n.privacyCardTitle,
+          trailing: IconButton(
+            onPressed: onInfo,
+            icon: Icon(
+              Icons.info_outline_rounded,
+              size: 15,
+              color: book.textTertiary,
+            ),
+            tooltip: l10n.moreInformationTooltip,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 24),
+          ),
+        ),
+        _PrivacyOption(
+          title: l10n.reputationMode,
+          subtitle: l10n.reputationModeSubtitle,
+          selected: !privacyMode,
+          onTap: () => onSelect(false),
+        ),
+        _PrivacyOption(
+          title: l10n.fullPrivacyMode,
+          subtitle: l10n.fullPrivacyModeSubtitle,
+          selected: privacyMode,
+          onTap: () => onSelect(true),
+        ),
+      ],
     );
   }
 }
@@ -737,69 +896,215 @@ class _PrivacyOption extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.selected,
-    required this.green,
     required this.onTap,
   });
 
   final String title;
   final String subtitle;
   final bool selected;
-  final Color green;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    final pal = BackupPalette.of(context);
+
     return Semantics(
       label: title,
-      button: onTap != null,
+      button: true,
       selected: selected,
       inMutuallyExclusiveGroup: true,
-      onTapHint: onTap != null ? 'select $title' : null,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(8),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 20,
-              height: 20,
+              width: 17,
+              height: 17,
+              margin: const EdgeInsets.only(top: 2),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: selected ? green : Colors.white30,
+                  color: selected ? pal.accent : pal.muted,
                   width: 2,
                 ),
               ),
+              alignment: Alignment.center,
               child:
                   selected
-                      ? Center(
-                        child: Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: green,
-                            shape: BoxShape.circle,
-                          ),
+                      ? Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: pal.accent,
+                          shape: BoxShape.circle,
                         ),
                       )
                       : null,
             ),
-            const SizedBox(width: AppSpacing.md),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium!.copyWith(fontWeight: FontWeight.w600),
-                ),
-                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-              ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: book.textStrong,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12, color: book.textSecondary),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Buttons ───────────────────────────────────────────────────────────────────
+
+class _AccountActions extends StatelessWidget {
+  const _AccountActions({
+    required this.onGenerate,
+    required this.onImport,
+    required this.onRefresh,
+  });
+
+  final VoidCallback onGenerate;
+  final VoidCallback onImport;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    final pal = BackupPalette.of(context);
+    final l10n = AppLocalizations.of(context);
+    final outline = OutlinedButton.styleFrom(
+      foregroundColor: book.limeText,
+      side: BorderSide(color: pal.outlineBorder),
+      minimumSize: const Size(48, 48),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      textStyle: const TextStyle(
+        fontFamily: AppFonts.ui,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        BackupPrimaryButton(
+          label: l10n.generateNewUserButton,
+          leading: Icons.person_add_alt_1_outlined,
+          onPressed: onGenerate,
+        ).withAutomationId(AutomationIds.keysGenerate),
+        const SizedBox(height: 9),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onImport,
+                icon: const Icon(Icons.download_rounded, size: 15),
+                label: Text(l10n.importMostroUserButton),
+                style: outline.copyWith(
+                  padding: const WidgetStatePropertyAll(EdgeInsets.all(13)),
+                ),
+              ).withAutomationId(AutomationIds.keysImport),
+            ),
+            const SizedBox(width: 9),
+            OutlinedButton(
+              onPressed: onRefresh,
+              style: outline.copyWith(
+                padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+              ),
+              child: Icon(
+                Icons.refresh_rounded,
+                size: 16,
+                semanticLabel: l10n.refreshButtonLabel,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ── Shared card pieces ────────────────────────────────────────────────────────
+
+class _Card extends StatelessWidget {
+  const _Card({
+    required this.padding,
+    required this.gap,
+    required this.children,
+  });
+
+  final EdgeInsets padding;
+  final double gap;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: OrderBookPalette.of(context).surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) SizedBox(height: gap),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CardHeader extends StatelessWidget {
+  const _CardHeader({
+    required this.icon,
+    required this.title,
+    required this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 17, color: BackupPalette.of(context).accent),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: OrderBookPalette.of(context).textStrong,
+            ),
+          ),
+        ),
+        trailing,
+      ],
     );
   }
 }
@@ -850,8 +1155,8 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
-      title: Text(l10n.importMnemonicDialogTitle),
+    return MostroDialog(
+      title: l10n.importMnemonicDialogTitle,
       content: TextField(
         controller: _controller,
         maxLines: 3,
@@ -866,13 +1171,11 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
           if (_error != null) setState(() => _error = null);
         },
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(l10n.cancel),
-        ),
-        FilledButton(onPressed: _submit, child: Text(l10n.importButtonLabel)),
-      ],
+      secondary: ModalAction(
+        label: l10n.cancel,
+        onPressed: () => Navigator.pop(context),
+      ),
+      primary: ModalAction(label: l10n.importButtonLabel, onPressed: _submit),
     );
   }
 }

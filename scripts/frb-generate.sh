@@ -3,8 +3,11 @@
 # does not match the version this repository pins.
 #
 # A mismatched CLI writes lib/src/rust/frb_generated.dart against a different API surface
-# than the resolved Dart package. Because that directory is gitignored, the result is a
-# build failure that names a Dart parameter and never mentions versions. See issue #205.
+# than the resolved Dart package. The result is a build failure that names a Dart parameter
+# and never mentions versions. See issue #205.
+#
+# The output is committed: commit it together with the rust/src/api/ change that caused it
+# (CONTRIBUTING.md → "Generated code"; ci.yml fails when it drifts).
 #
 # Usage:
 #   ./scripts/frb-generate.sh          verify, then generate

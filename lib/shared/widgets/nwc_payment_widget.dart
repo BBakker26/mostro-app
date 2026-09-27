@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/nwc.dart' as nwc_api;
 
@@ -15,12 +17,17 @@ class NwcPaymentWidget extends StatefulWidget {
     required this.amountSats,
     required this.onPaymentSuccess,
     required this.onFallbackToManual,
+    this.invoiceAutomationId = AutomationIds.payInvoiceText,
   });
 
   final String bolt11;
   final int amountSats;
   final VoidCallback onPaymentSuccess;
   final VoidCallback onFallbackToManual;
+
+  /// Automation id of the bolt11 readout, null to omit it (the screen
+  /// already exposes the invoice under its own id).
+  final String? invoiceAutomationId;
 
   @override
   State<NwcPaymentWidget> createState() => _NwcPaymentWidgetState();
@@ -57,20 +64,28 @@ class _NwcPaymentWidgetState extends State<NwcPaymentWidget> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // The hold invoice is never rendered on this path (the wallet pays it
+        // directly), so the readout is what lets a driver correlate the
+        // payment it is about to observe.
+        if (widget.invoiceAutomationId case final id?)
+          const SizedBox.shrink().withAutomationId(id, label: widget.bolt11),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: _paying ? null : _pay,
-            icon: _paying
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.account_balance_wallet, size: 20),
-            label: Text(_paying
-                ? AppLocalizations.of(context).payingStatus
-                : AppLocalizations.of(context).payWithWalletButton),
+            icon:
+                _paying
+                    ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                    : const Icon(Icons.account_balance_wallet, size: 20),
+            label: Text(
+              _paying
+                  ? AppLocalizations.of(context).payingStatus
+                  : AppLocalizations.of(context).payWithWalletButton,
+            ),
             style: FilledButton.styleFrom(
               backgroundColor: green,
               foregroundColor: Colors.black,
@@ -79,15 +94,12 @@ class _NwcPaymentWidgetState extends State<NwcPaymentWidget> {
                 borderRadius: BorderRadius.circular(AppRadius.button),
               ),
             ),
-          ),
+          ).withAutomationId(AutomationIds.payNwc),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
           '${widget.amountSats} sats',
-          style: TextStyle(
-            color: colors?.textSecondary,
-            fontSize: 13,
-          ),
+          style: TextStyle(color: colors?.textSecondary, fontSize: 13),
         ),
       ],
     );

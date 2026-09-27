@@ -1,4 +1,12 @@
 pub mod blossom;
-pub mod gift_wrap;
+pub mod coalesce;
+pub mod first_answer;
+pub mod transport;
+pub mod live_subs;
 pub mod order_events;
+pub mod publish;
+pub mod relay_list;
 pub mod relay_pool;
+pub mod relay_probe;
+pub mod req_census;
+pub mod subscriptions;

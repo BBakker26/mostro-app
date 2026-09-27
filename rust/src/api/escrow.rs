@@ -49,7 +49,7 @@ fn snapshot() -> EscrowModeInfo {
 fn validate_mint_url(url: &str) -> Result<()> {
     // `Url` comes from nostr-sdk's re-export of the `url` crate — no new
     // dependency for one validation.
-    let parsed = nostr_sdk::Url::parse(url)
+    let parsed = nostr_sdk::prelude::Url::parse(url)
         .map_err(|e| anyhow::anyhow!("InvalidMintUrl: '{url}' is not a URL ({e})"))?;
 
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -199,9 +199,15 @@ mod tests {
     use super::*;
     use crate::mostro::escrow_mode::{CashuNodeConfig, EscrowMode};
 
-    /// The escrow globals are process-wide and shared with `api::cashu`, so the
-    /// lock has to be too — see `escrow_mode::test_lock`.
-    use crate::mostro::escrow_mode::test_lock as escrow_lock;
+    /// The escrow globals are process-wide; serialize the tests that write them
+    /// and start each one from a freshly-launched app's state.
+    ///
+    /// The lock itself lives in `mostro::escrow_mode`, next to the state it
+    /// guards, and is shared with that module's own tests. A private lock here
+    /// only serialized this module and raced the other one (#309).
+    fn escrow_lock() -> std::sync::MutexGuard<'static, ()> {
+        escrow_mode::lock_globals_for_test()
+    }
 
     #[tokio::test]
     async fn a_fresh_client_reports_unknown_and_no_cashu() {

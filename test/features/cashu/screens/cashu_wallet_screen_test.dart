@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mostro/core/app_theme.dart';
@@ -15,9 +16,15 @@ import '../../../support/provider_harness.dart';
 /// overridden — an un-overridden one would call into Rust and hang the test
 /// rather than fail it.
 class _FakeController extends CashuWalletController {
-  const _FakeController({this.connectError});
+  const _FakeController({
+    this.connectError,
+    this.createTokenError,
+    this.token = 'cashuBtesttoken',
+  });
 
   final Object? connectError;
+  final Object? createTokenError;
+  final String token;
 
   @override
   Future<CashuWalletStatus> connect() async {
@@ -29,10 +36,13 @@ class _FakeController extends CashuWalletController {
   Future<BigInt> receiveToken(String encoded) async => BigInt.zero;
 
   @override
-  Future<String> createToken(BigInt amountSats) async => 'cashuBtesttoken';
+  Future<String> createToken(BigInt amountSats) async {
+    if (createTokenError != null) throw createTokenError!;
+    return token;
+  }
 
   @override
-  Future<BigInt> checkProofsState() async => BigInt.zero;
+  Future<void> sweepSpentProofs() async {}
 }
 
 /// `balance: null` models an unreadable balance, which the screen must not
@@ -50,6 +60,7 @@ Future<void> _pump(
   WidgetTester tester, {
   required CashuWalletStatus status,
   CashuWalletController controller = const _FakeController(),
+  Locale locale = const Locale('en'),
 }) async {
   final container = createContainer(overrides: [
     cashuWalletProvider.overrideWith((ref) => Stream.value(status)),
@@ -61,7 +72,7 @@ Future<void> _pump(
       container: container,
       child: MaterialApp(
         theme: buildDarkTheme(),
-        locale: const Locale('en'),
+        locale: locale,
         localizationsDelegates: const [
           AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
@@ -87,6 +98,40 @@ void main() {
       expect(find.text('1,234 Satoshis'), findsOneWidget);
       expect(find.text('Mint: https://mint.example.com'), findsOneWidget);
       expect(find.text('Not connected to a mint'), findsNothing);
+    });
+
+    testWidgets('the balance groups digits the way the reader\'s locale does',
+        (tester) async {
+      // Arrange / Act — German groups with a period. A hard-coded comma turns
+      // 1.234.567 sats into a number a German reader parses as 1.234567.
+      await _pump(
+        tester,
+        status: _status(connected: true, balance: 1234567),
+        locale: const Locale('de'),
+      );
+
+      // Assert
+      expect(find.textContaining('1.234.567'), findsOneWidget);
+      expect(find.textContaining('1,234,567'), findsNothing);
+    });
+
+    testWidgets('a balance beyond double precision is shown exactly',
+        (tester) async {
+      // Arrange — 2^53 + 1, the first integer a double cannot represent.
+      // Formatting through `num` would render this rounded, and a bearer-money
+      // balance must never be approximate.
+      final status = CashuWalletStatus(
+        connected: true,
+        mintUrl: 'https://mint.example.com',
+        balanceSats: BigInt.parse('9007199254740993'),
+        missingCapabilities: const [],
+      );
+
+      // Act
+      await _pump(tester, status: status);
+
+      // Assert
+      expect(find.textContaining('9,007,199,254,740,993'), findsOneWidget);
     });
 
     testWidgets('a wallet that could not bind says so', (tester) async {
@@ -141,6 +186,118 @@ void main() {
       await tester.tap(find.text('Show it again'));
       await tester.pumpAndSettle();
       expect(find.text('cashuBtesttoken'), findsOneWidget);
+    });
+
+    testWidgets('an amount above the balance is refused in the dialog',
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 100));
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '101');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('You only have 100 sats.'), findsOneWidget);
+      // Still open: the user corrects the amount instead of starting over.
+      expect(find.text('Confirm'), findsOneWidget);
+      expect(find.text('cashuBtesttoken'), findsNothing);
+    });
+
+    testWidgets('neither a stray tap nor back closes the token dialog',
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 100));
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '10');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      // Outside the dialog, on the barrier.
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(find.text('cashuBtesttoken'), findsOneWidget);
+
+      // The system back gesture / button.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('cashuBtesttoken'), findsOneWidget);
+    });
+
+    testWidgets("I've sent it clears the exported-token reminder",
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 100));
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '10');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(find.text('Show it again'), findsOneWidget);
+
+      await tester.tap(find.text("I've sent it"));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Show it again'), findsNothing);
+      expect(find.text("I've sent it"), findsNothing);
+    });
+
+    testWidgets('a token too large for a QR is shown as text, never as an error',
+        (tester) async {
+      // A cdk token from many small proofs runs to tens of KB; a QR holds
+      // ~2.9 KB. The dialog must degrade to the copyable text, not paint
+      // qr_flutter's exception on the one dialog showing the user's money.
+      final huge = 'cashuB${'A' * 4096}';
+      await _pump(
+        tester,
+        status: _status(connected: true, balance: 100),
+        controller: _FakeController(token: huge),
+      );
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '10');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('This token is too large for a QR code. Copy it instead.'),
+        findsOneWidget,
+      );
+      expect(find.text(huge), findsOneWidget);
+      expect(find.textContaining('QrInputTooLong'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a send that could not confirm its proofs back says so',
+        (tester) async {
+      // "Try again" is the wrong advice here: the wallet must sync first.
+      // The marker is one main grew after this screen was written, so it
+      // pins that the mapper kept up.
+      await _pump(
+        tester,
+        status: _status(connected: true, balance: 100),
+        controller: const _FakeController(
+          createTokenError: 'CashuSendUnresolved: revoke failed',
+        ),
+      );
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '10');
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Sync with the mint before trying again'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('CashuSendUnresolved'), findsNothing);
+      // Nothing was exported, so there is no token to keep retrievable.
+      expect(find.text('Show it again'), findsNothing);
     });
 
     testWidgets('sending is disabled with an empty wallet', (tester) async {
@@ -206,6 +363,34 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('SomeFutureMarker'), findsNothing);
+    });
+
+    testWidgets('a marker is found inside the exception the bridge really throws',
+        (tester) async {
+      // Arrange — the other marker tests pass a bare String, whose toString()
+      // starts with the marker. Production never does: the bridge throws an
+      // `AnyhowException`, and its toString() wraps the message, so the marker
+      // sits after `AnyhowException(` rather than at the start.
+      //
+      // This pins that shape. Narrowing the lookup to a leading token — a
+      // tempting "fix" for the tail-matching the mapper does — would send every
+      // marker to the generic message in the app while the String-based tests
+      // above stayed green.
+      await _pump(
+        tester,
+        status: _status(connected: false, balance: 0),
+        controller: _FakeController(
+          connectError: AnyhowException('CashuNotEnabled: whatever Rust appended'),
+        ),
+      );
+      await tester.pump();
+
+      // Assert
+      expect(
+        find.text('This Mostro node does not settle trades with Cashu.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('AnyhowException'), findsNothing);
     });
   });
 }

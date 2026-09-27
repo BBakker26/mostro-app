@@ -38,7 +38,7 @@ Every change must respect the layering:
 
 Changes that affect Nostr event kinds, tags, or the transport layer are **protocol changes** and deserve extra care:
 
-- **Transport v2** — daemon messages (new-order, take, release, cancel, dispute, rate, invoice, restore) use NIP-44 / signed Kind 14; peer and dispute chat use NIP-59 gift wrap (Kind 1059). Keep changes to these paths focused and well-described.
+- **Transport v2** — daemon messages (new-order, take, release, cancel, dispute, rate, invoice, restore) use NIP-44 / signed Kind 14. Peer and dispute chat use the **chat envelope**: a Kind 14 outer event signed with `K_sign`, carrying a NIP-44-encrypted inner Kind 1 signed by the trade key (`specs/004-mostro-p2p-client/contracts/messages.md`). This client speaks protocol v2 only — nothing reads or writes Kind 1059, in either direction, since #246. Keep changes to these paths focused and well-described.
 - **Wire compatibility** — wire status strings are kebab-case (e.g. `waiting-buyer-invoice`, `fiat-sent`). Any change to event formats must state its impact on external consumers (the Mostro daemon, other clients, relays).
 - **Keep the spec in sync** — specs under `specs/` and `.specify/` are a living artifact. Update the matching spec/contract as part of any behavior or contract change.
 
@@ -62,18 +62,60 @@ Run the full verify before committing and before requesting review:
 
 - **Rust:** `cd rust && cargo fmt && cargo clippy && cargo test` — keep the tree `clippy`-clean.
 - **Dart:** `dart format .`, then `flutter analyze && flutter test` — keep it analyzer-warning-free.
-- **Bindings:** run `./scripts/frb-generate.sh` after any change to `rust/src/api/`. It refuses to generate when your local `flutter_rust_bridge_codegen` does not match the version pinned in `pubspec.yaml`, because a mismatched CLI produces bindings that fail to compile with an error that never mentions versions. The generated `lib/src/rust/` is gitignored and produced on the fly (locally and in CI) — do not commit it.
-- **Localization:** run `flutter gen-l10n` after editing `lib/l10n/*.arb`.
+- **Bindings:** run `./scripts/frb-generate.sh` after any change to `rust/src/api/`. It refuses to generate when your local `flutter_rust_bridge_codegen` does not match the version pinned in `pubspec.yaml`, because a mismatched CLI produces bindings that fail to compile with an error that never mentions versions. **Commit** what it generates, in the same commit as the `api/` change. See [Generated code](#generated-code).
+- **Localization:** run `flutter gen-l10n` after editing `lib/l10n/*.arb`, and commit the regenerated `lib/l10n/app_localizations*.dart`.
 
-### Git hooks (opt-in)
+The repository ships **no git hooks**. These checks run in CI on every pull request. Run them locally before you push.
 
-`.githooks/pre-commit` runs the Rust and Dart checks above, plus the flutter_rust_bridge pin check, before each commit. It is **not active by default** — Git only picks it up once you point `core.hooksPath` at it:
+Clones that ran the old `scripts/setup-hooks.sh`, directly or through `frb-generate.sh`, still have its copies in `.git/hooks/`. Git does not remove those copies when the scripts leave the repository, so they keep regenerating code after pulls and running the old pre-commit checks. Remove them once per clone. This only deletes files that carry the installer's marker, so any hooks of your own stay:
 
 ```bash
-git config core.hooksPath .githooks
+hooks="$(git rev-parse --git-common-dir)/hooks"
+grep -l 'installed by scripts/setup-hooks.sh' "$hooks"/* 2>/dev/null | xargs -r rm --
 ```
 
-Without this, the checks above are yours to run manually.
+### Generated code
+
+The flutter_rust_bridge bindings (`lib/src/rust/`, `rust/src/frb_generated.rs`) and the localizations (`lib/l10n/app_localizations*.dart`) are **committed**. A fresh clone, a `git pull` or a branch switch builds as-is, with nothing to regenerate first.
+
+One rule keeps this safe: **generated files only change by regenerating them, in the same commit as the source change that caused it.** Never edit them by hand.
+
+| You changed | Run | Commit together |
+|---|---|---|
+| `rust/src/api/`, or the flutter_rust_bridge pin | `./scripts/frb-generate.sh` | the source + `lib/src/rust/` + `rust/src/frb_generated.rs` |
+| `lib/l10n/*.arb` | `flutter gen-l10n` | the `.arb` + `lib/l10n/app_localizations*.dart` |
+
+CI enforces this rule. The Flutter job regenerates both from the pull request's sources and fails with **"Generated code is out of date"** when the result differs from what the PR commits. To fix it, run both commands on your branch and commit the result. The files are marked `linguist-generated` in `.gitattributes`, so GitHub collapses them in PR diffs.
+
+#### Resolving conflicts in generated files
+
+Two branches that both touch `rust/src/api/` or an `.arb` also conflict in the generated files. **Never resolve those conflicts by hand.** A hand-merged file is output no generator produced, and it can compile while being wrong. Resolve the sources, then regenerate:
+
+1. **Resolve the sources first**: `rust/src/api/`, `lib/l10n/*.arb`, `pubspec.yaml`. Then `git add` them.
+2. **Take either side of the generated files.** They are about to be overwritten, so it does not matter which side:
+
+   ```bash
+   git checkout --theirs -- lib/src/rust rust/src/frb_generated.rs lib/l10n/app_localizations*.dart
+   ```
+
+   During a rebase, `--ours` and `--theirs` are swapped compared with a merge. That doesn't matter here either.
+3. **Regenerate from the resolved sources:**
+
+   ```bash
+   ./scripts/frb-generate.sh
+   flutter gen-l10n
+   ```
+
+4. **Stage and continue:**
+
+   ```bash
+   git add lib/src/rust rust/src/frb_generated.rs lib/l10n
+   git rebase --continue   # or `git commit` when merging
+   ```
+
+5. **Check the result** with `flutter analyze` before pushing. CI runs the same drift check.
+
+If a commit in the middle of a rebase can't be regenerated (for example, its Rust does not compile yet), take either side, finish the rebase, and regenerate once at the tip. Commit that as `chore: regenerate generated code`. CI checks the tip of the branch.
 
 ### Configure Git user name and email metadata
 

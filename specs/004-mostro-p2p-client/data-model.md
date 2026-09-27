@@ -46,17 +46,21 @@ A buy or sell offer on the Mostro network.
 | payment_method | String | Fiat payment method description |
 | premium | f64 | Price premium/discount percentage |
 | creator_pubkey | String | Public key of order creator |
-| created_at | Timestamp | When order was created |
+| created_at | Timestamp | When order was created: the Kind 38383 `published_at` tag, else the legacy `created_at` tag, else the event's `created_at`; a tag value is capped at the event's `created_at` |
 | expires_at | Timestamp? | Expiration time (null if no expiry) |
 | nostr_event_id | String? | Kind 38383 event ID on relay |
 | is_mine | bool | Whether current user created this order |
 | cached_at | Timestamp | When this order was last fetched/updated locally |
+| rating | f64 | Maker reputation from the Kind 38383 `rating` tag (`total_rating`, 0–5; 0.0 = no reputation: full privacy (`none`), missing tag, or malformed/invalid data) |
+| total_reviews | u32 | Number of reviews behind `rating` (`total_reviews`) |
+| days_active | u32 | Days the maker has been active on the node (`days`) |
 
 **Validation rules**:
 - `fiat_code` MUST be a valid ISO 4217 code.
 - Either `fiat_amount` OR both `fiat_amount_min` and `fiat_amount_max` MUST be provided, but NOT both. If `fiat_amount` is present, `fiat_amount_min` and `fiat_amount_max` MUST be absent; if `fiat_amount_min`/`fiat_amount_max` are present, `fiat_amount` MUST be absent.
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`.
 - `premium` is a signed float (negative = discount).
+- `rating` MUST be within 0–5. Each reputation field (`rating`, `total_reviews`, `days_active`) is validated independently: an out-of-range, non-integer, or malformed value degrades that field alone to 0, and the order is never rejected because of its `rating` tag.
 
 **State machine** (15 mostro-core states):
 ```text
@@ -83,6 +87,12 @@ Pending
 SettledHoldInvoice, Success, Canceled, CooperativelyCanceled, Dispute, InProgress,
 SettledByAdmin, CanceledByAdmin, CompletedByAdmin, Expired.
 
+This is the protocol state machine, which only daemon messages expose in full.
+The public Kind 38383 event carries NIP-69's four-bucket view instead, so an
+`InProgress` reaching this client stands for "taken, real state unknown" rather
+than for the admin-took-dispute transition above. See "Public status vs. trade
+status" in `contracts/orders.md`.
+
 ---
 
 ### Trade
@@ -102,10 +112,18 @@ trade at a time (v2.0 scope constraint).
 | trade_key_index | u32 | BIP-32 key index for this trade |
 | shared_key | String? | ECDH-derived key for P2P chat (hex) |
 | cooperative_cancel_state | Enum? | `RequestedByMe`, `RequestedByPeer`, `Accepted`, null |
-| timeout_at | Timestamp? | When current state times out |
+| timeout_at | Timestamp? | When current state times out (set on take: `now + 900`; used by the stale-state sweep as its age gate) |
 | started_at | Timestamp | When trade began |
 | completed_at | Timestamp? | When trade finished (null if active) |
 | outcome | Enum? | `Success`, `Canceled`, `Expired`, `DisputeWon`, `DisputeLost` |
+| rated_at | Timestamp? | When the local user rated the counterparty; durable marker written by `db.mark_trade_rated` after `submit_rating` publishes (issue #339). "Did I rate this trade" is local knowledge nothing on the wire can rebuild, so the in-memory `RATING_STORE` rehydrates from this on restart — the store stays the cache, this is authoritative on load. The score itself is not persisted (the rated UI shows only a label) |
+| bond | BondInfo? | Anti-abuse bond the node required for this trade (`docs/ANTI_ABUSE_BOND.md` §7.1): `role` (`Maker`/`Taker`), `amount_sats`, `invoice` (the bond bolt11, `None` after a fresh-device restore), `state` (`Requested`/`Locked`/`Released`/`Slashed`), `requested_at`, `expires_at` (decoded from the bolt11), `locked_at`. Null on nodes without bonds and on rows written before the field |
+
+Trade rows are history: they are updated in place (`status`,
+`hold_invoice`, `amount_sats` — see `update_trade_fields`) but never
+deleted, with one exception: a trade canceled by the daemon while still
+in pending/waiting states (never active) is **deleted** rather than kept
+(see `contracts/orders.md` — Daemon cancellation semantics).
 
 **Buyer progress steps**: `OrderTaken`, `PayInvoice`, `PaymentLocked`,
 `FiatSent`, `AwaitingRelease`, `Complete`
@@ -114,6 +132,12 @@ trade at a time (v2.0 scope constraint).
 `PaymentLocked`, `AwaitingFiat`, `Complete`
 
 **Special step**: `Disputed` (overlays any step, pauses normal flow)
+
+**Bond windows**: a trade whose `order.status` is `WaitingTakerBond` or
+`WaitingMakerBond` has not started its trade flow; the bond is outstanding.
+Neither status is ever on the public book. An unpaid window is closed locally
+once `bond.expires_at` passes; a maker's also closes at the order's own
+`expires_at`, whichever comes first. A bond already `Locked` never expires.
 
 **Validation rules**:
 - `counterparty_pubkey` MUST differ from current user's public key.
@@ -138,7 +162,7 @@ disputes. Persisted locally after decryption.
 | is_read | bool | Whether user has seen this message |
 | created_at | Timestamp | When message was sent |
 | received_at | Timestamp | When message was received locally |
-| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 from daemon / Kind 1059 from peer chat) |
+| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 — from the daemon, or a peer-chat envelope) |
 
 **Validation rules**:
 - `content` MUST not be empty.
@@ -175,7 +199,7 @@ An exception flow on an active trade.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
+| id | UUID | Primary key — the daemon's dispute id when we opened it (see below) |
 | trade_id | UUID | FK → Trade |
 | initiated_by | Enum | `Me` or `Counterparty` |
 | reason | String? | Optional reason text |
@@ -188,6 +212,49 @@ An exception flow on an active trade.
 - A dispute can only be opened on a trade with `current_step` between
   `PaymentLocked` and `AwaitingRelease`/`AwaitingFiat`.
 - Only one open dispute per trade.
+
+**On `id`**: for a dispute we opened, this is the UUID the daemon assigned and
+returned in its acceptance — the same id its Kind 38386 dispute event and the
+solver use. A record created for a **peer-opened** dispute (built from
+`admin-took-dispute`, which is the first the counterparty hears of it) still
+gets a locally minted UUID, so the two sides currently know the same dispute
+under different ids.
+
+---
+
+### BondClaim
+
+The user's share of a counterparty's slashed anti-abuse bond, claimable with a
+Lightning invoice (`docs/ANTI_ABUSE_BOND.md` §6.4, `contracts/bond.md`).
+Created by the daemon's `add-bond-invoice`. **Independent of Trade**: it has no
+foreign key, and it outlives the trade row, which may be completed, canceled or
+wiped by the time the claim arrives.
+
+Stored in `bond_claims` (SQLite table, IndexedDB store), keyed
+`<node_pubkey>:<order_id>`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| order_id | UUID | The order whose counterparty's bond was slashed |
+| node_pubkey | String | The issuing node, and the target of the submission even after a node switch |
+| trade_index | u32? | Key index the request was addressed to (the slashed attempt's); null on rows stored before it was recorded |
+| amount_sats | u64 | The share on offer; the invoice must be for exactly this |
+| slashed_at | Timestamp | When the daemon slashed the bond |
+| deadline_at | Timestamp | `slashed_at` + the node's claim window (default 15 days), frozen on first receipt |
+| phase | Enum | `Pending`, `Submitted`, `Acknowledged`, `Completed`, `Expired` |
+| submitted_invoice | String? | The bolt11 sent |
+| fiat_code | String | Display only |
+| fiat_amount | f64? | Display only |
+| payment_method | String | Display only |
+| updated_at | Timestamp | Last change; list order |
+
+**Validation rules**:
+- A cadence retry of `add-bond-invoice` never re-arms a `Submitted` claim; a
+  re-prompt after `Acknowledged` does.
+- `Completed` is terminal. `Expired` is terminal once `deadline_at` has
+  passed; a re-prompt inside the frozen deadline reopens it as `Pending`.
+- A request with a different `slashed_at` for the same (node, order) replaces
+  the claim, with a deadline computed afresh.
 
 ---
 
@@ -205,7 +272,13 @@ User preferences stored locally.
 `pin_enabled` (bool), `biometric_enabled` (bool),
 `default_fiat_currency` (ISO code), `notification_enabled` (bool),
 `privacy_mode` (bool — global toggle, applies to future trades),
-`logging_enabled` (bool — diagnostic logging, runtime-only: not persisted to storage; startup code unconditionally sets this to `false` on process start regardless of any prior value).
+`logging_enabled` (bool — verbose diagnostic logging, runtime-only in the Rust
+store: the Flutter layer persists it and re-applies it on launch, so the user's
+choice survives a restart), `bond_claim_retained_nodes` (JSON map of node
+pubkey → unix seconds: nodes the user switched away from, kept on the kind-14
+filter until then so a claim they issue still arrives), `push_enabled`,
+`push_token`, `push_platform`, `push_registrations` and `push_node_refusals`
+(push registration state, `contracts/push.md`).
 
 ---
 
@@ -216,7 +289,7 @@ Outgoing messages queued when offline.
 | Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | Primary key |
-| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 for daemon actions; Kind 1059 gift wrap for peer chat) |
+| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 throughout: daemon actions, and the chat envelope for peer chat) |
 | target_relays | String | JSON array of relay URLs to publish to |
 | created_at | Timestamp | When queued |
 | retry_count | u32 | Number of send attempts |
@@ -252,27 +325,33 @@ A Nostr Wallet Connect wallet connection for automatic invoice payment.
 
 ### FileAttachment
 
-An encrypted file sent or received in trade chat.
+An encrypted file sent or received in trade chat (#589). Stored inside its
+`Message` (`AttachmentInfo`), read from v1's JSON message; nothing about the
+key is stored — it is re-derived (raw ECDH with the counterpart) when needed.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
-| message_id | UUID | FK → Message |
 | file_type | Enum | `Image`, `Document`, `Video` |
-| mime_type | String | MIME type (e.g., "image/jpeg") |
-| file_name | String | Original file name |
-| file_size | u64 | Size in bytes (max 25MB) |
-| blossom_url | String | URL on Blossom server |
-| encryption_nonce | Bytes | 12-byte nonce for ChaCha20-Poly1305 |
-| encryption_key_encrypted | Bytes | Symmetric key encrypted at rest (wrapped by the device master key; plaintext key is ephemeral and held only in memory during encrypt/decrypt) |
-| key_wrapping_id | String | Identifier of the wrapping key used to encrypt `encryption_key_encrypted` |
+| mime_type | String | As declared by the sender (a label; the bytes are sniffed after decrypting) |
+| file_name | String | Sanitized: last path component, no control characters |
+| file_size | u64 | Size before encryption, in bytes (max 25MB) |
+| blossom_url | String | `https://…/<sha256>` |
+| sha256 | String | Hex SHA-256 of the encrypted blob, from the URL |
+| encrypted_size | u64 | `file_size` + 28 (nonce + tag) |
+| width / height | u32? | Pixel size, images only |
 | download_status | Enum | `Pending`, `Downloading`, `Downloaded`, `Failed` |
-| local_path | String? | Path to decrypted file on device (null if not downloaded) |
-| created_at | Timestamp | When attachment was created |
+
+The encrypted blob itself is cached in `attachment_blobs` (keyed by
+`sha256`, still ciphertext, 300 MB cap, oldest evicted first,
+wiped with the identity). On the web it is the IndexedDB store of the same
+name, with an `attachment_blob_index` store of `{sha256, size, created_at}`
+entries the eviction reads instead of the blobs; the cap there is 100 MB,
+since the origin's quota is shared with the rest of the app's data.
 
 **Validation rules**:
 - `file_size` MUST not exceed 26,214,400 bytes (25MB).
-- `file_type` determined from `mime_type`.
+- Only `https://` URLs naming a 64-hex blob hash are accepted; anything else
+  keeps the message as text.
 - Images auto-download; documents and videos are download-on-demand.
 
 ---
@@ -317,4 +396,5 @@ NwcWallet (0..1) ── independent (one active wallet)
 Relay (*) ── independent, no FK relationships
 Settings (*) ── independent key-value store
 MessageQueue (*) ── independent outbox
+BondClaim (*) ── independent of Trade, keyed by (node_pubkey, order_id)
 ```

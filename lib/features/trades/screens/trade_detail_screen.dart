@@ -2,31 +2,59 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mostro/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
-import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
-import 'package:mostro/src/rust/api/orders.dart' as orders_api;
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
+import 'package:mostro/core/daemon_errors.dart';
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
+import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/order/widgets/invoice_clock.dart';
+import 'package:mostro/features/rate/providers/rating_providers.dart';
+import 'package:mostro/features/trades/models/trade_status.dart';
+import 'package:mostro/features/trades/models/trade_view.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
-import 'package:mostro/features/trades/widgets/release_confirmation_dialog.dart';
+import 'package:mostro/features/trades/widgets/dispute_confirmation_dialog.dart';
+import 'package:mostro/features/trades/widgets/release_confirmation_sheet.dart';
+import 'package:mostro/features/trades/widgets/trade_action_bar.dart';
+import 'package:mostro/features/trades/widgets/trade_chat_card.dart';
+import 'package:mostro/features/trades/widgets/trade_completed_card.dart';
+import 'package:mostro/features/trades/widgets/trade_countdown.dart';
+import 'package:mostro/features/trades/widgets/trade_step_block.dart';
+import 'package:mostro/features/trades/widgets/trade_timeline.dart';
+import 'package:mostro/features/order/models/bond_rules.dart';
+import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
+import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
+import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
+import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
+import 'package:mostro/shared/widgets/counterpart_reputation_row.dart';
 import 'package:mostro/shared/widgets/mostro_reactive_button.dart';
-import 'package:mostro/shared/widgets/nym_avatar.dart';
+import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
+import 'package:mostro/src/rust/api/orders.dart' as orders_api;
+import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
+import 'package:mostro/src/rust/api/types.dart'
+    show CooperativeCancelState, TradeInfo;
 
-/// Trade detail screen — Route `/trade_detail/:orderId`.
+export 'package:mostro/features/trades/models/trade_status.dart';
+
+/// Trade screen — Route `/trade_detail/:orderId`. Handoff 8a–8e.
 ///
-/// One explicit next action per state-machine state: a single primary CTA,
-/// secondary/destructive actions collapsed behind the app-bar overflow menu,
-/// a persistent chat chip, a contextual timer (what expires + consequence),
-/// and a step timeline of the trade.
+/// One screen with five states, not five screens: app bar → chat (once the
+/// trade is active) → step block → reputation (while the fiat leg is open) →
+/// timeline → id and date, over a pinned action bar. When the user has
+/// something to do there is one lime button; when they only wait, none.
+/// [TradeView] holds the status → layout mapping.
 class TradeDetailScreen extends ConsumerStatefulWidget {
   const TradeDetailScreen({super.key, required this.orderId});
 
@@ -39,68 +67,50 @@ class TradeDetailScreen extends ConsumerStatefulWidget {
 /// Default trade countdown duration (matches Mostro daemon default).
 const _kCountdownSeconds = 900; // 15 minutes
 
-/// Type-safe trade status for the detail screen.
-/// Will map to/from Rust bridge TradeStep when wired.
-enum TradeStatus {
-  /// Status not yet resolved (initial loading state — no actions shown).
-  loading('Loading'),
-  /// Order published but not yet taken by a counterpart.
-  pending('Pending'),
-  /// Buyer must submit Lightning invoice (waitingBuyerInvoice).
-  waitingInvoice('Waiting Invoice'),
-  /// Seller must pay hold invoice (waitingPayment).
-  waitingPayment('Waiting Payment'),
-  active('Active'),
-  fiatSent('Fiat Sent'),
-  completed('Completed'),
-  cancelled('Cancelled'),
-  disputed('Disputed'),
-  /// Trade completed; counterpart rating prompt shown.
-  /// Maps to `Action.rate` / `Action.rateUser` from the Rust bridge.
-  pendingRating('Rate'),
-  /// Rating has been submitted (or skipped).
-  /// Maps to `Action.rateReceived` — no further actions shown.
-  rated('Rated');
-
-  const TradeStatus(this.label);
-  final String label;
-}
-
-/// Localized display label for the trade status pill.
-extension TradeStatusL10n on TradeStatus {
-  String localizedLabel(AppLocalizations l10n) => switch (this) {
-        TradeStatus.loading => l10n.tradeStatusLoading,
-        TradeStatus.pending => l10n.tradeFilterPending,
-        TradeStatus.waitingInvoice => l10n.tradeFilterWaitingInvoice,
-        TradeStatus.waitingPayment => l10n.tradeFilterWaitingPayment,
-        TradeStatus.active => l10n.tradeStatusActive,
-        TradeStatus.fiatSent => l10n.tradeStatusFiatSent,
-        TradeStatus.completed => l10n.tradeStatusCompleted,
-        TradeStatus.cancelled => l10n.tradeStatusCancelled,
-        TradeStatus.disputed => l10n.tradeStatusDisputed,
-        TradeStatus.pendingRating => l10n.tradeStatusRate,
-        TradeStatus.rated => l10n.tradeStatusRated,
-      };
-}
-
 /// Overflow-menu actions (currently just sharing the order).
 enum _OverflowAction { shareOrder }
 
-class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
-  Timer? _countdownTimer;
-  Duration _remaining = const Duration(seconds: _kCountdownSeconds);
-  int _totalCountdownSeconds = _kCountdownSeconds;
+class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
+    with InvoiceClock {
+  Timer? _tick;
+
+  /// Drives only the countdown. A notifier rather than screen state: it
+  /// ticks every second under an hour, and this build method lays out the
+  /// entire screen — chat, step, reputation, timeline, actions.
+  final ValueNotifier<Duration> _remaining = ValueNotifier(
+    const Duration(seconds: _kCountdownSeconds),
+  );
+
+  /// The window as measured when the screen loaded — the fallback for the
+  /// countdown bar when the node does not advertise its expiration.
+  Duration _loadedWindow = const Duration(seconds: _kCountdownSeconds);
+
+  /// Star picked on the completed card, 0 until the user taps one.
+  int _selectedRating = 0;
+
+  /// Generation of the latest `expiresAt` fetch: a status change starts a
+  /// new one, and a slower, older response must not overwrite it.
+  int _expiresAtRequest = 0;
 
   @override
   void initState() {
     super.initState();
+    // The waiting steps run on the daemon's own clock — the message that
+    // opened the step plus the node's window — which is what the invoice
+    // screens show. Everything else keeps the order's lifetime below.
+    ref.listenManual<AsyncValue<int?>>(
+      invoiceDeadlineProvider(widget.orderId),
+      (_, next) => trackInvoiceDeadline(next.valueOrNull),
+      fireImmediately: true,
+    );
     _loadExpiresAt();
-    _startCountdown();
+    _scheduleTick();
   }
 
   @override
   void dispose() {
-    _countdownTimer?.cancel();
+    _tick?.cancel();
+    _remaining.dispose();
     super.dispose();
   }
 
@@ -108,111 +118,250 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
   ///
   /// Falls back to the default [_kCountdownSeconds] when the field is null or
   /// the order is no longer available.
+  ///
+  /// Not for the waiting steps: `expires_at` carries the 38383 event's NIP-40
+  /// retention, which the daemon sets ~14 days out once the order is taken —
+  /// never the step's deadline. Those read [invoiceDeadlineProvider] instead.
+  ///
+  /// The step is checked twice because the first check usually cannot know:
+  /// `initState` calls this before `tradeStatusProvider` has emitted, so the
+  /// status reads `null` there and a waiting step falls straight through. The
+  /// load is not deferred until it resolves, because that stream drops null
+  /// statuses entirely — an order the user only views from the book never
+  /// emits one, and its countdown would never load. So the fetch goes ahead
+  /// and the result is refused afterwards, once the status is usually known.
   Future<void> _loadExpiresAt() async {
+    if (_isWaitingStep(
+      ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+    )) {
+      return;
+    }
+    final request = ++_expiresAtRequest;
     try {
       final info = await orders_api.getOrder(orderId: widget.orderId);
+      if (!mounted ||
+          request != _expiresAtRequest ||
+          _isWaitingStep(
+            ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+          )) {
+        return;
+      }
       final raw = info?.expiresAt;
-      if (raw == null || !mounted) return;
+      if (raw == null) return;
       final expiresAtSeconds = platformInt64ToInt(raw);
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final diff = expiresAtSeconds - now;
       if (!mounted) return;
       setState(() {
-        _totalCountdownSeconds = diff > 0 ? diff : _kCountdownSeconds;
-        _remaining = diff > 0 ? Duration(seconds: diff) : Duration.zero;
+        _loadedWindow = Duration(seconds: diff > 0 ? diff : _kCountdownSeconds);
       });
-    } catch (_) {
-      // Keep the default remaining time on error.
+      _remaining.value = diff > 0 ? Duration(seconds: diff) : Duration.zero;
+      _scheduleTick();
+    } catch (e, st) {
+      // Keep the default remaining time; the clock is not worth a dialog.
+      debugPrint('[TradeDetailScreen] loadExpiresAt error: $e\n$st');
     }
   }
 
-  void _startCountdown() {
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+  /// Repaints every second under an hour and once a minute above it: the
+  /// clock shows no seconds at that scale, so ticking faster decides nothing.
+  void _scheduleTick() {
+    _tick?.cancel();
+    final remaining = _remaining.value;
+    if (remaining <= Duration.zero) return;
+    final step = nextCountdownTick(remaining);
+    _tick = Timer(step, () {
       if (!mounted) return;
-      setState(() {
-        final next = _remaining - const Duration(seconds: 1);
-        if (next.inSeconds <= 0) {
-          _countdownTimer?.cancel();
-          _remaining = Duration.zero;
-        } else {
-          _remaining = next;
-        }
-      });
+      final next = _remaining.value - step;
+      _remaining.value = next <= Duration.zero ? Duration.zero : next;
+      _scheduleTick();
     });
   }
 
-  String _formatDate(DateTime dt) =>
-      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
-      '${dt.day.toString().padLeft(2, '0')} '
-      '${dt.hour.toString().padLeft(2, '0')}:'
-      '${dt.minute.toString().padLeft(2, '0')}';
+  // ── Actions ──────────────────────────────────────────────────────────────
 
-  static TradeStatus _mapOrderStatus(OrderStatus s) => switch (s) {
-    OrderStatus.pending => TradeStatus.pending,
-    OrderStatus.waitingBuyerInvoice => TradeStatus.waitingInvoice,
-    OrderStatus.waitingPayment => TradeStatus.waitingPayment,
-    OrderStatus.active || OrderStatus.inProgress => TradeStatus.active,
-    OrderStatus.fiatSent => TradeStatus.fiatSent,
-    OrderStatus.settledHoldInvoice ||
-    OrderStatus.success ||
-    OrderStatus.completedByAdmin ||
-    OrderStatus.settledByAdmin => TradeStatus.pendingRating,
-    OrderStatus.canceled ||
-    OrderStatus.canceledByAdmin ||
-    OrderStatus.cooperativelyCanceled ||
-    OrderStatus.expired => TradeStatus.cancelled,
-    OrderStatus.dispute => TradeStatus.disputed,
+  /// Set once the screen has decided to leave, so no rebuild in between
+  /// navigates twice.
+  bool _leaving = false;
+
+  /// Back to home with [message], at most once.
+  void _leave(String message) {
+    if (_leaving || !mounted) return;
+    _leaving = true;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+    context.go(AppRoute.home);
+  }
+
+  /// The wire-level status a screen status stands for, where a cancel
+  /// request can be open: only `active` and `fiatSent` map back one-to-one;
+  /// everything else is a status no request is open in.
+  static OrderStatus _orderStatus(TradeStatus status) => switch (status) {
+    TradeStatus.active => OrderStatus.active,
+    TradeStatus.fiatSent => OrderStatus.fiatSent,
+    _ => OrderStatus.pending,
   };
 
-  Future<void> _cancelOrder() async {
+  /// Whether a cancel in [status] ends the trade outright. Mirrors Rust's
+  /// `cancellation_wipes_history`: before `active` mostrod cancels at once —
+  /// a take hands the order back to the book, a maker's order dies — and the
+  /// trade row is wiped. From `active` on it is a cooperative request, and
+  /// `inProgress` may be either. Kept equal to the Rust predicate by
+  /// `the_trade_screen_copy_of_cancellation_wipes_history_matches`
+  /// (`rust/src/mostro/status.rs`), which reads this set from source: keep
+  /// the `=> const {…}.contains(status)` shape.
+  static bool _cancelEndsTrade(TradeStatus status) => const {
+    TradeStatus.pending,
+    TradeStatus.waitingInvoice,
+    TradeStatus.waitingPayment,
+    TradeStatus.waitingBond,
+  }.contains(status);
+
+  /// What a cancel in [status] does, as the confirmation dialog tells it.
+  /// Before `active` mostrod cancels at once; from `active` on it is a
+  /// cooperative request — or, when [peerAsked], the acceptance of the
+  /// counterparty's, which ends the trade; `inProgress` only says the order
+  /// was taken, so it may be either (#203).
+  static String _cancelDialogContent(
+    AppLocalizations l10n,
+    TradeStatus status, {
+    bool peerAsked = false,
+  }) {
+    if (_cancelEndsTrade(status)) {
+      return l10n.cancelTradeDialogContentNotStarted;
+    }
+    if (peerAsked && CancelRequestNotice.requestIsOpen(_orderStatus(status))) {
+      return l10n.cancelTradeDialogContentAccept;
+    }
+    if (status == TradeStatus.inProgress) {
+      return l10n.cancelTradeDialogContentMaybeStarted;
+    }
+    return l10n.cancelTradeDialogContent;
+  }
+
+  /// Who, if anyone, asked to cancel this trade cooperatively — from the
+  /// trade row, which Rust keeps from the daemon's cancel-request messages
+  /// and from this side's own cancel.
+  CooperativeCancelState? _cancelRequest() =>
+      ref
+          .watch(tradeInfoProvider(widget.orderId))
+          .valueOrNull
+          ?.cooperativeCancelState;
+
+  /// The trade's status now, from the live provider; [fallback] while it has
+  /// no value yet. The status a callback was built with goes stale across an
+  /// await: the seller's payment can land while the cancel dialog is open.
+  TradeStatus _liveStatus(TradeStatus fallback) {
+    final live = ref.read(tradeStatusProvider(widget.orderId)).valueOrNull;
+    if (live == null) return fallback;
+    final trade = ref.read(tradeInfoProvider(widget.orderId)).valueOrNull;
+    return tradeStatusFromOrderStatus(_shown(live, trade));
+  }
+
+  /// What [live] shows for this trade once its [trade] row is read in
+  /// ([shownTradeStatus]); [live] itself while the row has not loaded, or
+  /// when there is none.
+  static OrderStatus _shown(OrderStatus live, TradeInfo? trade) =>
+      trade == null
+          ? live
+          : shownTradeStatus(
+            row: trade.order.status,
+            live: live,
+            isTake: !trade.order.isMine,
+          );
+
+  Future<void> _cancelOrder(TradeStatus status) async {
     final l10n = AppLocalizations.of(context);
-    final confirmed = await showDialog<bool>(
+    // A maker parked on their own deposit cannot cancel (the daemon refuses
+    // it, docs/ANTI_ABUSE_BOND.md §2.8): the way out is the local abandon
+    // the pay-bond screen offers, so send them there.
+    if (status == TradeStatus.waitingBond) {
+      final trade = ref.read(tradeInfoProvider(widget.orderId)).valueOrNull;
+      if (trade != null &&
+          bondIsMakers(trade.bond, isMine: trade.order.isMine)) {
+        await context.push(AppRoute.payBondPath(widget.orderId));
+        return;
+      }
+    }
+    final confirmed = await showMostroDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(l10n.cancelTradeDialogTitle),
-        content: Text(l10n.cancelTradeDialogContent),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(l10n.noButtonLabel),
+      builder:
+          (ctx) => MostroDialog(
+            title: l10n.cancelTradeDialogTitle,
+            // Follows the live status, so the copy the user confirms is the
+            // cancel the daemon will apply.
+            content: Consumer(
+              builder: (context, dialogRef, child) {
+                final live =
+                    dialogRef
+                        .watch(tradeStatusProvider(widget.orderId))
+                        .valueOrNull;
+                final trade =
+                    dialogRef
+                        .watch(tradeInfoProvider(widget.orderId))
+                        .valueOrNull;
+                final now =
+                    live == null
+                        ? status
+                        : tradeStatusFromOrderStatus(_shown(live, trade));
+                // The counterparty's request can land while the dialog is
+                // open, and it changes no status: the row watched above
+                // answers it.
+                final peerAsked =
+                    trade?.cooperativeCancelState ==
+                    CooperativeCancelState.requestedByPeer;
+                return Text(
+                  _cancelDialogContent(l10n, now, peerAsked: peerAsked),
+                  style: Theme.of(context).dialogTheme.contentTextStyle,
+                );
+              },
+            ),
+            secondary: ModalAction(
+              label: l10n.noButtonLabel,
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            primary: ModalAction(
+              label: l10n.yesCancelButtonLabel,
+              onPressed: () => Navigator.pop(ctx, true),
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.tradeCancelConfirm,
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(l10n.yesCancelButtonLabel),
-          ),
-        ],
-      ),
     );
     if (!mounted) return;
     if (confirmed != true) {
       throw const MostroActionAborted();
     }
     try {
-      await orders_api.cancelOrder(orderId: widget.orderId);
+      await ref.read(cancelOrderActionProvider)(widget.orderId);
       ref.invalidate(rawTradesProvider);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.cancelRequestSent)),
-      );
+      // Decided on the status the cancel was sent in, not the one the button
+      // was built with: a trade that went active meanwhile is a cooperative
+      // request and stays open.
+      if (_cancelEndsTrade(_liveStatus(status))) {
+        // Nothing is left to follow here: leave, as the invoice screens do.
+        _leave(l10n.cancelRequestSent);
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(l10n.cancelRequestSent)));
     } catch (e, st) {
       debugPrint('[TradeDetailScreen] cancelOrder error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.cancelRequestFailed)),
-      );
+      _showFailure(e, (l10n) => l10n.cancelRequestFailed);
       rethrow;
     }
   }
 
+  /// No confirmation: marking the fiat as sent is reversible by dispute.
   Future<void> _markFiatSent() async {
     try {
       await orders_api.sendFiatSent(orderId: widget.orderId);
     } catch (e, st) {
       debugPrint('[TradeDetailScreen] sendFiatSent error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).fiatSentFailed)),
-      );
+      _showFailure(e, (l10n) => l10n.fiatSentFailed);
       rethrow;
     }
   }
@@ -220,11 +369,20 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
   /// Open a dispute for this trade, upsert into the local dispute notifier,
   /// and navigate to the dispute chat.
   Future<void> _openDispute() async {
+    // #280: a dispute escalates to an admin and cannot be undone, so confirm
+    // first.
+    final confirmed = await showDisputeConfirmationDialog(context);
+    if (!mounted) return;
+    if (confirmed != true) {
+      throw const MostroActionAborted();
+    }
     try {
       final dispute = await disputes_api.openDispute(tradeId: widget.orderId);
       if (!mounted) return;
       final openedAt = platformInt64ToInt(dispute.openedAt);
-      ref.read(disputeNotifierProvider.notifier).upsert(
+      ref
+          .read(disputeNotifierProvider.notifier)
+          .upsert(
             DisputeItem(
               id: dispute.id,
               tradeId: dispute.tradeId,
@@ -237,333 +395,769 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       context.push(AppRoute.disputeDetailsPath(dispute.id));
     } catch (e, st) {
       debugPrint('[TradeDetailScreen] openDispute error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).openDisputeFailed)),
-      );
+      _showFailure(e, (l10n) => l10n.openDisputeFailed);
       rethrow;
     }
   }
 
-  /// Shared by the fiat-sent primary CTA and the disputed secondary row.
+  /// Shared by the fiat-sent primary action and the disputed secondary row.
+  /// The only action of this screen that asks for confirmation.
   Future<void> _releaseOrder() async {
-    final confirmed = await showReleaseConfirmationDialog(context);
+    final confirmed = await showReleaseConfirmationSheet(context);
     if (!mounted) return;
     if (confirmed != true) {
       throw const MostroActionAborted();
     }
     try {
-      await orders_api.releaseOrder(orderId: widget.orderId);
+      await ref.read(releaseOrderActionProvider)(widget.orderId);
       if (!mounted) return;
-      if (ref.read(privacyModeProvider)) {
-        context.go(AppRoute.home);
-      } else {
-        context.push(AppRoute.rateUserPath(widget.orderId));
-      }
+      // Publishing release confirms neither escrow settlement nor payout. Stay
+      // here until the live status reaches Success before offering rating.
+      ref.invalidate(tradeStatusProvider(widget.orderId));
     } catch (e, st) {
       debugPrint('[TradeDetailScreen] releaseOrder error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).releaseFailed)),
-      );
+      _showFailure(e, (l10n) => l10n.releaseFailed);
       rethrow;
     }
   }
 
-  String _getInstructionText(bool isBuyer, TradeStatus status) {
-    final l10n = AppLocalizations.of(context);
-    if (status == TradeStatus.waitingInvoice) {
-      return isBuyer
-          ? l10n.tradeWaitingInvoiceBuyerInstruction
-          : l10n.tradeWaitingInvoiceSellerInstruction;
+  /// Sends the star picked on the completed card. The screen buckets a
+  /// successful trade as "rate me" until a local rating exists, so the
+  /// lookup is refreshed once the daemon accepts it (#327).
+  Future<void> _submitRating() async {
+    try {
+      await reputation_api.submitRating(
+        tradeId: widget.orderId,
+        score: _selectedRating,
+      );
+      if (!mounted) return;
+      ref.invalidate(tradeRatingProvider(widget.orderId));
+    } catch (e, st) {
+      debugPrint('[TradeDetailScreen] submitRating error: $e\n$st');
+      _showFailure(e, (l10n) => l10n.ratingFailed);
+      rethrow;
     }
-    if (status == TradeStatus.waitingPayment) {
-      return isBuyer
-          ? l10n.tradeWaitingPaymentBuyerInstruction
-          : l10n.tradeWaitingPaymentSellerInstruction;
-    }
-    if (isBuyer) {
-      if (status == TradeStatus.active) {
-        return l10n.tradeInstructionActiveBuyer;
-      } else if (status == TradeStatus.fiatSent) {
-        return l10n.tradeInstructionFiatSentBuyer;
-      }
-    } else {
-      // Seller
-      if (status == TradeStatus.active) {
-        return l10n.tradeInstructionActiveSeller;
-      } else if (status == TradeStatus.fiatSent) {
-        return l10n.tradeInstructionFiatSentSeller;
-      }
-    }
-    if (status == TradeStatus.disputed) {
-      return l10n.tradeInstructionDisputed;
-    }
-    if (status == TradeStatus.pendingRating) {
-      return l10n.tradeInstructionPendingRating;
-    }
-    if (status == TradeStatus.rated) {
-      return l10n.tradeInstructionRated;
-    }
-    if (status == TradeStatus.pending) {
-      return l10n.tradeInstructionPending;
-    }
-    if (status == TradeStatus.cancelled) {
-      return l10n.tradeInstructionCancelled;
-    }
-    return l10n.tradeInstructionInProgress;
   }
 
-  String _formatDuration(Duration d) {
-    if (d.isNegative) return '00:00';
-    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
-    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
-    if (d.inHours > 0) return '${d.inHours}:$m:$s';
-    return '$m:$s';
+  void _showFailure(Object e, String Function(AppLocalizations) fallback) {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(localizedDaemonError(l10n, e, fallback: fallback(l10n))),
+      ),
+    );
   }
 
-  // ── State → copy mapping ─────────────────────────────────────────────────
-
-  /// Headline of the state strip — the one thing happening right now.
-  String _headline(bool isBuyer, TradeStatus status, OrderItem? order) {
-    final l10n = AppLocalizations.of(context);
-    final amount = order != null
-        ? '${order.displayAmount} ${order.fiatCode}'
-        : l10n.theAgreedAmount;
-    return switch (status) {
-      TradeStatus.pending => l10n.tradeHeadlinePending,
-      TradeStatus.waitingInvoice => isBuyer
-          ? l10n.tradeHeadlineWaitingInvoiceBuyer
-          : l10n.tradeHeadlineWaitingInvoiceSeller,
-      TradeStatus.waitingPayment => isBuyer
-          ? l10n.tradeHeadlineWaitingPaymentBuyer
-          : l10n.tradeHeadlineWaitingPaymentSeller,
-      TradeStatus.active => isBuyer
-          ? l10n.tradeHeadlineActiveBuyer(amount)
-          : l10n.tradeHeadlineActiveSeller(amount),
-      TradeStatus.fiatSent => isBuyer
-          ? l10n.tradeHeadlineFiatSentBuyer
-          : l10n.tradeHeadlineFiatSentSeller(amount),
-      TradeStatus.disputed => l10n.tradeHeadlineDisputed,
-      TradeStatus.pendingRating ||
-      TradeStatus.completed => l10n.tradeHeadlineComplete,
-      TradeStatus.rated => l10n.tradeHeadlineCompleteRated,
-      TradeStatus.cancelled => l10n.tradeHeadlineCancelled,
-      TradeStatus.loading => l10n.tradeHeadlineLoading,
-    };
+  void _viewDispute() {
+    final dispute = ref.read(disputeByTradeIdProvider(widget.orderId));
+    if (dispute == null) {
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.disputeNotFoundForOrder),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    context.push(AppRoute.disputeDetailsPath(dispute.id));
   }
 
-  /// Contextual timer copy: what expires and what happens then.
-  (String, String)? _timerContext(bool isBuyer, TradeStatus status) {
-    final l10n = AppLocalizations.of(context);
-    return switch (status) {
-      TradeStatus.pending => (
-          l10n.tradeTimerPendingLabel,
-          l10n.tradeTimerPendingConsequence,
-        ),
-      TradeStatus.waitingInvoice => (
-          isBuyer
-              ? l10n.tradeTimerWaitingInvoiceLabelBuyer
-              : l10n.tradeTimerWaitingInvoiceLabelSeller,
-          l10n.tradeTimerWaitingInvoiceConsequence,
-        ),
-      TradeStatus.waitingPayment => (
-          isBuyer
-              ? l10n.tradeTimerWaitingPaymentLabelBuyer
-              : l10n.tradeTimerWaitingPaymentLabelSeller,
-          l10n.tradeTimerWaitingInvoiceConsequence,
-        ),
-      TradeStatus.active => (
-          isBuyer
-              ? l10n.tradeTimerActiveLabelBuyer
-              : l10n.tradeTimerActiveLabelSeller,
-          l10n.tradeTimerActiveConsequence,
-        ),
-      TradeStatus.fiatSent => (
-          isBuyer
-              ? l10n.tradeTimerFiatSentLabelBuyer
-              : l10n.tradeTimerFiatSentLabelSeller,
-          l10n.tradeTimerFiatSentConsequence,
-        ),
-      _ => null,
-    };
+  void _close() => context.canPop() ? context.pop() : context.go(AppRoute.home);
+
+  void _copyId() {
+    Clipboard.setData(ClipboardData(text: widget.orderId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(AppLocalizations.of(context).orderIdCopied),
+        duration: const Duration(seconds: 1),
+      ),
+    );
   }
 
-  /// Status pill colors — (background, text).
-  (Color, Color) _statusPillColors(TradeStatus status) => switch (status) {
-        TradeStatus.pending => AppColors.statusPending,
-        TradeStatus.waitingInvoice ||
-        TradeStatus.waitingPayment => AppColors.statusWaiting,
-        TradeStatus.active => AppColors.statusActive,
-        TradeStatus.fiatSent => AppColors.statusSettled,
-        TradeStatus.pendingRating ||
-        TradeStatus.completed ||
-        TradeStatus.rated => AppColors.statusSuccess,
-        TradeStatus.disputed => AppColors.statusDispute,
-        _ => AppColors.statusInactive,
-      };
+  // ── Status resolution ────────────────────────────────────────────────────
 
-  /// 0-based index of the current step in [_steps]; equals the list length
-  /// once the trade is fully done.
-  int _currentStep(TradeStatus status) => switch (status) {
-        TradeStatus.pending => 0,
-        TradeStatus.waitingInvoice || TradeStatus.waitingPayment => 1,
-        TradeStatus.active => 2,
-        TradeStatus.fiatSent => 3,
-        TradeStatus.pendingRating || TradeStatus.completed => 4,
-        TradeStatus.rated => 5,
-        _ => -1, // disputed / cancelled / loading — timeline hidden
-      };
+  /// Role: the in-memory map (set by TakeOrderScreen in this session) takes
+  /// priority; the DB-backed provider covers trades reopened after a restart.
+  ///
+  /// Null while the DB lookup is unresolved or failed: the screen then holds
+  /// `loading` rather than guessing a role, because a guessed role offers
+  /// the other party's actions (a seller shown "add your invoice").
+  bool? _isBuyer() {
+    final roleMap = ref.watch(tradeRoleProvider);
+    if (roleMap.containsKey(widget.orderId)) return roleMap[widget.orderId]!;
+    final dbRole = ref.watch(tradeRoleFromDbProvider(widget.orderId));
+    if (dbRole.hasError) {
+      debugPrint(
+        '[TradeDetailScreen] trade role lookup failed: ${dbRole.error}',
+      );
+    }
+    return dbRole.valueOrNull;
+  }
 
-  /// Step labels. Lightning setup is one step because the invoice/hold-invoice
-  /// order depends on which side made the order.
-  List<String> _steps(bool isBuyer) {
-    final l10n = AppLocalizations.of(context);
-    return [
-      l10n.tradeStepOrderTaken,
-      isBuyer ? l10n.tradeStepInvoiceBuyer : l10n.tradeStepInvoiceSeller,
-      isBuyer ? l10n.tradeStepFiatBuyer : l10n.tradeStepFiatSeller,
-      isBuyer ? l10n.tradeStepReleaseBuyer : l10n.tradeStepReleaseSeller,
-      l10n.tradeStepRate,
-    ];
+  /// [TradeStatus.loading] until the live status resolves, so the screen
+  /// never flashes an action that the next frame would take away.
+  ///
+  /// The protocol has no "rated" order status — a successful trade stays
+  /// successful once the rating is sent — so `rated` is only reachable by
+  /// overlaying the local rating (#327). While that first lookup is
+  /// unresolved the screen holds `loading` for the same reason; a refresh
+  /// keeps the previous value, so a fresh rating never bounces through it.
+  TradeStatus _status({required bool isBuyer}) {
+    final live = ref.watch(tradeStatusProvider(widget.orderId));
+    if (live.hasError && !live.hasValue) {
+      debugPrint('[TradeDetailScreen] trade status failed: ${live.error}');
+    }
+    if (!live.hasValue) return TradeStatus.loading;
+    final tradeAsync = ref.watch(tradeInfoProvider(widget.orderId));
+    // A public `pending` may be a take's leftover, and only the row tells
+    // them apart (#434). Until it answers, hold `loading` rather than offer
+    // the maker's view with a Cancel the daemon refuses. First read only: a
+    // refresh keeps the previous row, and the trades cache is invalidated on
+    // every trade update, so waiting for those would flash `loading`.
+    if (live.value == OrderStatus.pending &&
+        tradeAsync.isLoading &&
+        !tradeAsync.hasValue) {
+      return TradeStatus.loading;
+    }
+    final status = tradeStatusFor(
+      _shown(live.value!, tradeAsync.valueOrNull),
+      isBuyer: isBuyer,
+    );
+    if (status != TradeStatus.pendingRating) return status;
+    final rating = ref.watch(tradeRatingProvider(widget.orderId));
+    if (rating.isLoading && !rating.hasValue) return TradeStatus.loading;
+    return ref.watch(ratedByMeProvider(widget.orderId))
+        ? TradeStatus.rated
+        : TradeStatus.pendingRating;
+  }
+
+  /// The steps mostrod times from the message that opened them: the buyer's
+  /// invoice and the seller's payment. Their deadline is the node's, not the
+  /// order's lifetime.
+  static bool _isWaitingStep(OrderStatus? status) =>
+      status == OrderStatus.waitingBuyerInvoice ||
+      status == OrderStatus.waitingPayment;
+
+  /// The step window the node advertises, which sizes the bar while a
+  /// waiting step runs.
+  Duration get _stepWindow => Duration(
+    seconds:
+        ref.watch(mostroNodeProvider).valueOrNull?.expirationSeconds ??
+        kDefaultInvoiceStepSeconds,
+  );
+
+  /// The whole window the countdown bar fills: the node's advertised
+  /// expiration when it is known and can contain the remaining time, else
+  /// the remaining time measured on load.
+  Duration _window(TradeStatus status) {
+    final node = ref.watch(mostroNodeProvider).valueOrNull;
+    final hours = node?.expirationHours;
+    final seconds = node?.expirationSeconds;
+    final advertised =
+        status == TradeStatus.pending
+            ? (hours == null ? null : Duration(hours: hours))
+            : (seconds == null ? null : Duration(seconds: seconds));
+    if (advertised != null && advertised >= _loadedWindow) return advertised;
+    return _loadedWindow;
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.extension<AppColors>();
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
+    final book = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
 
-    // Derive role: in-memory map (set by TakeOrderScreen in this session) takes
-    // priority; fall back to the DB-backed provider so reopened trades after an
-    // app restart still show the correct buyer/seller actions.
-    final roleMap = ref.watch(tradeRoleProvider);
-    final bool isBuyer;
-    if (roleMap.containsKey(widget.orderId)) {
-      isBuyer = roleMap[widget.orderId]!;
-    } else {
-      final dbRole =
-          ref.watch(tradeRoleFromDbProvider(widget.orderId)).valueOrNull;
-      isBuyer = dbRole ?? true; // default to buyer while DB result is loading
+    // A step advanced by the relay: a nudge, the crossfades below, and a
+    // fresh deadline — every step has its own expiration, owned by a
+    // different party, so the clock loaded for the previous step is stale.
+    // Judged on what the screen shows: a book change the row outranks is
+    // not a step of this trade.
+    ref.listen<AsyncValue<OrderStatus>>(tradeStatusProvider(widget.orderId), (
+      previous,
+      next,
+    ) {
+      final row = ref.read(tradeInfoProvider(widget.orderId));
+      // Without the row a public `pending` cannot be told from the trade's
+      // own status, so a change into or out of it says nothing yet.
+      if (row.isLoading && !row.hasValue) return;
+      final trade = row.valueOrNull;
+      final before = previous?.valueOrNull;
+      final after = next.valueOrNull;
+      if (before != null &&
+          after != null &&
+          _shown(before, trade) != _shown(after, trade)) {
+        HapticFeedback.mediumImpact();
+        _loadExpiresAt();
+      }
+    });
+
+    final role = _isBuyer();
+    final status =
+        role == null ? TradeStatus.loading : _status(isBuyer: role);
+    final isBuyer = role ?? true;
+    // A failed status subscription would otherwise look like a slow one.
+    final loadFailed =
+        status == TradeStatus.loading &&
+        ref.watch(tradeStatusProvider(widget.orderId)).hasError;
+    final canRate = !ref.watch(privacyModeProvider);
+    final cancelRequest = _cancelRequest();
+    final view = TradeView.of(
+      status: status,
+      isBuyer: isBuyer,
+      canRate: canRate,
+      cancelRequested: cancelRequest == CooperativeCancelState.requestedByMe,
+    );
+    final order = ref.watch(orderByIdProvider(widget.orderId));
+    // Counterpart reputation snapshot persisted from the daemon's follow-up
+    // Peer DM (#305), via tradeInfoProvider: it refreshes on the TradeUpdate
+    // the Rust side emits after persisting the snapshot.
+    final tradeAsync = ref.watch(tradeInfoProvider(widget.orderId));
+    final trade = tradeAsync.valueOrNull;
+    final peerRating = trade?.peerRating;
+    final room =
+        ref
+            .watch(chatRoomsNotifierProvider)
+            .where((r) => r.orderId == widget.orderId)
+            .firstOrNull;
+
+    // No trade row and not the maker: this is no longer a trade of this
+    // user's. A take lost before going active (its own cancel, a waiting
+    // timeout, the maker cancelling) is wiped in Rust, and the order is
+    // handed back to the public book, where it reads `pending` — which this
+    // screen would render as the user's own published order, cancel button
+    // included. Leave instead, as the invoice screens do; this also covers
+    // arriving later from a notification or the chat header. Only on settled
+    // reads of both the trades list and the order book: no answer yet is
+    // neither an absent row nor a stranger's order (a cold start can resolve
+    // the trades before the book's first emission).
+    if (!_leaving &&
+        ref.watch(orderBookProvider).hasValue &&
+        !tradeAsync.isLoading &&
+        tradeAsync.hasValue &&
+        trade == null &&
+        order?.isMine != true) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _leave(l10n.tradeNoLongerYours),
+      );
     }
 
-    // Derive trade status from the polled order status.
-    // Use TradeStatus.loading while the provider hasn't resolved so the UI
-    // doesn't flash the pending CTA before the real status is known.
-    final tradeStatusAsync = ref.watch(tradeStatusProvider(widget.orderId));
-    final status = tradeStatusAsync.hasValue
-        ? _mapOrderStatus(tradeStatusAsync.value!)
-        : TradeStatus.loading;
-
-    // Look up order details from the live order book.
-    final allOrders = ref.watch(orderBookProvider).valueOrNull ?? [];
-    final order = allOrders.where((o) => o.id == widget.orderId).firstOrNull;
-
-    final inFlight = const {
-      TradeStatus.waitingInvoice,
-      TradeStatus.waitingPayment,
-      TradeStatus.active,
-      TradeStatus.fiatSent,
-      TradeStatus.disputed,
-    }.contains(status);
-
     return Scaffold(
+      backgroundColor: book.bg,
       appBar: AppBar(
-        title: Text(inFlight ? l10n.activeTradeTitle : l10n.orderDetailsTitle),
+        backgroundColor: book.bg,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () =>
-              context.canPop() ? context.pop() : context.go(AppRoute.home),
+          icon: Icon(Icons.arrow_back, size: 22, color: book.textBody),
+          tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+          onPressed: _close,
+        ).withAutomationId(AutomationIds.appBarBack),
+        titleSpacing: 0,
+        title: Text(
+          l10n.tradeScreenTitle,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+            color: book.textPrimary,
+          ),
         ),
-        actions: [_buildOverflowMenu()],
+        actions: [_buildOverflowMenu(book)],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
         children: [
-          // Persistent chat chip — always-on access to the counterpart.
-          if (inFlight) ...[
-            _ChatChip(orderId: widget.orderId),
-            const SizedBox(height: AppSpacing.md),
-          ],
-
-          // State strip: step pill + status pill + headline + instruction
-          // + contextual timer.
-          _buildStateStrip(theme, colors, isBuyer, status, order),
-          const SizedBox(height: AppSpacing.lg),
-
-          // Single primary CTA for the current state.
-          ..._buildPrimaryAction(status, isBuyer, green, colors),
-
-          // Secondary row of outlined destructive actions (cancel / dispute /
-          // release), shown only when at least one applies to the current
-          // status + role.
-          ..._buildSecondaryActionRow(status, isBuyer, colors),
-
-          // Step timeline.
-          if (_currentStep(status) >= 0) ...[
-            const SizedBox(height: AppSpacing.lg),
-            _buildTimeline(theme, colors, isBuyer, status),
-          ],
-
-          // Compact meta footer: order ID + created date.
-          const SizedBox(height: AppSpacing.lg),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-            child: Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    l10n.tradeIdShortLabel(_shortId(widget.orderId)),
-                    style: TextStyle(
-                      color: textSec,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                InkWell(
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: widget.orderId));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(l10n.orderIdCopied),
-                        duration: const Duration(seconds: 1),
+          _chatArea(view),
+          const SizedBox(height: 12),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: KeyedSubtree(
+              key: ValueKey(status),
+              child:
+                  view.isCompleted
+                      ? _completedCard(
+                        l10n,
+                        status,
+                        canRate,
+                        order,
+                        room?.displayHandle(l10n),
+                      )
+                      : _stepBlock(
+                        l10n,
+                        view,
+                        status,
+                        isBuyer,
+                        order,
+                        loadFailed: loadFailed,
                       ),
-                    );
-                  },
-                  child: Icon(Icons.copy, size: 14, color: textSec),
-                ),
-                const Spacer(),
-                if (order != null)
-                  Text(
-                    l10n.tradeCreatedAtLabel(_formatDate(order.createdAt)),
-                    style: TextStyle(color: textSec, fontSize: 12),
-                  ),
-              ],
             ),
           ),
+          // The share of a slashed bond, when the daemon offered one
+          // (docs/ANTI_ABUSE_BOND.md §8.3); nothing otherwise.
+          BondClaimBanner(orderId: widget.orderId),
+          // The node slashed this user's own bond: a fact that outlives the
+          // notification (docs/ANTI_ABUSE_BOND.md §8.3).
+          BondSlashedNotice(orderId: widget.orderId),
+          // A pending cooperative-cancel request, this side's or the
+          // counterparty's (protocol `cancel.md`); nothing otherwise.
+          CancelRequestNotice(orderId: widget.orderId),
+          if (view.showsReputation && peerRating != null) ...[
+            const SizedBox(height: 12),
+            CounterpartReputationRow(
+              rating: peerRating,
+              reviews: trade!.peerReviews ?? 0,
+              days: trade.peerDays ?? 0,
+              counterpartIsBuyer: !isBuyer,
+            ),
+          ],
+          if (view.step >= 0) ...[
+            const SizedBox(height: 12),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: TradeTimeline(
+                key: ValueKey(view.step),
+                steps: _steps(l10n, isBuyer),
+                current: view.step,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          _idRow(l10n, book, order),
         ],
+      ),
+      bottomNavigationBar:
+          view.hasActions
+              ? _actionBar(l10n, view, status, cancelRequest)
+              : null,
+    );
+  }
+
+  // ── Chat ─────────────────────────────────────────────────────────────────
+
+  /// The chat card slides in once the trade is active (fade + 8dp, 220 ms);
+  /// the lock line before it fades out (150 ms). Nothing in either state.
+  Widget _chatArea(TradeView view) {
+    final Widget child;
+    if (view.showsChat) {
+      child = TradeChatCard(
+        key: const ValueKey('chat'),
+        orderId: widget.orderId,
+      );
+    } else if (!view.isCompleted && view.step >= 0) {
+      child = const TradeChatLockedLine(key: ValueKey('locked'));
+    } else {
+      child = const SizedBox.shrink(key: ValueKey('none'));
+    }
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      reverseDuration: const Duration(milliseconds: 150),
+      switchInCurve: Curves.easeOut,
+      transitionBuilder:
+          (child, animation) => FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.12),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          ),
+      child: child,
+    );
+  }
+
+  // ── Step block ───────────────────────────────────────────────────────────
+
+  Widget _stepBlock(
+    AppLocalizations l10n,
+    TradeView view,
+    TradeStatus status,
+    bool isBuyer,
+    OrderItem? order, {
+    required bool loadFailed,
+  }) {
+    final amount =
+        order != null ? '${order.displayAmount} ${order.fiatCode}' : null;
+    return TradeStepBlock(
+      stepLabel:
+          view.step >= 0 && view.step < kTradeStepCount
+              ? l10n.stepIndicator(view.step + 1, kTradeStepCount)
+              : null,
+      chip: view.chip,
+      chipLabel: _chipLabel(l10n, view.chip),
+      title: _title(l10n, status, isBuyer, amount),
+      body:
+          loadFailed
+              ? TextSpan(text: l10n.tradeLoadError)
+              : _body(l10n, status, isBuyer, order?.paymentMethod),
+      warning: view.showsReleaseWarning ? l10n.tradeReleaseIrreversible : null,
+      countdown: view.showsTimer ? _countdown(l10n, view, status) : null,
+      statusReadout: status.machineName,
+    );
+  }
+
+  String _chipLabel(AppLocalizations l10n, TradeChip chip) => switch (chip) {
+    TradeChip.waiting => l10n.tradeChipWaiting,
+    TradeChip.active => l10n.tradeChipActive,
+    TradeChip.yourTurn => l10n.tradeChipYourTurn,
+    TradeChip.dispute => l10n.tradeChipDispute,
+    TradeChip.none => '',
+  };
+
+  /// The one thing happening right now. The amount, when it appears, is set
+  /// in the figures face.
+  InlineSpan _title(
+    AppLocalizations l10n,
+    TradeStatus status,
+    bool isBuyer,
+    String? amount,
+  ) {
+    final figure = amount ?? l10n.theAgreedAmount;
+    final text = switch (status) {
+      TradeStatus.loading => l10n.tradeHeadlineLoading,
+      TradeStatus.pending => l10n.tradeHeadlinePending,
+      TradeStatus.waitingInvoice =>
+        isBuyer
+            ? l10n.tradeHeadlineWaitingInvoiceBuyer
+            : l10n.tradeHeadlineWaitingInvoiceSeller,
+      TradeStatus.waitingPayment =>
+        isBuyer
+            ? l10n.tradeHeadlineWaitingPaymentBuyer
+            : l10n.tradeHeadlineWaitingPaymentSeller,
+      TradeStatus.inProgress => l10n.tradeHeadlineInProgress,
+      TradeStatus.waitingBond => l10n.tradeHeadlineWaitingBond,
+      TradeStatus.active =>
+        isBuyer
+            ? l10n.tradeHeadlineActiveBuyer(figure)
+            : l10n.tradeHeadlineActiveSeller(figure),
+      TradeStatus.fiatSent =>
+        isBuyer
+            ? l10n.tradeHeadlineFiatSentBuyer
+            : l10n.tradeHeadlineFiatSentSeller(figure),
+      TradeStatus.payoutPending => l10n.tradeHeadlinePayoutPending,
+      TradeStatus.disputed => l10n.tradeHeadlineDisputed,
+      TradeStatus.cancelled => l10n.tradeHeadlineCancelled,
+      TradeStatus.pendingRating ||
+      TradeStatus.completed ||
+      TradeStatus.rated => l10n.tradeCompletedTitle,
+    };
+    if (amount == null) return TextSpan(text: text);
+    return emphasise(
+      text,
+      amount,
+      const TextStyle(fontFamily: AppFonts.figures),
+    );
+  }
+
+  /// What to do about it, with the payment method in the body face. The
+  /// method-specific copy needs the order; without it the generic line.
+  InlineSpan? _body(
+    AppLocalizations l10n,
+    TradeStatus status,
+    bool isBuyer,
+    String? method,
+  ) {
+    final book = OrderBookPalette.of(context);
+    final keyData = TextStyle(
+      color: book.textBody,
+      fontWeight: FontWeight.w500,
+    );
+    final text = switch (status) {
+      TradeStatus.loading => null,
+      TradeStatus.pending => l10n.tradeInstructionPending,
+      TradeStatus.waitingInvoice =>
+        isBuyer
+            ? l10n.tradeWaitingInvoiceBuyerInstruction
+            : l10n.tradeWaitingInvoiceSellerInstruction,
+      TradeStatus.waitingPayment =>
+        isBuyer
+            ? l10n.tradeBodyWaitingPaymentBuyer
+            : l10n.tradeWaitingPaymentSellerInstruction,
+      TradeStatus.inProgress => l10n.tradeInstructionInProgress,
+      TradeStatus.waitingBond => l10n.tradeInstructionWaitingBond,
+      TradeStatus.active when method != null =>
+        isBuyer
+            ? l10n.tradeBodyActiveBuyer(method)
+            : l10n.tradeBodyActiveSeller(method),
+      TradeStatus.active =>
+        isBuyer
+            ? l10n.tradeInstructionActiveBuyer
+            : l10n.tradeInstructionActiveSeller,
+      TradeStatus.fiatSent when !isBuyer && method != null => l10n
+          .tradeBodyFiatSentSeller(method),
+      TradeStatus.fiatSent =>
+        isBuyer
+            ? l10n.tradeInstructionFiatSentBuyer
+            : l10n.tradeInstructionFiatSentSeller,
+      TradeStatus.payoutPending => l10n.tradeInstructionPayoutPending,
+      TradeStatus.disputed => l10n.tradeInstructionDisputed,
+      TradeStatus.cancelled => l10n.tradeInstructionCancelled,
+      TradeStatus.pendingRating ||
+      TradeStatus.completed ||
+      TradeStatus.rated => null,
+    };
+    if (text == null) return null;
+    if (method == null) return TextSpan(text: text);
+    return emphasise(text, method, keyData);
+  }
+
+  /// The per-tick repaint reaches this builder only.
+  Widget _countdown(AppLocalizations l10n, TradeView view, TradeStatus status) {
+    final label = switch (view.timer) {
+      TradeTimerOwner.user => l10n.tradeTimerYouHave,
+      TradeTimerOwner.counterpart => l10n.tradeTimerTheyHave,
+      TradeTimerOwner.order => l10n.tradeTimerOrderHas,
+      TradeTimerOwner.none => '',
+    };
+    final note = switch (view.note) {
+      TradeTimerNote.expiresCancels => l10n.tradeTimerWaitingInvoiceConsequence,
+      TradeTimerNote.coordinateInChat => l10n.tradeTimerNoteCoordinate,
+      TradeTimerNote.leavesBook => l10n.tradeTimerPendingConsequence,
+      TradeTimerNote.none => null,
+    };
+    final isWaiting = view.timer != TradeTimerOwner.user;
+    if (status == TradeStatus.waitingInvoice ||
+        status == TradeStatus.waitingPayment) {
+      final total = _stepWindow;
+      return ValueListenableBuilder<Duration?>(
+        valueListenable: invoiceRemaining,
+        builder:
+            (context, remaining, _) =>
+                // No recorded step start — a maker whose reply the take consumed
+                // — means the deadline cannot be told. A bar counting down from
+                // an invented one is worse than none (#270).
+                remaining == null
+                    ? const SizedBox.shrink()
+                    : TradeCountdown(
+                      remaining: remaining,
+                      total: total,
+                      label: label,
+                      isWaiting: isWaiting,
+                      note: note,
+                    ),
+      );
+    }
+    final total = _window(status);
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _remaining,
+      builder:
+          (context, remaining, _) => TradeCountdown(
+            remaining: remaining,
+            total: total,
+            label: label,
+            isWaiting: isWaiting,
+            note: note,
+          ),
+    );
+  }
+
+  // ── Completed card ───────────────────────────────────────────────────────
+
+  Widget _completedCard(
+    AppLocalizations l10n,
+    TradeStatus status,
+    bool canRate,
+    OrderItem? order,
+    String? alias,
+  ) {
+    final rating = ref.watch(tradeRatingProvider(widget.orderId)).valueOrNull;
+    final mine = rating != null && rating.isMine ? rating.score : null;
+    final picking = status == TradeStatus.pendingRating && canRate;
+    return TradeCompletedCard(
+      amount: order != null ? '${order.displayAmount} ${order.fiatCode}' : null,
+      paymentMethod: order?.paymentMethod,
+      ratedAlias: alias ?? l10n.unknownPeerHandle,
+      ratedScore: mine,
+      selectedRating: picking ? _selectedRating : null,
+      onRatingChanged:
+          picking ? (star) => setState(() => _selectedRating = star) : null,
+      statusReadout: status.machineName,
+    );
+  }
+
+  // ── Timeline ─────────────────────────────────────────────────────────────
+
+  /// Steps written from the user's side.
+  List<String> _steps(AppLocalizations l10n, bool isBuyer) => [
+    l10n.tradeStepOrderTaken,
+    isBuyer ? l10n.tradeStepInvoiceBuyer : l10n.tradeStepInvoiceSeller,
+    isBuyer ? l10n.tradeStepFiatBuyer : l10n.tradeStepFiatSeller,
+    isBuyer ? l10n.tradeStepReleaseBuyer : l10n.tradeStepReleaseSeller,
+    l10n.tradeStepRate,
+  ];
+
+  // ── ID and date ──────────────────────────────────────────────────────────
+
+  /// Last row of the scroll; tapping anywhere on it copies the id.
+  Widget _idRow(
+    AppLocalizations l10n,
+    OrderBookPalette book,
+    OrderItem? order,
+  ) {
+    final faint = TextStyle(fontSize: 11, color: book.textFaint);
+    return InkWell(
+      onTap: _copyId,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+        child: Row(
+          children: [
+            Text(l10n.tradeIdLabel, style: faint),
+            const SizedBox(width: 8),
+            // The visible id is shortened; the readout carries the whole id.
+            Text(
+              _shortId(widget.orderId),
+              style: TextStyle(
+                fontFamily: AppFonts.figures,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: book.textTertiary,
+              ),
+            ).withAutomationId(AutomationIds.orderId, label: widget.orderId),
+            const SizedBox(width: 8),
+            Icon(Icons.copy_outlined, size: 13, color: book.textTertiary),
+            const Spacer(),
+            if (order != null)
+              Text(_createdLabel(l10n, order.createdAt), style: faint),
+          ],
+        ),
       ),
     );
   }
 
   static String _shortId(String id) =>
-      id.length <= 14 ? id : '${id.substring(0, 8)}…${id.substring(id.length - 5)}';
+      id.length <= 12
+          ? id
+          : '${id.substring(0, 5)}…${id.substring(id.length - 4)}';
+
+  /// `created today 17:41`, or `created 11 Sep 2026, 17:41` in the locale's
+  /// own order — the same format as the own-order screen.
+  String _createdLabel(AppLocalizations l10n, DateTime dt) {
+    final locale = Localizations.localeOf(context).toString();
+    final now = DateTime.now();
+    if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+      return l10n.tradeCreatedTodayLabel(DateFormat.Hm(locale).format(dt));
+    }
+    return l10n.tradeCreatedAtLabel(
+      DateFormat.yMMMd(locale).add_Hm().format(dt),
+    );
+  }
+
+  // ── Action bar ───────────────────────────────────────────────────────────
+
+  Widget _actionBar(
+    AppLocalizations l10n,
+    TradeView view,
+    TradeStatus status,
+    CooperativeCancelState? cancelRequest,
+  ) {
+    final primary = switch (view.primary) {
+      TradePrimaryAction.none => null,
+      TradePrimaryAction.addInvoice => TradePrimarySpec(
+        label: l10n.addLightningInvoiceButton,
+        icon: Icons.receipt_long_outlined,
+        automationId: AutomationIds.tradeAddInvoice,
+        onPressed:
+            () async => context.push(AppRoute.addInvoicePath(widget.orderId)),
+      ),
+      TradePrimaryAction.payBond => TradePrimarySpec(
+        label: l10n.tradeVerbPayBond,
+        icon: Icons.lock_outline,
+        automationId: AutomationIds.tradePayBond,
+        onPressed:
+            () async => context.push(AppRoute.payBondPath(widget.orderId)),
+      ),
+      TradePrimaryAction.payHoldInvoice => TradePrimarySpec(
+        label: l10n.payHoldInvoiceButton,
+        icon: Icons.bolt,
+        automationId: AutomationIds.tradePayInvoice,
+        onPressed:
+            () async => context.push(AppRoute.payInvoicePath(widget.orderId)),
+      ),
+      TradePrimaryAction.fiatSent => TradePrimarySpec(
+        label: l10n.tradeFiatSentAction,
+        icon: Icons.check,
+        automationId: AutomationIds.tradeFiatSent,
+        onPressed: _markFiatSent,
+      ),
+      TradePrimaryAction.release => TradePrimarySpec(
+        label: l10n.confirmReleaseSatsButton,
+        icon: Icons.lock_outline,
+        automationId: AutomationIds.tradeRelease,
+        onPressed: _releaseOrder,
+      ),
+      TradePrimaryAction.viewDispute => TradePrimarySpec(
+        label: l10n.viewDisputeButton,
+        icon: Icons.gavel,
+        automationId: AutomationIds.tradeViewDispute,
+        onPressed: () async => _viewDispute(),
+      ),
+      TradePrimaryAction.sendRating => TradePrimarySpec(
+        label: l10n.tradeSendRatingAction,
+        automationId: AutomationIds.tradeRateSubmit,
+        onPressed: _selectedRating > 0 ? _submitRating : null,
+      ),
+      TradePrimaryAction.close => TradePrimarySpec(
+        label: l10n.tradeCloseAction,
+        automationId:
+            view.isCompleted
+                ? AutomationIds.tradeRateClose
+                : AutomationIds.tradeClose,
+        onPressed: () async => _close(),
+      ),
+    };
+
+    final secondary = [
+      for (final action in view.secondary)
+        switch (action) {
+          // Once the counterparty asked to cancel, this side's cancel is
+          // the acceptance that ends the trade: say so on the button.
+          TradeSecondaryAction.cancel => TradeSecondarySpec(
+            label:
+                cancelRequest == CooperativeCancelState.requestedByPeer &&
+                        CancelRequestNotice.requestIsOpen(_orderStatus(status))
+                    ? l10n.acceptCancelButton
+                    : view.cancelIsFullWidth
+                    ? l10n.cancelTradeButton
+                    : l10n.cancel,
+            automationId: AutomationIds.tradeCancel,
+            onPressed: () => _cancelOrder(status),
+            isDestructive: true,
+          ),
+          TradeSecondaryAction.dispute => TradeSecondarySpec(
+            label: l10n.openDisputeButton,
+            automationId: AutomationIds.tradeDispute,
+            onPressed: _openDispute,
+          ),
+          TradeSecondaryAction.release => TradeSecondarySpec(
+            label: l10n.releaseSatsButton,
+            automationId: AutomationIds.tradeRelease,
+            onPressed: _releaseOrder,
+          ),
+        },
+    ];
+
+    return TradeActionBar(
+      primary: primary,
+      secondary: secondary,
+      closeLink: view.showsCloseLink ? _close : null,
+      closeLabel: l10n.tradeCloseAction,
+      closeAutomationId: AutomationIds.tradeRateClose,
+    );
+  }
 
   // ── Overflow menu (share order) ───────────────────────────────────────────
 
   /// Unconditional `⋮` menu — sharing an order is always a valid action,
-  /// unlike the status-gated Cancel/Dispute/Release row below.
-  Widget _buildOverflowMenu() {
+  /// unlike the status-gated actions of the bar below.
+  Widget _buildOverflowMenu(OrderBookPalette book) {
     final l10n = AppLocalizations.of(context);
     return PopupMenuButton<_OverflowAction>(
-      icon: const Icon(Icons.more_vert),
+      icon: Icon(Icons.more_vert, color: book.textSecondary),
       onSelected: (_) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -572,637 +1166,34 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
           ),
         );
       },
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: _OverflowAction.shareOrder,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.share, size: 18),
-            title: Text(l10n.shareOrderButton),
-            dense: true,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── Secondary action row (visible cancel / dispute / release) ────────────
-
-  /// Empty list when no action applies.
-  List<Widget> _buildSecondaryActionRow(
-    TradeStatus status,
-    bool isBuyer,
-    AppColors? colors,
-  ) {
-    final canCancel = const {
-      TradeStatus.pending,
-      TradeStatus.waitingInvoice,
-      TradeStatus.waitingPayment,
-      TradeStatus.active,
-      TradeStatus.fiatSent,
-    }.contains(status) ||
-        (status == TradeStatus.disputed && !isBuyer);
-    final canDispute =
-        status == TradeStatus.active || status == TradeStatus.fiatSent;
-    final canRelease = status == TradeStatus.disputed && !isBuyer;
-
-    if (!canCancel && !canDispute && !canRelease) {
-      return const [];
-    }
-
-    final l10n = AppLocalizations.of(context);
-
-    Widget destructiveButton({
-      required String label,
-      required Future<void> Function() onPressed,
-    }) =>
-        Expanded(
-          child: MostroReactiveButton(
-            outlined: true,
-            label: label,
-            variant: MostroButtonVariant.destructive,
-            onPressed: onPressed,
-          ),
-        );
-
-    final buttons = [
-      if (canRelease)
-        destructiveButton(
-          label: l10n.releaseSatsButton,
-          onPressed: _releaseOrder,
-        ),
-      if (canCancel)
-        destructiveButton(
-          label: l10n.cancelTradeButton,
-          onPressed: _cancelOrder,
-        ),
-      if (canDispute)
-        destructiveButton(
-          label: l10n.openDisputeButton,
-          onPressed: _openDispute,
-        ),
-    ];
-
-    return [
-      const SizedBox(height: AppSpacing.sm),
-      Row(
-        children: [
-          for (var i = 0; i < buttons.length; i++) ...[
-            if (i > 0) const SizedBox(width: AppSpacing.sm),
-            buttons[i],
-          ],
-        ],
-      ),
-    ];
-  }
-
-  // ── State strip ──────────────────────────────────────────────────────────
-
-  Widget _buildStateStrip(
-    ThemeData theme,
-    AppColors? colors,
-    bool isBuyer,
-    TradeStatus status,
-    OrderItem? order,
-  ) {
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-    final (pillBg, pillFg) = _statusPillColors(status);
-    final currentStep = _currentStep(status);
-    final totalSteps = _steps(isBuyer).length;
-    final timerCtx = _timerContext(isBuyer, status);
-    final showTimer = timerCtx != null && _remaining > Duration.zero;
-    final l10n = AppLocalizations.of(context);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (currentStep >= 0)
-                _Pill(
-                  label: currentStep >= totalSteps
-                      ? l10n.stepDoneLabel
-                      : l10n.stepIndicator(currentStep + 1, totalSteps),
-                  background: colors?.backgroundElevated ??
-                      const Color(0xFF2A2D35),
-                  foreground: textSec,
-                ),
-              if (currentStep >= 0) const SizedBox(width: AppSpacing.sm),
-              _Pill(
-                label: status.localizedLabel(l10n),
-                background: pillBg,
-                foreground: pillFg,
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            _headline(isBuyer, status, order),
-            style: theme.textTheme.headlineMedium,
-          ),
-          if (order != null) ...[
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              '${order.displayAmount} ${order.fiatCode} · ${order.paymentMethod}',
-              style: TextStyle(
-                color: textSec,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            _getInstructionText(isBuyer, status),
-            style: theme.textTheme.bodyMedium,
-          ),
-          if (showTimer) ...[
-            const SizedBox(height: AppSpacing.lg),
-            _buildContextualTimer(colors, timerCtx),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// Mini timer row: clock + remaining + label, progress bar, consequence.
-  Widget _buildContextualTimer(AppColors? colors, (String, String) ctx) {
-    final (label, consequence) = ctx;
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final amber = colors?.warningAmber ?? const Color(0xFFE89C3C);
-    final red = colors?.destructiveRed ?? const Color(0xFFD84D4D);
-    final track = colors?.backgroundInput ?? const Color(0xFF252A3A);
-
-    final fraction = _totalCountdownSeconds > 0
-        ? (_remaining.inSeconds / _totalCountdownSeconds).clamp(0.0, 1.0)
-        : 0.0;
-    // Lime → amber at <10% remaining → red at <2%.
-    final timerColor = fraction < 0.02
-        ? red
-        : fraction < 0.10
-            ? amber
-            : green;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.schedule, size: 16, color: timerColor),
-            const SizedBox(width: AppSpacing.sm),
-            Text(
-              _formatDuration(_remaining),
-              style: TextStyle(
-                color: timerColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                fontFamily: 'monospace',
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(color: textSec, fontSize: 12),
-                overflow: TextOverflow.ellipsis,
+      itemBuilder:
+          (_) => [
+            PopupMenuItem(
+              value: _OverflowAction.shareOrder,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.share, size: 18),
+                title: Text(l10n.shareOrderButton),
+                dense: true,
               ),
             ),
           ],
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(2),
-          child: LinearProgressIndicator(
-            value: fraction,
-            minHeight: 4,
-            color: timerColor,
-            backgroundColor: track,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          consequence,
-          style: TextStyle(color: textSec, fontSize: 12, height: 1.4),
-        ),
-      ],
-    );
-  }
-
-  // ── Primary CTA ──────────────────────────────────────────────────────────
-
-  /// One explicit next action per state. Waiting-on-counterpart states get a
-  /// disabled button with a spinner instead of a tappable CTA.
-  List<Widget> _buildPrimaryAction(
-    TradeStatus status,
-    bool isBuyer,
-    Color green,
-    AppColors? colors,
-  ) {
-    final red = colors?.destructiveRed ?? const Color(0xFFD84D4D);
-    final l10n = AppLocalizations.of(context);
-
-    FilledButton bigButton({
-      required String label,
-      required IconData icon,
-      required VoidCallback onPressed,
-      Color? background,
-      Color? foreground,
-    }) =>
-        FilledButton.icon(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 18),
-          label: Text(label),
-          style: FilledButton.styleFrom(
-            backgroundColor: background ?? green,
-            foregroundColor: foreground ?? Colors.black,
-            minimumSize: const Size.fromHeight(56),
-            textStyle:
-                const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.card),
-            ),
-          ),
-        );
-
-    switch ((status, isBuyer)) {
-      case (TradeStatus.waitingInvoice, true):
-        return [
-          bigButton(
-            label: l10n.addLightningInvoiceButton,
-            icon: Icons.receipt_long_outlined,
-            onPressed: () =>
-                context.push(AppRoute.addInvoicePath(widget.orderId)),
-          ),
-        ];
-      case (TradeStatus.waitingPayment, false):
-        return [
-          bigButton(
-            label: l10n.payHoldInvoiceButton,
-            icon: Icons.bolt,
-            onPressed: () =>
-                context.push(AppRoute.payInvoicePath(widget.orderId)),
-          ),
-        ];
-      case (TradeStatus.active, true):
-        return [
-          MostroReactiveButton(
-            label: l10n.markFiatSentButton,
-            icon: Icons.check,
-            onPressed: _markFiatSent,
-          ),
-        ];
-      case (TradeStatus.fiatSent, false):
-        return [
-          MostroReactiveButton(
-            label: l10n.confirmReleaseSatsButton,
-            icon: Icons.lock_open,
-            onPressed: _releaseOrder,
-          ),
-        ];
-      case (TradeStatus.disputed, _):
-        return [
-          bigButton(
-            label: l10n.viewDisputeButton,
-            icon: Icons.gavel,
-            background: red,
-            foreground: Colors.white,
-            onPressed: () {
-              final dispute = ref.read(
-                disputeByTradeIdProvider(widget.orderId),
-              );
-              if (dispute == null) {
-                final l10n = AppLocalizations.of(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(l10n.disputeNotFoundForOrder),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-                return;
-              }
-              context.push(AppRoute.disputeDetailsPath(dispute.id));
-            },
-          ),
-        ];
-      case (TradeStatus.pendingRating, _):
-        return [
-          bigButton(
-            label: l10n.tradeStepRate,
-            icon: Icons.star_outline,
-            onPressed: () {
-              if (ref.read(privacyModeProvider)) {
-                context.go(AppRoute.home);
-              } else {
-                context.push(AppRoute.rateUserPath(widget.orderId));
-              }
-            },
-          ),
-        ];
-      case (TradeStatus.rated, _) || (TradeStatus.cancelled, _):
-        return [
-          OutlinedButton(
-            onPressed: () =>
-                context.canPop() ? context.pop() : context.go(AppRoute.home),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: green,
-              side: BorderSide(color: green),
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.card),
-              ),
-            ),
-            child: Text(l10n.closeRatingButton),
-          ),
-        ];
-      // Waiting on the counterpart (or order still pending / loading):
-      // disabled button with spinner so the "next action" is explicit.
-      case (TradeStatus.waitingInvoice, false):
-        return [_waitingButton(l10n.waitingForBuyer, colors)];
-      case (TradeStatus.waitingPayment, true):
-        return [_waitingButton(l10n.waitingForSeller, colors)];
-      case (TradeStatus.active, false):
-        return [_waitingButton(l10n.waitingForFiatPayment, colors)];
-      case (TradeStatus.fiatSent, true):
-        return [_waitingButton(l10n.waitingForSeller, colors)];
-      case (TradeStatus.pending, _):
-        return [_waitingButton(l10n.waitingForCounterpart, colors)];
-      default:
-        return const [];
-    }
-  }
-
-  Widget _waitingButton(String label, AppColors? colors) {
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-    return Container(
-      height: 56,
-      decoration: BoxDecoration(
-        color: colors?.backgroundCard ?? const Color(0xFF1E2230),
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: textSec),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Text(
-            label,
-            style: TextStyle(
-              color: textSec,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Step timeline ────────────────────────────────────────────────────────
-
-  Widget _buildTimeline(
-    ThemeData theme,
-    AppColors? colors,
-    bool isBuyer,
-    TradeStatus status,
-  ) {
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final elevated = colors?.backgroundElevated ?? const Color(0xFF2A2D35);
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final amber = colors?.warningAmber ?? const Color(0xFFE89C3C);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-    final textSubtle = colors?.textSubtle ?? const Color(0xFF9A9A9C);
-    final l10n = AppLocalizations.of(context);
-
-    final steps = _steps(isBuyer);
-    final current = _currentStep(status);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            l10n.yourTradeTimelineTitle,
-            style: TextStyle(
-              color: textSubtle,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          for (var i = 0; i < steps.length; i++) ...[
-            if (i > 0) const SizedBox(height: AppSpacing.md),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: i < current
-                        ? green
-                        : i == current
-                            ? amber
-                            : elevated,
-                  ),
-                  alignment: Alignment.center,
-                  child: i < current
-                      ? const Icon(Icons.check, size: 14, color: Colors.black)
-                      : i == current
-                          ? Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.black,
-                              ),
-                            )
-                          : null,
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      steps[i],
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.3,
-                        color: i <= current
-                            ? colors?.textPrimary ?? Colors.white
-                            : textSec,
-                        fontWeight:
-                            i == current ? FontWeight.w700 : FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
     );
   }
 }
 
-// ── Small shared widgets ──────────────────────────────────────────────────────
-
-class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.label,
-    required this.background,
-    required this.foreground,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: 3,
-      ),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(AppRadius.chip),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: foreground,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
-        ),
-      ),
-    );
-  }
-}
-
-/// Persistent chat chip: counterpart handle + unread badge, navigates to the
-/// trade chat. Replaces the old ghost CONTACT button at the bottom.
-class _ChatChip extends ConsumerWidget {
-  const _ChatChip({required this.orderId});
-
-  final String orderId;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final colors = Theme.of(context).extension<AppColors>();
-    final purple = colors?.purpleButton ?? const Color(0xFF8359C2);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-    final l10n = AppLocalizations.of(context);
-
-    final rooms = ref.watch(chatRoomsNotifierProvider);
-    final room = rooms.where((r) => r.orderId == orderId).firstOrNull;
-
-    final handle =
-        room == null ? l10n.yourCounterpartFallback : room.displayHandle(l10n);
-    final unread = room?.unreadCount ?? 0;
-
-    return InkWell(
-      onTap: () => context.push(AppRoute.chatRoomPath(orderId)),
-      borderRadius: BorderRadius.circular(AppRadius.card),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm + 2,
-        ),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              purple.withValues(alpha: 0.20),
-              purple.withValues(alpha: 0.07),
-            ],
-          ),
-          border: Border.all(color: purple.withValues(alpha: 0.27)),
-          borderRadius: BorderRadius.circular(AppRadius.card),
-        ),
-        child: Row(
-          children: [
-            if (room != null)
-              NymAvatar(
-                iconIndex: room.peerIconIndex,
-                colorHue: room.peerColorHue,
-                size: 36,
-              )
-            else
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: purple.withValues(alpha: 0.3),
-                child:
-                    Icon(Icons.chat_bubble_outline, size: 18, color: purple),
-              ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    handle,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    unread > 0
-                        ? l10n.secureChatUnread(unread)
-                        : l10n.secureChatEncrypted,
-                    style: TextStyle(fontSize: 11, color: textSec),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            if (unread > 0) ...[
-              Container(
-                width: 22,
-                height: 22,
-                alignment: Alignment.center,
-                decoration:
-                    BoxDecoration(shape: BoxShape.circle, color: purple),
-                child: Text(
-                  '$unread',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.xs),
-            ],
-            Icon(Icons.chevron_right, color: purple),
-          ],
-        ),
-      ),
-    );
-  }
+/// Wraps the first occurrence of [part] in [sentence] with [style], so the
+/// translation decides the word order and the code the emphasis. The whole
+/// sentence, unstyled, when [part] does not occur.
+InlineSpan emphasise(String sentence, String part, TextStyle style) {
+  final at = part.isEmpty ? -1 : sentence.indexOf(part);
+  if (at < 0) return TextSpan(text: sentence);
+  return TextSpan(
+    children: [
+      if (at > 0) TextSpan(text: sentence.substring(0, at)),
+      TextSpan(text: part, style: style),
+      if (at + part.length < sentence.length)
+        TextSpan(text: sentence.substring(at + part.length)),
+    ],
+  );
 }

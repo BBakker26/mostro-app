@@ -8,13 +8,47 @@ Mostro daemon via Kind 38383 Nostr events and cached locally.
 ### Daemon confirmation & request correlation
 
 Every request that expects a daemon reply (`create_order`, `take_order`,
-`send_invoice`) carries a random u64 `request_id` nonce. The daemon echoes
+`send_invoice`, and `open_dispute` from the [disputes](disputes.md) API)
+carries a random u64 `request_id` nonce. The daemon echoes
 it in its reply (success or `CantDo`), and **only a reply echoing the exact
 nonce may resolve or consume the pending request** — stale events replayed
 by relays carry a different (or no) `request_id` and touch nothing. Each
 call waits up to 10 s; on timeout it returns `NoDaemonResponse` and nothing
-is persisted. A genuine late reply is still reconciled where meaningful
-(create), or logged and dropped (take / add-invoice).
+is persisted.
+
+Before that wait, the request has to be accepted by a relay. Publishing
+resolves on the first relay that answers `OK true`; when none does (every
+relay refused the event, timed out or was not connected), the call fails with
+`NoRelayAccepted` instead, rolls its pending record back and does not wait for
+the daemon. A relay that timed out may still have stored and forwarded the
+event, so the daemon can see the request anyway. The two are different
+failures and the UI tells them apart: `NoDaemonResponse` means the request went out and no
+reply came back, `NoRelayAccepted` points the user at their relay list.
+
+What happens to a genuine reply that arrives **after** that timeout depends on
+the request. The pending record survives the timeout in every case — only its
+waiter detaches — so the late reply is still recognized as ours rather than as
+a stale replay:
+
+- **create**: reconciled — the daemon UUID is bound to the attempt's trade
+  index, and the maker row is persisted from the echoed order itself (#394;
+  the payload is the published order, min/max included).
+- **take**: the nonce-correlated late reply itself is consumed by the waiter
+  interception and dropped whole — it never reaches the per-action arms. The
+  row it failed to establish is rebuilt by the NEXT daemon message carrying an
+  order, or by the next start's replay, where no in-memory record remains to
+  intercept (#394: role from the payload's trade pubkeys, or
+  AddInvoice ⇒ buyer / PayInvoice ⇒ seller where mostrod omits them; never
+  guessed).
+- **add-invoice**: acknowledged and passed through — the reply doubles as a
+  status update, which the per-action arms process as usual.
+- **dispute**: reconciled — `record_late_acceptance` persists the accepted
+  dispute under the daemon-assigned id (unread, and without the reason, which
+  went with the timed-out call). So a `NoDaemonResponse` from `open_dispute` is
+  **not** proof that no dispute can appear for that trade later. Retrying after
+  the timeout does not break this: the retry takes the trade key over but
+  carries every superseded attempt's nonce forward, so a reply to any of them
+  is still correlated. See [disputes.md](disputes.md) for the full behavior.
 
 ## Functions
 
@@ -63,10 +97,65 @@ NewOrderParams {
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`
 - `fiat_code` MUST be valid ISO 4217
 - `payment_method` MUST not be empty
+- The amount is checked against the node's advertised `min_order_amount` /
+  `max_order_amount` before anything is sent: directly for a fixed
+  `amount_sats` (#282), and for a market-price order by converting every fiat
+  amount the daemon will price — both ends of a range order — at the rate the
+  node publishes (`fetch_exchange_rate` in `nostr.md`), truncating as the
+  daemon does (#337). The fiat amount is first normalised to the whole unit the
+  wire carries (`new_order` casts it to `i64`), so the check judges the amount
+  the daemon actually receives rather than the decimal the user typed
+
+**Fail-open**: that range check blocks nothing it cannot judge — no rate, no
+advertised bounds, an amount that is not yet a finite positive number. The
+order is submitted and the daemon stays the authority, answering
+`OutOfRangeSatsAmount` if it disagrees. Blocking instead would make
+market-price orders unusable against every node that leaves rate publishing
+off, which the protocol allows.
 
 **Side effects**: Sends the new-order message to the Mostro daemon and waits for its confirmation. The order is created only once the daemon confirms it; the public order book is populated exclusively from the daemon's Kind 38383 event (the order is **not** inserted optimistically). On no confirmation within the timeout the order is treated as not created — nothing is persisted to My Trades and nothing is added to the book.
 
+**Book ownership on a fresh create (#552).** The order's Kind 38383 usually
+outruns the confirmation that binds the daemon UUID and persists the maker
+row, so the ingest writes the entry with `is_mine = false` — and the live
+stream never redelivers the event to correct it. Persisting a maker row
+(`persist_trade_row`, the funnel every row creation passes through) therefore
+**claims** the order in the book, in memory and before the save: the claim
+marks the order's existing entry `is_mine = true` and every later write of it,
+whichever arrives first and even when the save fails. It never inserts an
+entry, keeping the book fed by Kind 38383 alone. The ingest reads the claim
+too, so it treats a claimed order as ours without a readable row. A taker's
+row (`is_mine = false`) claims nothing.
+
+Claims belong to the identity: forgetting the identity (#533) empties them
+under the same lock, so a persist of the old identity's that was already
+under way when the teardown began cannot mark the book afterwards. A node
+switch keeps them (order ids are daemon UUIDs).
+
+The ingest classifies an order for the identity current when it starts —
+`is_mine` from the claim or the trade row, a refused wire status replaced
+by the trade's, whether the order is ours — and awaits the database before
+writing the entry. Forgetting the identity also bumps an ownership epoch,
+which the ingest reads with the claim and the write checks again under the
+book's lock: a classification made for a forgotten identity is discarded,
+and the event applies as a stranger's order (its wire view, marked only by
+a claim of the new identity's, dropped when finished).
+
+Not covered: a persist that *starts* after the teardown, and writes that
+read an entry and write it back outside the lock — no operation carries an
+identity generation from where it began.
+
 **Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`.
+
+**Anti-abuse bond (maker).** A node that requires a maker bond answers the
+create with `pay-bond-invoice` instead of `new-order`. The order then has its
+daemon id but no kind 38383 event until the bond is paid: `create_order`
+returns it at `WaitingMakerBond`, and persists the maker row with `bond` set
+(`role = Maker`, `state = Requested`, the bolt11 and its decoded expiry). The
+later `new-order` for that id is the only sign the bond locked; it moves the
+row to `Pending` with the bond `Locked`. Walking away is `cancel_order`, which
+in this window waits for the daemon's answer (see *Maker's bond window* under
+`cancel_order`).
 
 ---
 
@@ -88,22 +177,137 @@ or a direct progression message. Only on a correlated reply is the trade
 created: the TradeInfo is built from the reply's real data (status,
 calculated `amount_sats`, `hold_invoice`), persisted to My Trades, the
 order book entry is synced, and the trade session/subscriptions start.
-On rejection or timeout **nothing is persisted** — no phantom trade.
+The row is the order's **only** trade row: every earlier row for the same
+order id is deleted before the save. Rows are keyed by a fresh id per take
+and lookups by order id are unordered (`LIMIT 1`), so a row an earlier take
+left behind — its `Canceled` never reached this client, or it predates the
+wipe on a taker's own cancel — would otherwise feed its status to the guards
+that gate the new trade's messages, and its `trade_key_index` to the chat
+session rebuild.
+A confirmed take **installs** that session. A session may already exist for
+two unrelated reasons, told apart by its `trade_key_index`: an earlier
+confirmed take of the same order whose session was never removed (its
+`Canceled` never reached this client) left a stale one (different index —
+replaced, since each take derives a fresh trade key and keeping the earlier
+session would leave chat key lookups reading a superseded index, #335), or
+the peer reveal already created this take's own session with `peer_pubkey`
+and `shared_key` set (same index — kept, since replacing it would drop the
+chat keys that path exists to establish, #334).
+That persistence half runs under the per-order lock (see *Per-order
+serialization*), acquired after the reply and never around the wait for it.
+On rejection or timeout **nothing is persisted** — no phantom trade, and no
+session: a take that fails never leaves one behind.
+
+The row is created with an **empty `counterparty_pubkey`**: a book
+order's `creator_pubkey` is the Mostro node (the 38383 event author),
+never the peer, and seeding it there poisons the durable peer record
+(#334). The real peer arrives via the peer-reveal capture (see *Inbound
+Kind 14 actions*), which may already have run on the take's first reply —
+in that case the session **pre-exists** with peer and shared key set,
+`install_session` keeps it (same index), and,
+because the reveal ran before the row existed, its durable write was a
+no-op: the persistence block replays it from the session and mirrors the
+peer onto the returned `TradeInfo` (the field the UI gates the chat room
+on). The durable half applies to backends with a trades store — on web
+(#233) the write is a stub and only the session and the returned struct
+carry the peer.
+
+**Anti-abuse bond (taker).** A node that requires a taker bond answers the
+take with `pay-bond-invoice`. That is an acceptance, not an error:
+`take_order` returns the trade at `WaitingTakerBond` with `bond` set
+(`role = Taker`, `state = Requested`), and the bond's amount never seeds
+`order.amount_sats`. Publicly the order stays `pending` and takeable by
+others until a bond locks; the first trade-flow message after the request
+marks the bond `Locked`. A `canceled` in this window is a lost race or a
+cancel, never a trade outcome, and wipes the row
+(`docs/ANTI_ABUSE_BOND.md` §6.1).
 
 **Errors**: `OrderNotFound`, `CannotTakeOwnOrder`, `OrderAlreadyTaken`,
 `InvalidRole`, `FiatAmountRequired`/`OutOfRange` (range orders),
-`BondRequired` (daemon requires an anti-abuse bond — not supported yet),
 `NoDaemonResponse`, plus daemon `CantDo` reasons passed through as errors.
 
 ---
 
 ### cancel_order(order_id: String) → ()
-Cancel own untaken order.
+Send the daemon a `Cancel` for the order, signed with its trade key (the
+persisted `trade_keys` binding). The same call serves a maker's own pending
+order, a take that has not gone active yet, and an active trade — where
+mostrod runs its cooperative-cancel state machine. The daemon decides; this
+function does not validate ownership or status.
 
-**Preconditions**: Order MUST be owned by current user. Order status
-MUST be `Pending`.
+**Local side effects**, applied once the message is published:
+- The order leaves the in-memory book.
+- A trade row that never went active (`Pending` / `WaitingBuyerInvoice` /
+  `WaitingPayment`), maker's or taker's, is **left untouched**: the daemon's
+  `Canceled` — or the Kind 38383 `canceled` it publishes when the order dies
+  with the cancel, whichever lands first — wipes it with its session (see
+  *Daemon cancellation semantics*), the path a waiting timeout takes too.
+  The cancelled trade leaves My Trades, as in v1. Marking it `Canceled`
+  first made that arm skip the row as already canceled, so the row and the
+  session outlived the trade, and the row's terminal status then refused the
+  daemon's `pending` republish — the ex-taker never saw the order in the book
+  again. No reference client writes anything before the daemon replies. A
+  cancel the daemon refuses also leaves a live trade looking live.
+- A row further along keeps its status and records
+  `cooperative_cancel_state = RequestedByMe`: from `active` on the cancel is
+  a request the counterparty must agree to (protocol `cancel.md`, "Cancel
+  cooperatively"), and the daemon's `cooperative-cancel-initiated-by-you`
+  confirms it. It used to be marked `Canceled` at once; that showed a
+  cancelled trade the daemon still ran, and the terminal status then made
+  the daemon's `cooperative-cancel-accepted` look like a replay over a
+  finished trade and dropped it, so the requester never learned the
+  counterparty had agreed. An `in-progress` row may still be a never-active
+  take; the daemon's `Canceled` then settles it as before.
 
-**Errors**: `NotMyOrder`, `OrderNotCancelable`, `ProtocolError`.
+**Between the request and the daemon's answer.** The call returns once the
+message is published; nothing waits for the daemon.
+- A never-active trade: the screen the user cancelled from goes home at
+  once. The trade screen and the invoice screens say the cancel request was
+  sent; the maker's own order screen says the order was cancelled. My Trades
+  keeps listing the trade at its previous status until the daemon's
+  `Canceled` or the public `canceled` wipes it, normally within a second or
+  two.
+- No answer (relay down, app closed before it lands): a taker's
+  `WaitingBuyerInvoice` / `WaitingPayment` row is settled by the stale sweep
+  (*Stale-state sweep*). The sweep runs 60 s after the order subscription
+  starts and then every 30 minutes, and acts once the row is past its window
+  (`timeout_at`, else `started_at` + 900 s), asking the relays for the
+  order's public status. A maker's `Pending` row is left to the public
+  `canceled`: the sweep does not look at pending rows, so if that event is
+  missed too, the row stays listed as pending.
+- Refused (`CantDo`): nothing changes locally, which is right, because the
+  trade is still live. But the user is not told: `cancel_order` does not wait
+  for the reply, and the `CantDo` arm finds no pending request to route it to.
+- A trade further along stays as it was, with the request noted on the row
+  (above); the trade screen says the cancel waits for the counterparty and
+  drops the `Cancel` action until the daemon settles the trade.
+
+**Maker's bond window** (`WaitingMakerBond`, docs/ANTI_ABUSE_BOND.md §6.2).
+Here the call **does** wait: the cancel carries a `request_id`, and the daemon's
+answer decides the outcome, within 10 s.
+- `canceled` (mostro#996): the daemon closed the unpublished order and cancelled
+  the bond invoice. The row is wiped with `Canceled` / `UserCanceled` before the
+  call returns.
+- `NotAllowedByStatus`: the bond locked first, or the daemon predates #996. The
+  call watches the row for 5 s, then checks the public book under the order's
+  guard. If the row moved to `Pending`, or the book carries the order, the order
+  is live: the row is reconciled to the lock, and the call fails with
+  `BondAlreadyLocked`. With no evidence either way nothing is wiped: the call
+  fails with `MakerCancelRefused`, and the user may drop the order from this
+  device with `abandon_bonded_order` (see `contracts/bond.md`).
+- Any other `CantDo`: the call fails with the daemon's reason.
+- No answer: `NoDaemonResponse`, and the row stays. A late `canceled` still wipes
+  it as the user's own cancel, including one answering an earlier attempt that a
+  retry superseded.
+
+A `canceled` with no cancel of this client behind it is the daemon's payment
+deadline (mostro#994): the row is wiped with `Canceled` / `BondExpired`.
+
+**Errors**: no trade-key binding for the order (`no persisted trade key for
+order …`), trade-key or identity load failures, and publish failures. Daemon
+rejections arrive later as `CantDo`; this call does not wait for them, except in
+the maker's bond window (`BondAlreadyLocked`, `MakerCancelRefused`,
+`NoDaemonResponse`, the `CantDo` reason).
 
 ---
 
@@ -116,10 +320,18 @@ their own amount.
 **Side effects**: Sends `AddInvoice` (with the correlation nonce) and waits
 for the daemon's acknowledgement — its reply (`waiting-seller-to-pay`,
 `buyer-invoice-accepted`, …) is also a status update and is processed
-normally. The UI advances only on acknowledgement.
+normally. The UI advances on acknowledgement **or** when the trade's status
+moves past the invoice step (`active`, `fiat-sent`, `dispute`, `success`),
+whichever comes first: the acknowledgement is awaited for 10 s only, and the
+daemon's reply queue can outlast that, so an accepted invoice may read as
+`NoDaemonResponse`. The invoice screen therefore follows the trade status
+rather than trusting the call's outcome alone.
 
 **Errors**: `InvalidInvoice` (daemon CantDo), `NoDaemonResponse` (stay on
-the invoice step), `TradeNotFound`.
+the invoice step — the submission may still have been accepted),
+`NotAllowedByStatus` (daemon CantDo: the order no longer waits for an invoice,
+i.e. client and daemon diverged; the screen runs `resync()` to recover the
+missed message and leaves once the status catches up), `TradeNotFound`.
 
 ---
 
@@ -195,6 +407,48 @@ Returns null if URI is not a valid Mostro deep link.
 Emits whenever the order list changes (new orders, status updates,
 expirations). Used to keep the UI order list in sync.
 
+### on_trade_updated() → Stream<TradeUpdate>
+`occurred_at` is Unix seconds from the source daemon event, including
+recovery, republish, and peer-reputation refresh emissions. Locally initiated
+changes use the local clock. Notification consumers use this timestamp for
+presentation and the identity-import history cutoff; replay must never reset it.
+
+Push channel for daemon-driven trade lifecycle changes. Every status a
+Kind 14 dispatch arm syncs is emitted here after the in-memory book
+update and the DB persistence **attempt** — a DB write failure (or a
+memory-only session, where `db()` is `None`) is logged and does not
+suppress the notification, so listeners must not assume the trade row
+already reflects the status. Also emitted by the stale-state sweep's
+maker resync. Two consumer needs:
+changes the 2s status polling cannot observe (a never-active trade is
+**wiped** from the DB on the daemon's `Canceled` — no row left to poll —
+and after a taker-timeout republish the book reads `pending` again), and
+action requests the user must react to promptly — `WaitingBuyerInvoice` /
+`WaitingPayment` drive the app-wide auto-navigation to the add-invoice /
+pay-invoice screens (`TradeActionListener`, which resolves the trade role
+so the counterparty's informational copy of those statuses never
+navigates). Take replies produce no emission: the take waiter consumes
+them before the dispatch arms run. Screens filter by `order_id`.
+
+```text
+TradeUpdate {
+  order_id: String
+  status: OrderStatus   # the status just persisted; Pending on maker resync
+  reason: TradeUpdateReason?  # optional cause for local/cancellation transitions
+  occurred_at: i64      # Unix seconds: daemon event time, or local action time
+}
+
+TradeUpdateReason: UserCanceled | MakerCanceled | BondLostRace | BondExpired
+                 | CooperativeCancelRequestedByMe | CooperativeCancelRequestedByPeer
+```
+
+The two `CooperativeCancelRequested*` reasons ride on an emission whose
+`status` did **not** change (it is the row's current `Active` / `FiatSent`):
+they say a cooperative-cancel request was confirmed for this side or made
+by the counterparty. Consumers keyed on status alone (the trade screen's
+status provider) see nothing new; the Notifications cards key on status
+**and** reason, so each request gets its own card, once.
+
 ### on_order_status_changed(order_id: String) → Stream<OrderStatus>
 Emits when a specific order's status changes.
 
@@ -226,23 +480,373 @@ call — it arrives as a Kind 14 (NIP-44) message from mostrod. This
 section documents the full chain so Flutter providers and screens know
 what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_invoice.html>.
 
-### Inbound gift-wrap actions consumed by `process_gift_wrap_rumor`
+### Kind-14 delivery & decryption coverage
 
-| Action                             | Payload variant                                     | Effect on the seller's trade row                                                 |
+Receiving a daemon Kind 14 takes two independent layers, and BOTH must
+cover the trade or its messages are lost (dropped as
+`no-matching-p-tag`, observable in the logs with the map size):
+
+- **Delivery** — the bulk `mostro-dm` relay subscription, author-pinned to
+  the active node, whose `#p` filter must include the trade key's pubkey.
+- **Decryption** — the refreshable coverage map (`global_dm_keys`,
+  pubkey → keys+index) the event loop decrypts against.
+
+Coverage invariants:
+
+- **Both subscription entry points seed in full.** Startup
+  (`_run_order_subscription`) and node switch derive every known trade key
+  (indexes `1..=identity.trade_key_index`) and seed the map through the
+  shared `seed_global_dm_coverage()` before subscribing. A session that
+  does not rehydrate leaves every previous session's trade deaf: statuses
+  freeze at whatever the public Kind 38383 shows (masked `in-progress`),
+  requests like add-invoice never reach the user, and the daemon
+  eventually cancels by timeout (#277 cause 3).
+- **Seeding is a union, never a replace** — a key derived concurrently by
+  a create/take in flight must survive the seed.
+- **Mid-session keys join incrementally**: every derive path calls
+  `ensure_global_dm_coverage`, which inserts the key and re-issues the
+  relay filter under the same stable subscription id — closing that id
+  first, since nostr-sdk 0.45 rejects a duplicate id and keeps the stale
+  filter (`replace_subscription`). Every re-issue — this one and a node
+  switch's — goes through `replace_global_dm_filter`, which reads the map and
+  replaces the filter under one lock: interleaved CLOSE/REQ pairs would
+  otherwise keep an older key set or fail with a duplicate id.
+- **The relay filter is always rebuilt from the full map** — never from
+  session-local state. A rebuild from a subset silently unsubscribes the
+  missing trades at the relay.
+- The temporary 30-minute per-trade receivers (see #182) are an
+  additional delivery path, not a substitute: they exist only for trades
+  touched this session and mask coverage gaps while they run.
+- **The bulk filter is unbounded on purpose** — no `since`, no `limit`, so
+  after any downtime it replays the node's full stored history instead of a
+  window, and nothing is lost to a cutoff derived from an unreliable local
+  clock. The cost is that relays serve that backlog **newest-first**;
+  ordering is settled downstream, by the per-order `status_cursor:`
+  high-water mark described under the status-sync rules, not by narrowing
+  the filter. Only the ephemeral per-trade subscription carries a cutoff
+  (`limit(0)`, live-only).
+
+### Per-trade watcher lifecycle (single owner, #325)
+
+The 30-minute per-trade receiver has, per trade key, exactly one owner,
+enforced by a registry in `nostr/subscriptions.rs`:
+
+- **One owner per trade key.** `subscribe_daemon_messages` claims the key
+  before any setup; a claim finding a live owner bounces — the relay-side
+  REQ and the pending-request record stay untouched — so re-arming a
+  covered key (the restore apply #218, the resume paths #291/#308) is
+  idempotent.
+- **A bounce is never backed by setup alone.** A claim advances
+  `Setup → Live` only once at least one relay accepted the REQ — the SDK
+  reports a subscribe every relay rejected as an `Ok`, and a rejected REQ
+  is dropped from the relay's registry, beyond reconnect resubscription's
+  reach, so it counts as a failed setup and releases the claim. A claim
+  landing mid-setup parks until the owner is Live (then bounces, against
+  a real REQ) or until that setup fails and releases (then takes over and
+  subscribes itself). A bounce is therefore always a promise of coverage
+  that exists.
+- **A bounce is a lease refresh**: it re-arms the owner's 30-minute idle
+  window, so the promised coverage lasts a full window from the bounce,
+  not whatever remained of the old one.
+- **Teardown is targeted and atomic.** The idle-timeout exit consults the
+  registry under its lock: re-armed → reset the timer and keep running;
+  otherwise unsubscribe that one trade's REQ and purge its pending record
+  while still holding the lock, so no concurrent claim can land between
+  the decision and the destruction. The purge spares a record whose
+  waiter is still attached: its caller registered it before claiming
+  (the create/take ordering) and may be parked on the registry, about to
+  subscribe from scratch — only a detached record (its 10 s timeout ran)
+  is dead state. Shutdown/closed-channel exits tear
+  down unconditionally — their receiver is dead — and post-reconnect
+  coverage belongs to the re-arm paths, not to the registry.
+- **An abandoned setup cannot wedge a key.** The claim is an RAII guard:
+  a setup that ends in neither mark-live nor release (a panic unwinding
+  it, a cancelled future) frees the claim on drop, so parked claims take
+  over instead of hanging every later take/create on that key.
+
+### Inbound Kind 14 actions consumed by `dispatch_mostro_message`
+
+**Peer-reveal capture (#334), before the per-action arms.** Any message —
+whatever its action — whose payload carries a `SmallOrder` naming **both**
+trade pubkeys (an `Order` payload or a `PaymentRequest`) reveals the
+counterparty: our trade key is matched against the two and the other side
+is taken, symmetrically, with no per-action role table. The peer is then
+persisted to the trade row (`update_trade_counterparty` — the row is the
+durable peer record, the session a cache of it; on web the write is a
+stub, #233, and the session is the only holder) and the session is
+updated **or created**: no session is the maker's *normal* case, since
+`take_order` is the only other session creator. Ordering is load-bearing:
+the capture runs after the generation gate and the local→daemon UUID
+reconciliation (it writes by the daemon's order id) but **before the
+take-waiter interception**, so a take's first reply — consumed there and
+never seen by the arms — still reveals. `BondSlashed` is exempt for the
+same reason it skips the generation gate: it may address a superseded
+generation and must not write order state. Empty or unparsable pubkeys do
+not qualify, the terminal-status guard applies (a stale replay over a
+finished trade must not respawn chat state), and an already-complete
+capture (session holds peer + shared key) short-circuits — the capture
+runs for every replayed message on each restart, and that replay is also
+what rebuilds sessions after one.
+
+| Action                             | Payload variant                                     | Effect on the local trade row                                                    |
 |------------------------------------|-----------------------------------------------------|----------------------------------------------------------------------------------|
 | `WaitingBuyerInvoice`              | (status sync)                                       | `status → WaitingBuyerInvoice`                                                   |
+| `AddInvoice`                       | `Payload::Order(small_order)`                       | Maker-buyer path (a taker's nonce-correlated copy is consumed by the take interception, even when late): `status → WaitingBuyerInvoice` (payload status, fallback `status_for_action`), `amount_sats ← small_order.amount` when > 0 — synced to book **and** DB so `tradeAmountProvider` sees the sats. Keyed by the message's order id (`trade_index` is `None`). The follow-up `AddInvoice` with a `Payload::Peer` (counterparty reputation) is ignored. A payload status of `settled-hold-invoice` is the payout-failure replacement request (mostrod `check_failure_retries`, retries exhausted) and also maps to `WaitingBuyerInvoice` — persisting the settled status would hide the request and strand the payout. |
+| `InvoiceUpdated`                   | (status sync)                                       | `status → SettledHoldInvoice`: mostrod sends this only from `pay_new_invoice`, when the buyer's replacement payout invoice is accepted on a settled escrow — the payout is pending again on the new invoice |
 | `PayInvoice`                       | `Payload::PaymentRequest(small_order, bolt11, amt)` | `hold_invoice ← bolt11`, `amount_sats ← amt ?? small_order.amount`, `status → WaitingPayment` |
-| `BuyerTookOrder` / `HoldInvoicePaymentAccepted` | `SmallOrder` with `status = active`      | `status → Active` (routed through `map_core_status` kebab-case)                  |
+| `BuyerTookOrder` / `HoldInvoicePaymentAccepted` | `SmallOrder` with `status = active`      | `status → Active` (routed through `map_core_status` kebab-case). The peer reveal happens in the pre-dispatch capture above, not in this arm. |
 | `FiatSentOk`                       | (status sync)                                       | `status → FiatSent`                                                              |
-| `HoldInvoicePaymentSettled` / `Released` / `PurchaseCompleted` | (status sync)             | `status → SettledHoldInvoice`                                                    |
+| `HoldInvoicePaymentSettled` / `Released` | (status sync)                                 | `status → SettledHoldInvoice`: the seller's escrow settled, the buyer payout is still pending; shown as `payout-pending`, not as completion |
+| `PurchaseCompleted`                | (status sync)                                       | `status → Success`: the buyer payout completed; only now may either party rate |
+| `CooperativeCancelInitiatedByYou` / `CooperativeCancelInitiatedByPeer` | (none)     | No status change (the protocol has no cancel-requested status): `cooperative_cancel_state → RequestedByMe` / `RequestedByPeer` on the row, and a `TradeUpdate` with the row's **current** status (`Active` or `FiatSent`) and reason `CooperativeCancelRequestedByMe` / `CooperativeCancelRequestedByPeer`, so the trade screen and the Notifications cards announce the request. Gated like a status sync (terminal row, cursor). |
 | `CooperativeCancelAccepted`        | (status sync)                                       | `status → CooperativelyCanceled`                                                 |
 | `AdminSettled` / `AdminCanceled`   | (status sync)                                       | `status → SettledByAdmin` / `CanceledByAdmin`                                    |
+| `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |
+| `PayBondInvoice`                   | `Payload::PaymentRequest(small_order, bolt11, _)`   | A bond bolt11 no take or create is waiting for (the daemon's idempotent re-send, a replay): refreshes `bond.invoice` and its expiry on an existing bond-window row, never creates one |
+| `BondSlashed`                      | `Payload::Order(small_order)`                       | Informational: the payload amount is the **slashed bond**, never written to the order. Marks `bond.state → Slashed` when the row still exists (winning over a provisional `Released`), infers the cause from the row's status, emits `on_bond_slashed`. Exempt from the generation gate |
+| `AddBondInvoice`                   | `Payload::BondPayoutRequest { order, slashed_at }`  | No trade row involved: upserts a payout claim for (`sender`, order) per the §6.4 table (`contracts/bond.md`). Our own `PaymentRequest` echo is ignored |
+| `BondInvoiceAccepted` / `BondPayoutCompleted` | (none)                                   | Claim phase → `Acknowledged` / `Completed` for the sending node's claim; no trade row involved |
+
+Two rules gate every status sync in the table, and both exist for the
+same reason: the global kind-14 subscription carries no `since`, so every
+start replays the node's whole history for an order, and relays serve
+stored events **newest-first**. A skipped sync is skipped entirely — no
+book write, no DB write, no `TradeUpdate`, and no session side effect
+either (both guards run before the peer-key/chat setup of the
+escrow-locked arm).
+
+**Ordering.** Each order carries a persisted high-water mark,
+`status_cursor:<order_id>` — the `created_at` of the newest daemon
+message whose status write was applied, stored **raw, in the node's time
+domain**, which is the domain the comparison uses. It is deliberately not
+clamped to the local clock the way the chat cursor is: there the value is
+a subscription `since`, where a low one only asks for more than needed,
+while here it is an ordering comparator, and a local clock behind the
+node's would make a newest event store a smaller mark that the next older
+one then outranks. The mark is instead not advanced at all by an event
+dated beyond the clock-skew tolerance, so one malformed timestamp cannot
+silence an order for good; a node genuinely further ahead makes the rule
+inert for that order rather than wrong, and says so in the log. Ordering
+between the node's own events survives any uniform skew — they share one
+clock. A message **strictly older** than the mark is skipped. Strictly older: the daemon emits several messages for one
+order inside the same second (the `PayInvoice` reputation follow-up, for
+one) and those are genuine in-order traffic. Without this rule the oldest
+message of the backlog is applied last and wins — a disputed trade came
+back as `waiting-buyer-invoice` on the next start, with every state in
+between emitted to the UI on the way down.
+
+The mark is deliberately **not** cleared with the trade row: a `Canceled`
+before the trade went active wipes that row, which is exactly where the
+terminal rule below goes blind, and the mark is what still refuses the
+replay afterwards. One settings row per order ever traded, the same shape
+and lifetime as the `chat_cursor:` that bounds the other channel.
+
+**Terminal status.** A sync that would move a trade out of a
+**hard-terminal** status (`Canceled` / `CanceledByAdmin` /
+`CooperativelyCanceled` / `Expired` / `Success` / `SettledByAdmin` /
+`CompletedByAdmin`) is skipped: mostrod never reopens a finished trade,
+so such a message is an out-of-order replay whatever its timestamp says.
+This is not redundant with the ordering rule — it reads the in-memory
+book, so it is the only one of the two that still holds where there is no
+durable store (web, #233). `Canceled` applies it too: a stale
+timeout-cancel replayed over an order that was later re-taken and
+completed must not overwrite the outcome; its wipe path is unaffected,
+since it starts from non-terminal waiting states.
+
+`SettledHoldInvoice` and `Dispute` are deliberately **not** in the
+terminal set — they still progress, to `Success` and to admin
+resolutions respectively — so it is the ordering rule, not this one, that
+keeps a replay from walking them backwards.
+
+Every arm above that syncs a status also emits a `TradeUpdate` (see
+`on_trade_updated`) after the in-memory book update and the DB
+persistence attempt — DB failures are logged, never suppress the
+emission, and leave the row behind the book. `Canceled` included, which
+emits whether it wiped the row or kept it as history.
+
+### Per-order serialization
+
+`dispatch_mostro_message` and `take_order`'s persistence block both check
+local state and mutate the order book, the trade row and the session
+several `await`s later. Those two halves are **one operation per
+`order_id`**, held under a per-order mutex (#259).
+
+Without it, a delivery that passed its check can be overtaken by a retake
+of the same order while it is suspended: the retake persists its own
+state, then the suspended handler resumes and writes the previous
+generation's outcome over it. The `Canceled` arm is the reachable case —
+it has mutated book and DB with no generation check of its own.
+
+Invariants:
+
+- **The lock is keyed by `order_id`, never global.** One stalled handler
+  must not stop every other trade.
+- **`dispatch_mostro_message` takes it once the message kind is parsed**,
+  covering the local→daemon id reconcile, the waiter interception and
+  every per-action arm. A message carrying no order id owns no order state
+  and takes no lock.
+- **No caller may hold it while waiting for a daemon reply.** That reply is
+  delivered by `dispatch_mostro_message`, which takes the same lock, so
+  `take_order` acquires it only *after* its wait resolves — around the
+  persistence block alone. Holding it across the wait deadlocks the take
+  until its 10 s timeout.
+- **The take reply hands the guard off.** The dispatcher that resolves a
+  waiting `take_order` sends its own guard through the waiter channel
+  (`Wake.order_guard`), so consumed-reply → persistence is one critical
+  section: released instead, a second daemon message already queued on the
+  FIFO mutex would beat the woken task and run its arm against a trade row
+  and session that do not exist yet. The guard rides *inside* the channel
+  value, so every losing path releases it by dropping — a timed-out
+  waiter's failed send, a receiver dropped with the reply unread. Only the
+  take reply carries a guard: an add-invoice's effects are persisted by
+  the dispatch arms themselves (still holding it), and a create's gap is
+  owned by the reconcile block and the late-confirmation persistence
+  (#394 — the Kind 38383 feed is the order book only, never a source of
+  ownership or keys).
+- **The registry tracks live work, not history**: entries no handler holds
+  any more are dropped on the next acquisition, so it does not grow with
+  every order ever dispatched.
+- **A generation gate backs the lock**, read under it so it cannot
+  interleave with a retake's rebind: a message addressed to a trade key
+  *older* than the one currently bound to its order (`trade_keys` binding)
+  belongs to a superseded attempt and is dropped whole — the lock
+  serializes concurrent handlers, the gate rejects the late ones.
+  Strictly-older only: a retake's first reply arrives on the NEW key while
+  the binding still holds the old index (`take_order` rebinds only after
+  that reply resolves its waiter), and the identity counter only grows, so
+  newer-than-bound is always legitimate. No binding fails open (a create's
+  confirmation precedes any binding for the daemon id). The gate compares
+  against the persisted `trade_keys` binding — written by `take_order` on
+  every confirmed take (`store_trade_key_index`) — not against
+  `Session.trade_key_index`, which a retake could leave stale until #335.
+  That is why a superseded reply was already dropped even while the session
+  held the previous take's index. `BondSlashed` is
+  exempt: it never writes order state, and a trailing slash notice
+  addressed to the slashed (superseded) generation is by-design delivery
+  (#197).
+
+### Daemon cancellation semantics
+
+- A trade still in `Pending` / `WaitingBuyerInvoice` / `WaitingPayment` when
+  the daemon's `Canceled` arrives never went active — no peer, no chat, no
+  exchange (typically a waiting-state timeout). Its trade row and in-memory
+  session are **deleted**, mirroring v1's session cleanup; chat messages are
+  untouched (none can exist before Active). Trades that progressed keep
+  their row (and chat) as history, marked `Canceled`. `InProgress` rows are
+  conservatively kept: that status only enters via the Kind 38383 sync,
+  where mostrod masks both waiting AND active phases as `in-progress`.
+  This covers a taker's own cancel too: `cancel_order` leaves a never-active
+  row for this arm rather than marking it `Canceled` first. When the row
+  cannot be deleted, nothing else is touched — row, session and book entry
+  keep describing the same trade.
+- The **Kind 38383 `canceled`** wipes such a trade the same way, on both
+  ingest paths (`wipe_on_public_cancel`). mostrod reports the end of a
+  never-active trade twice — it publishes the event, then enqueues the
+  `Canceled` (cancel.rs) — and the two reach separate subscriptions, so
+  either may be handled first. Had the event written `Canceled` into the
+  row, the `Canceled` arm would then keep it as history, and a maker's own
+  cancel (or a take whose maker cancelled) would end in My Trades or out of
+  it depending on arrival order. The event is also the only report of an
+  expired pending order: mostrod publishes `Expired` as `canceled` and sends
+  no message. The decision reads the trade row itself, never the book, so a
+  stranger's `pending` order cannot pass for a never-active trade of ours;
+  a trade further along keeps its row, marked `Canceled`. When the event
+  wins, the `Canceled` that follows is dropped by the tombstone below.
+- Every such wipe — the daemon's `Canceled`, the public `canceled` and the
+  stale sweep — goes through `wipe_never_active_trade` → `wipe_trade_row`,
+  which leaves a tombstone (`trade_wiped:<order_id>` =
+  `<wiped_at>:<trade_key_index>`, #394). The order's replayed messages for
+  that generation are then dropped whole, so on the next start neither the
+  DM rebuild nor `adopt_range_remainder` brings the row back. A retake of the
+  order is a later generation and lifts it (`persist_trade_row`).
+- The handler MUST NOT blindly remove the order from the in-memory book: on
+  a taker-responsible timeout mostrod republishes the order as `pending`
+  BEFORE sending `Canceled`, so a blind remove races the republish and
+  loses the order until restart. The book is fed only by Kind 38383 events;
+  a genuine cancel arrives as a status update and the UI filters it out.
+- A wiped **take** hands its order back to the public book. While the take
+  stood, the entry carried the local trade status wherever the wire's was
+  refused (see *Public status vs. trade status*) — so the `pending`
+  republish, arriving first, was refused, and nothing arrives after the
+  `Canceled` to correct it: the order vanished from the ex-taker's book alone.
+  The book therefore notes the latest public view of each order the d-tag
+  subscription watches (the book feed keeps an existing note current after
+  that subscription idles out), and the wipe settles the entry from it:
+  - latest view `pending` → the entry becomes that view, takeable again;
+  - any other view, or none while the entry holds a non-`pending` local
+    status → the entry is dropped, so the next Kind 38383 event lands on
+    nothing local and applies as is (this covers a `Canceled` that overtook
+    the republish);
+  - no view and the entry already `pending` → left alone.
+
+  Only that settle reads a note back, so a note is forgotten once nothing
+  can: when the order's public view turns hard-terminal (after that event's
+  own wipe decision, which settles from it), and when a daemon message ends
+  the trade without a wipe. The notes tolerate a poisoned lock.
+
+  A **maker's** own order dies with the cancel; its entry is left to the
+  daemon's Kind 38383 `canceled`. Every reference client (mobile, mostrix,
+  mostro-cli) builds its book from Kind 38383 alone, so an ex-taker there
+  sees the republish without any of this.
+
+### Stale-state sweep
+
+Covers cancellations whose daemon message the app never received (closed or
+offline when the daemon's waiting window expired). Runs 60s after the
+order subscription starts, then every 30 minutes: waiting trades past
+their window (`timeout_at`, else `started_at + 900`) are checked against
+the public book — `pending` republish wipes taker rows (handing the order
+back to the book, as the `Canceled` wipe does) and resyncs maker
+rows to `Pending`; an outright cancel wipes; absence from the book or the
+ambiguous `in-progress` marker changes nothing. Every action requires a
+positive daemon signal; the clock only triggers the check. The sweep also
+drops keyless in-memory sessions older than 24h and logs counters.
 
 `process_gift_wrap_rumor` MUST update **both** the in-memory order book
 (`order_book().update_order_status`) **and** the persisted trade row
 (`db.update_trade_fields`) on every status transition, otherwise UI
 screens reading from the DB (e.g. `tradeInfoStreamProvider`) will miss
 transitions that only affected in-memory state.
+
+### Public status vs. trade status
+
+The `s` tag of a Kind 38383 event is NIP-69's four-bucket view of an order
+(`pending`, `in-progress`, `success`, `canceled`), not its protocol status.
+mostrod publishes `in-progress` when an order leaves the book and then stops
+publishing altogether while the trade is private: `Active`, `FiatSent`,
+`Dispute` and `SettledHoldInvoice` never reach the wire (`create_status_tags`
+returns `create_event = false`, so no event is emitted at all). `WaitingTakerBond`
+publishes as `pending`; `WaitingMakerBond` publishes nothing.
+
+Therefore `OrderStatus::InProgress` on this client means **taken, real state
+unknown** — never that the escrow is locked. The fine-grained states are only
+ever learned from daemon messages, so:
+
+- Both wire ingest paths (`ingest_order_event`, `subscribe_single_order`) MUST
+  gate the status through `wire_status_applies`: a wire status may only fill an
+  unknown or still-`Pending` local status, or announce a terminal one. It MUST
+  NOT overwrite a status already learned from a daemon message, in the trade row
+  or in the order book. The book entry carries that local status only while
+  a trade of ours stands: once a never-active take is wiped, the entry goes
+  back to the public view (see *Daemon cancellation semantics*). A
+  `canceled` that reaches a never-active trade of ours wipes it instead of
+  being written to it (same section).
+- Both paths MUST accept only events authored by the active node: a d-tag is
+  public, and a `canceled` deletes a trade row. The live book subscription
+  and the refetch drop other authors before ingesting; `subscribe_single_order`
+  reads the client's shared notification stream and checks the author itself.
+  A node switch re-targets the long-lived subscriptions but leaves that task
+  running on the previous node, so it also stops as soon as an event of its
+  order arrives while its node is no longer the active one, as
+  `dispatch_mostro_message` rejects any sender but the active node.
+- One `subscribe_single_order` task per order. A retake calls it again while
+  the first take's task may still be running; the newest call replaces the
+  older task, which stops at its next wake without touching the
+  `mostro-order-<id>` subscription. The new task re-opens it (a fresh idle
+  window) and is the only one that may drop it.
+- UI MUST NOT treat `InProgress` as `Active`. Actions the daemon gates on
+  `Active`/`FiatSent` (dispute, fiat-sent) are rejected with `CantDo` in that
+  state (issue #203).
 
 ### `update_trade_fields(order_id, status?, hold_invoice?, amount_sats?)` (DB contract)
 
@@ -303,3 +907,24 @@ The seller pay-invoice flow uses two complementary providers from
   advancing past the pay-invoice screen; the NWC widget's local
   `onPaymentSuccess` callback only flips a spinner flag and does not
   navigate.
+
+`tradeStatusProvider` reads the order book first, and the book holds the
+order's public view. So the My Trades list and `TradeDetailScreen` show a
+trade through `shownTradeStatus`, where the trade row wins in two cases:
+
+- **The row has ended** (success or a cancelled family): whatever the book
+  says about the order afterwards is no longer this trade.
+- **A take, and the book says `pending`**: a public `pending` means nobody
+  holds the order, so it is never a take's status. That covers a take left
+  `Canceled` by builds that wrote the status before the daemon answered
+  (the daemon later put the order back in the book), and a take parked at
+  `WaitingTakerBond`, whose order is still `pending` in public.
+
+Every other live status wins over an open row.
+
+The take screen sends a user who already takes part in the order to the
+trade instead of offering to take it again (`tradeRoleLookupProvider`,
+`participatingRole`). A take whose row has ended does not count: once its
+order can be taken again, such a row can only be what a take that never
+went active left behind, and `take_order` replaces it with the new take's
+row. A maker's row always counts, and so does any row still open.

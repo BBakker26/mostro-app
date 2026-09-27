@@ -12,7 +12,7 @@
 //! `CashuMintUnreachable`, …); Dart maps them to localized strings.
 
 use anyhow::{bail, Result};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};
 
@@ -23,8 +23,13 @@ use crate::mostro::escrow_mode;
 
 // ── Global wallet ─────────────────────────────────────────────────────────────
 
-fn wallet_lock() -> &'static RwLock<Option<CashuWallet>> {
-    static WALLET: OnceLock<RwLock<Option<CashuWallet>>> = OnceLock::new();
+/// The wallet is held behind an `Arc` so callers can take a handle and drop the
+/// lock before talking to the mint. Holding the read guard across a round trip
+/// would park a waiting `cashu_disconnect` in tokio's write-preferring queue,
+/// and every `cashu_status` behind it — a frozen screen for as long as the mint
+/// takes to answer.
+fn wallet_lock() -> &'static RwLock<Option<Arc<CashuWallet>>> {
+    static WALLET: OnceLock<RwLock<Option<Arc<CashuWallet>>>> = OnceLock::new();
     WALLET.get_or_init(|| RwLock::new(None))
 }
 
@@ -38,8 +43,17 @@ fn changes() -> &'static broadcast::Sender<CashuWalletStatus> {
 /// `cdk` owns that file's schema and migrations; mixing it into the app's would
 /// put two migration systems on one file.
 fn proof_store_path() -> Result<String> {
-    let app_db = crate::db::app_db::app_db_path()
-        .ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable"))?;
+    sibling_store_path(crate::db::app_db::app_db_path())
+}
+
+/// The proof store that belongs next to `app_db`, or `CashuStoreUnavailable`
+/// when the app database was never opened.
+///
+/// Split from [`proof_store_path`] so it can be tested on its argument instead
+/// of on a process-wide `OnceLock` that any other test in this binary may have
+/// set — two of them in `api::escrow` and `api::reputation` call `init_db`.
+fn sibling_store_path(app_db: Option<&str>) -> Result<String> {
+    let app_db = app_db.ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable"))?;
 
     // `init_db`'s argument is a filesystem path on native and an IndexedDB
     // *database name* on web. A name has no parent, and joining onto `""` would
@@ -65,15 +79,50 @@ fn lifecycle_lock() -> &'static tokio::sync::Mutex<()> {
     LIFECYCLE.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// May a wallet built for `connected_to` still be installed?
+/// Is a wallet bound to `bound_to` still the right wallet for the active node?
 ///
-/// Only if the active node still resolves to that same mint. A node switch
-/// during the connect makes the wallet stale before it is ever stored, and the
-/// funds it would manage belong to a different node's mint.
-fn should_install(connected_to: &str, resolved_now: Option<&str>) -> bool {
+/// Only if that node still resolves to the same mint. A node switch makes the
+/// wallet stale — the funds it manages belong to the previous node's mint — and
+/// that is true both of a wallet about to be installed and of one already
+/// running, so both paths ask this question.
+fn same_mint(bound_to: &str, resolved_now: Option<&str>) -> bool {
     resolved_now
-        .map(|current| current.trim_end_matches('/') == connected_to.trim_end_matches('/'))
+        .map(|current| current.trim_end_matches('/') == bound_to.trim_end_matches('/'))
         .unwrap_or(false)
+}
+
+/// A handle to the live wallet, once it is established that it is the wallet
+/// the *active* node should be using.
+///
+/// Every operating entry point goes through here rather than reading the lock
+/// itself: `is_cashu_mode()` says the node speaks Cashu, not that it pins the
+/// mint this wallet is bound to. Without the second check, switching node A → B
+/// keeps spending and receiving at A's mint.
+///
+/// The `Arc` is cloned out and the guard dropped, so the mint round trip that
+/// follows holds no lock.
+///
+/// **Errors**: `CashuNotEnabled`, `CashuNotConnected`, `CashuMintChanged`.
+async fn active_wallet() -> Result<Arc<CashuWallet>> {
+    ensure_enabled()?;
+
+    let wallet = wallet_lock()
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("CashuNotConnected"))?;
+
+    let resolved = escrow_mode::get_resolved();
+    if !same_mint(wallet.mint_url(), resolved.config.mint_url.as_deref()) {
+        log::warn!(
+            "[cashu] wallet is bound to {}, the active node resolves to {:?}",
+            wallet.mint_url(),
+            resolved.config.mint_url
+        );
+        bail!("CashuMintChanged");
+    }
+
+    Ok(wallet)
 }
 
 /// Fail closed unless the active node was positively identified as Cashu.
@@ -85,8 +134,10 @@ fn ensure_enabled() -> Result<()> {
 }
 
 async fn snapshot() -> CashuWalletStatus {
-    let guard = wallet_lock().read().await;
-    match guard.as_ref() {
+    // Cloned out so the balance read below — which can reach the store — runs
+    // with no lock held.
+    let wallet = wallet_lock().read().await.clone();
+    match wallet.as_ref() {
         Some(wallet) => CashuWalletStatus {
             connected: true,
             mint_url: Some(wallet.mint_url().to_string()),
@@ -132,7 +183,8 @@ async fn notify() {
 /// connected wallet is returned as is rather than reconnected.
 ///
 /// **Errors**: `CashuNotEnabled` when the node is not a usable Cashu node,
-/// `NoIdentity` before an identity is loaded, plus the markers from
+/// `NoIdentity` before an identity is loaded, `CashuNoMnemonic` for an
+/// nsec-imported identity (there is no seed to derive), plus the markers from
 /// [`CashuWallet::connect`].
 pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     ensure_enabled()?;
@@ -140,11 +192,23 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     // One lifecycle change at a time — see [`lifecycle_lock`].
     let _lifecycle = lifecycle_lock().lock().await;
 
+    // An already connected wallet is reused — but only while it is still bound
+    // to the mint the active node pins. After a node switch it is the previous
+    // node's wallet, and returning it here would be the same stale-binding bug
+    // the install check below guards against, just one call later.
     {
-        let guard = wallet_lock().read().await;
-        if guard.is_some() {
-            drop(guard);
-            return Ok(snapshot().await);
+        let live = wallet_lock().read().await.clone();
+        if let Some(wallet) = live {
+            let resolved = escrow_mode::get_resolved();
+            if same_mint(wallet.mint_url(), resolved.config.mint_url.as_deref()) {
+                return Ok(snapshot().await);
+            }
+            log::info!(
+                "[cashu] dropping the wallet bound to {}: the active node now resolves to {:?}",
+                wallet.mint_url(),
+                resolved.config.mint_url
+            );
+            *wallet_lock().write().await = None;
         }
     }
 
@@ -155,9 +219,7 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
         .mint_url
         .ok_or_else(|| anyhow::anyhow!("CashuNotEnabled"))?;
 
-    let seed = crate::api::identity::current_bip39_seed()
-        .await
-        .ok_or_else(|| anyhow::anyhow!("NoIdentity"))?;
+    let seed = crate::api::identity::current_bip39_seed().await?;
 
     let db_path = proof_store_path()?;
     let wallet = CashuWallet::connect(&mint_url, seed, &db_path).await?;
@@ -168,7 +230,7 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     // should be bound to, and installing anyway would leave the wallet pointing
     // at the previous node's mint.
     let resolved_now = escrow_mode::get_resolved();
-    if !should_install(&mint_url, resolved_now.config.mint_url.as_deref()) {
+    if !same_mint(&mint_url, resolved_now.config.mint_url.as_deref()) {
         log::warn!(
             "[cashu] discarding a wallet for {mint_url}: the active node now resolves to {:?}",
             resolved_now.config.mint_url
@@ -179,7 +241,7 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     {
         let mut guard = wallet_lock().write().await;
         if guard.is_none() {
-            *guard = Some(wallet);
+            *guard = Some(Arc::new(wallet));
         }
     }
 
@@ -197,12 +259,7 @@ pub async fn cashu_status() -> Result<CashuWalletStatus> {
 ///
 /// **Errors**: `CashuNotEnabled`, `CashuNotConnected`.
 pub async fn cashu_get_balance() -> Result<u64> {
-    ensure_enabled()?;
-    let guard = wallet_lock().read().await;
-    let wallet = guard
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("CashuNotConnected"))?;
-    wallet.balance().await
+    active_wallet().await?.balance().await
 }
 
 /// Redeem an encoded Cashu token into the wallet, returning the amount received.
@@ -210,14 +267,7 @@ pub async fn cashu_get_balance() -> Result<u64> {
 /// **Errors**: `CashuNotEnabled`, `CashuNotConnected`, `CashuReceiveFailed`
 /// (wrong mint, already spent, malformed).
 pub async fn cashu_receive_token(encoded: String) -> Result<u64> {
-    ensure_enabled()?;
-    let amount = {
-        let guard = wallet_lock().read().await;
-        let wallet = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("CashuNotConnected"))?;
-        wallet.receive_token(&encoded).await?
-    };
+    let amount = active_wallet().await?.receive_token(&encoded).await?;
     notify().await;
     Ok(amount)
 }
@@ -227,34 +277,25 @@ pub async fn cashu_receive_token(encoded: String) -> Result<u64> {
 /// **Errors**: `CashuNotEnabled`, `CashuNotConnected`, `CashuAmountZero`,
 /// `CashuSendFailed` (insufficient funds included).
 pub async fn cashu_create_token(amount_sats: u64) -> Result<String> {
-    ensure_enabled()?;
-    let token = {
-        let guard = wallet_lock().read().await;
-        let wallet = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("CashuNotConnected"))?;
-        wallet.create_token(amount_sats).await?
-    };
+    let token = active_wallet().await?.create_token(amount_sats).await?;
     notify().await;
     Ok(token)
 }
 
-/// Reconcile pending proofs with the mint, returning the amount reclaimed.
+/// Reconcile the proof store with the mint: proofs the mint reports spent are
+/// forgotten, and the new balance is broadcast.
 ///
-/// **Errors**: `CashuNotEnabled`, `CashuNotConnected`.
-pub async fn cashu_check_proofs_state() -> Result<u64> {
-    ensure_enabled()?;
-    let reclaimed = {
-        let guard = wallet_lock().read().await;
-        let wallet = guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("CashuNotConnected"))?;
-        wallet.check_proofs_state().await?
-    };
-    if reclaimed > 0 {
-        notify().await;
-    }
-    Ok(reclaimed)
+/// **Returns nothing on purpose.** It reclaims neither an unredeemed token of
+/// ours nor the proofs of a half-finished send — cdk's state check cannot see
+/// either — so there is no "reclaimed N sat" to report and C2 does not pretend
+/// otherwise; see [`CashuWallet::sweep_spent_proofs`]. Getting an abandoned
+/// token back is phase C10.
+///
+/// **Errors**: `CashuNotEnabled`, `CashuNotConnected`, `CashuMintChanged`.
+pub async fn cashu_sweep_spent_proofs() -> Result<()> {
+    active_wallet().await?.sweep_spent_proofs().await?;
+    notify().await;
+    Ok(())
 }
 
 /// Drop the in-memory wallet. Proofs stay on disk — this is a disconnect, not a
@@ -368,13 +409,13 @@ pub async fn lock_escrow(order_id: String) -> Result<crate::api::types::CashuEsc
         );
     }
 
-    let trade_index = crate::api::orders::get_trade_key_index(&order_id)
+    let trade_index = crate::api::orders::trade_key_for_order(&order_id)
         .await
         .ok_or_else(|| anyhow::anyhow!("no persisted trade key for order {order_id}"))?;
     let seller_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
     let identity_keys = crate::api::identity::get_transport_identity_keys(&seller_keys).await?;
     let mostro_hex = crate::config::active_mostro_pubkey();
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&mostro_hex)?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&mostro_hex)?;
 
     let seller_hex = seller_keys.public_key().to_hex();
 
@@ -546,9 +587,14 @@ pub fn on_cashu_wallet_changed() -> CashuWalletStream {
 mod tests {
     use super::*;
 
-    /// The escrow globals are process-wide and shared with `api::escrow`, so
-    /// the lock has to be too — see `escrow_mode::test_lock`.
-    use crate::mostro::escrow_mode::test_lock as escrow_lock;
+    /// The escrow globals are process-wide, and so is the lock that guards
+    /// them: a private mutex here would serialize this module against itself
+    /// while racing `api::escrow` and `mostro::escrow_mode`, whose `clear()`
+    /// would land mid-test — issue #309, which is why the lock lives with the
+    /// state. It also resets to a node that has advertised nothing.
+    fn escrow_lock() -> std::sync::MutexGuard<'static, ()> {
+        escrow_mode::lock_globals_for_test()
+    }
 
     #[tokio::test]
     async fn every_entry_point_is_shut_on_a_lightning_node() {
@@ -564,7 +610,7 @@ mod tests {
                 .await
                 .unwrap_err(),
             cashu_create_token(1).await.unwrap_err(),
-            cashu_check_proofs_state().await.unwrap_err(),
+            cashu_sweep_spent_proofs().await.unwrap_err(),
             // The escrow entry points too: these move real money, and the
             // seller reaches them from a trade screen rather than a wallet one.
             cashu_escrow_quote("any-order".to_string()).await.unwrap_err(),
@@ -594,24 +640,23 @@ mod tests {
     }
 
     #[test]
-    fn a_wallet_is_only_installed_while_its_mint_is_still_the_active_one() {
-        // The scenario: a connect is awaiting the mint when the user switches
-        // node. The lifecycle lock keeps `cashu_disconnect` from interleaving,
-        // but the escrow mode is not under that lock — so the connect can
-        // finish holding a wallet bound to the *previous* node's mint. Storing
-        // it would silently point the app's funds at the wrong mint.
+    fn a_wallet_serves_only_the_node_whose_mint_it_is_bound_to() {
+        // Two scenarios, one question. A connect awaiting the mint when the
+        // user switches node would otherwise store a wallet bound to the
+        // *previous* node's mint; an already-connected wallet would otherwise
+        // keep serving that mint after the switch. Both ask this.
         let mint = "https://mint.example.com";
 
-        // Still the active mint — install.
-        assert!(should_install(mint, Some(mint)));
+        // Still the active mint — keep it.
+        assert!(same_mint(mint, Some(mint)));
         // Trailing slashes are a formatting difference, not a different mint.
-        assert!(should_install(mint, Some("https://mint.example.com/")));
-        assert!(should_install("https://mint.example.com/", Some(mint)));
+        assert!(same_mint(mint, Some("https://mint.example.com/")));
+        assert!(same_mint("https://mint.example.com/", Some(mint)));
 
-        // The node switched to a different Cashu node — discard.
-        assert!(!should_install(mint, Some("https://other.example.com")));
-        // The node switched to Lightning, or the mode was cleared — discard.
-        assert!(!should_install(mint, None));
+        // The node switched to a different Cashu node — drop it.
+        assert!(!same_mint(mint, Some("https://other.example.com")));
+        // The node switched to Lightning, or the mode was cleared — drop it.
+        assert!(!same_mint(mint, None));
     }
 
     #[tokio::test]
@@ -654,6 +699,9 @@ mod tests {
                 created_at: 0,
                 expires_at: None,
                 is_mine: false,
+                rating: 0.0,
+                total_reviews: 0,
+                days_active: 0,
             },
             role: TradeRole::Seller,
             counterparty_pubkey: counterparty_pubkey.to_string(),
@@ -671,6 +719,11 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            peer_rating: None,
+            peer_reviews: None,
+            peer_days: None,
+            rated_at: None,
+            bond: None,
         }
     }
 
@@ -723,12 +776,32 @@ mod tests {
     fn the_proof_store_needs_an_initialised_database() {
         // Arrange / Act — with no app DB there is nowhere to put the store,
         // and guessing a path would create one the user never sees.
-        let err = proof_store_path().unwrap_err();
+        //
+        // Asked of the pure helper rather than of `proof_store_path()`: the
+        // path behind it is a process-wide `OnceLock`, and other tests in this
+        // binary (`api::escrow`, `api::reputation`) call `init_db`, so the
+        // global answer depends on which test ran first.
+        let err = sibling_store_path(None).unwrap_err();
 
         // Assert
         assert!(
             err.to_string().contains("CashuStoreUnavailable"),
             "got {err}"
         );
+    }
+
+    #[test]
+    fn the_proof_store_sits_next_to_the_app_database() {
+        // Arrange / Act / Assert — a native path gets a sibling file, never a
+        // second schema inside the app's own database.
+        assert_eq!(
+            sibling_store_path(Some("/data/app/mostro.sqlite")).unwrap(),
+            "/data/app/cashu.sqlite"
+        );
+
+        // On web `init_db` is given an IndexedDB *name*, which has no parent
+        // directory. Joining onto `""` would put a stray relative file next to
+        // the process's cwd, so the bare name is used instead.
+        assert_eq!(sibling_store_path(Some("mostro")).unwrap(), "cashu.sqlite");
     }
 }

@@ -1,10 +1,20 @@
 pub mod app_db;
+/// The web attachment cache's eviction rule; compiled everywhere for the
+/// same reason as `trade_json`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub mod blob_cache;
+#[cfg(target_arch = "wasm32")]
+pub mod indexeddb;
 pub mod schema;
 pub mod seeds;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sqlite;
+/// Used by the IndexedDB backend; compiled everywhere so its unit tests run
+/// natively, where the trait implementation that calls it does not exist.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub mod trade_json;
 #[cfg(target_arch = "wasm32")]
-pub mod indexeddb;
+pub mod web_lock;
 
 use anyhow::Result;
 
@@ -18,6 +28,44 @@ pub mod settings_keys {
     /// [`super::Storage::save_active_mostro_pubkey`] accessor.
     pub const ACTIVE_MOSTRO_PUBKEY: &str = "active_mostro_pubkey";
 
+    /// Nodes the user switched away from that may still send a payout claim,
+    /// JSON map of pubkey (hex) → unix seconds until which they stay on the
+    /// kind-14 filter (docs/ANTI_ABUSE_BOND.md §6.4).
+    pub const BOND_CLAIM_RETAINED_NODES: &str = "bond_claim_retained_nodes";
+
+    // ── Push notifications (docs/PUSH_NOTIFICATIONS.md §7.1, §8.1) ──────────
+
+    /// The master toggle, `"true"` / `"false"`; absent reads as enabled.
+    pub const PUSH_ENABLED: &str = "push_enabled";
+    /// The device token Dart last handed over, so a restart can unregister
+    /// before the device hands one over again.
+    pub const PUSH_TOKEN: &str = "push_token";
+    /// The platform of [`PUSH_TOKEN`]: `android`, `ios` or `web`.
+    pub const PUSH_PLATFORM: &str = "push_platform";
+    /// Every trade pubkey registered with the push server, JSON map of
+    /// pubkey (hex) → [`crate::mostro::push::PushRegistration`].
+    pub const PUSH_REGISTRATIONS: &str = "push_registrations";
+    /// Nodes the push server operator refused, JSON map of node (hex) →
+    /// unix seconds of the `403`; each entry clears per §7.1.
+    pub const PUSH_NODE_REFUSALS: &str = "push_node_refusals";
+
+    /// User-added Mostro nodes, JSON array of `crate::api::nodes::CustomNode`.
+    /// The trusted registry is compiled in (`crate::config::TRUSTED_MOSTRO_NODES`);
+    /// only user additions are persisted.
+    pub const CUSTOM_MOSTRO_NODES: &str = "custom_mostro_nodes";
+
+    /// Cached kind 0 display metadata for known Mostro nodes, JSON map of
+    /// pubkey (hex) → `crate::api::nodes::NodeMetadata`. Refreshed opportunistically
+    /// by `refresh_mostro_node_metadata`; stale entries are acceptable.
+    pub const MOSTRO_NODE_METADATA: &str = "mostro_node_metadata";
+
+    /// Cached kind 38385 instance events of known Mostro nodes, JSON map of
+    /// pubkey (hex) → `crate::api::node_stats::CachedNodeInfo` (the event's
+    /// `created_at` and raw tags). Lets the node selector paint fee, range,
+    /// currencies, custody and bond before any relay answers; refreshed at
+    /// startup and by every `fetch_mostro_node_stats`.
+    pub const MOSTRO_NODE_INFO: &str = "mostro_node_info";
+
     /// Developer escrow-mode override — `"auto"` or `"force_cashu"`.
     /// See [`crate::mostro::escrow_mode::EscrowModeOverride`].
     pub const ESCROW_MODE_OVERRIDE: &str = "escrow_mode_override";
@@ -25,6 +73,132 @@ pub mod settings_keys {
     /// Developer mint-URL override, pointing Cashu at a local mint instead of
     /// the one the node advertises.
     pub const CASHU_MINT_URL_OVERRIDE: &str = "cashu_mint_url_override";
+
+    /// Per-order chat `since` cursor — the `created_at` (unix seconds, decimal
+    /// string) of the newest accepted outer chat event, clamped to the local
+    /// clock. Full key is `chat_cursor:<order_id>`; build it with
+    /// [`chat_cursor`]. Bounds the chat subscription backlog so a flood is
+    /// never re-downloaded on restart (protocol chat spec, issue #246).
+    pub const CHAT_CURSOR_PREFIX: &str = "chat_cursor:";
+
+    /// Build the settings key holding the chat `since` cursor for `order_id`.
+    pub fn chat_cursor(order_id: &str) -> String {
+        format!("{CHAT_CURSOR_PREFIX}{order_id}")
+    }
+
+    /// Per-order solver pubkey (hex) for the dispute chat.
+    pub const DISPUTE_ADMIN_PREFIX: &str = "dispute_admin:";
+
+    /// Build the settings key holding the dispute solver's pubkey for
+    /// `order_id`.
+    ///
+    /// The dispute record itself stays in memory by design — status and
+    /// resolution are re-derivable from daemon events. This pubkey is not: it
+    /// arrives exactly once, in `admin-took-dispute`, and without it the
+    /// dispute chat keys cannot be derived again after a restart.
+    pub fn dispute_admin(order_id: &str) -> String {
+        format!("{DISPUTE_ADMIN_PREFIX}{order_id}")
+    }
+
+    /// Per-order marker that *this* side opened the dispute.
+    pub const DISPUTE_MINE_PREFIX: &str = "dispute_mine:";
+
+    /// Build the settings key marking the dispute on `order_id` as opened by
+    /// this side. Like the solver pubkey, the origin is not re-derivable from
+    /// daemon events after a restart (PR #256 review), so it is persisted
+    /// alongside and read back by rehydration. Presence is the value.
+    pub fn dispute_mine(order_id: &str) -> String {
+        format!("{DISPUTE_MINE_PREFIX}{order_id}")
+    }
+
+    /// Per-order status replay cursor — the `created_at` (unix seconds,
+    /// decimal string) of the newest daemon message whose status write was
+    /// applied, clamped to the local clock. Full key is
+    /// `status_cursor:<order_id>`; build it with [`status_cursor`].
+    pub const STATUS_CURSOR_PREFIX: &str = "status_cursor:";
+
+    /// Build the settings key holding the status replay cursor for `order_id`.
+    ///
+    /// Same shape and purpose as [`chat_cursor`], for the other channel: the
+    /// global kind-14 subscription carries no `since`, so every start replays
+    /// the node's full history, and relays serve stored events newest-first.
+    /// Without a durable high-water mark the oldest message in that backlog is
+    /// applied last and wins, walking a trade's status back to where it began.
+    ///
+    /// Deliberately **not** cleared with the trade row: a cancel before the
+    /// trade went active wipes that row (`cancellation_wipes_history`), and the
+    /// cursor is precisely what still refuses the older messages afterwards.
+    /// One tiny row per order ever traded, like the chat cursor.
+    pub fn status_cursor(order_id: &str) -> String {
+        format!("{STATUS_CURSOR_PREFIX}{order_id}")
+    }
+
+    /// Prefix of [`invoice_step_start`] keys.
+    pub const INVOICE_STEP_PREFIX: &str = "invoice_step_start:";
+
+    /// Per-order start of the current invoice step
+    /// (`<status>:<unix secs>:<trade_index>`, node clock), written only by the
+    /// AddInvoice / PayInvoice arms. Unlike [`status_cursor`], later messages
+    /// for the same step never advance it, so the invoice screens' countdown
+    /// cannot be pushed out.
+    ///
+    /// `trade_index` is the generation the message was addressed to, and it
+    /// decides before the timestamp does: a step belongs to one trade, not to
+    /// one status, so a later take opens a new step even though its status is
+    /// `WaitingBuyerInvoice` again, and a message for a superseded key never
+    /// walks the current start backwards (`next_step_start`, issue #567).
+    /// Values written before the generation existed carry two fields and are
+    /// replaced by the first message that can name its own.
+    ///
+    /// The generation identifies a **taker's** take, since a taker derives a
+    /// key per take. A maker keeps one key for the whole life of the order,
+    /// so nothing in the value distinguishes their takes: the key is deleted
+    /// instead when the daemon puts the order back on the book
+    /// (`resync_republished_maker_order`), and when the row is wiped.
+    pub fn invoice_step_start(order_id: &str) -> String {
+        format!("{INVOICE_STEP_PREFIX}{order_id}")
+    }
+
+    /// Per-order tombstone marking the trade row as deleted **on purpose** —
+    /// by the pre-active cancel wipe (`cancellation_wipes_history`) or by the
+    /// stale sweeper — so a daemon message for an order with no row can tell
+    /// "removed deliberately" (replay noise, drop it) from "never persisted"
+    /// (a confirmation timeout, where the message is the only recovery signal
+    /// there is). Full key is `trade_wiped:<order_id>`; build it with
+    /// [`trade_wiped`]. See issue #394.
+    ///
+    /// The value is `<wiped_at>:<trade_index>`. `wiped_at` is the wipe's unix
+    /// timestamp (decimal): the Canceled event's `created_at` where an event
+    /// drove the wipe, the local clock in the sweeper, which acts on public
+    /// book state and has no event — never compare it against the status
+    /// cursor, whose timestamps come from a different rule. `trade_index` is
+    /// the dead row's trade key index: the tombstone covers that generation
+    /// and older, so a later take of the same order — a different trade —
+    /// classifies `NeverWritten` and stays recoverable (`tombstone_covers`,
+    /// review round 2).
+    ///
+    /// Cleared whenever a trade row is (re)created for the order id — a
+    /// canceled order can be legitimately re-taken (`persist_trade_row`).
+    pub const TRADE_WIPED_PREFIX: &str = "trade_wiped:";
+
+    /// Every per-order key family above, plus the one identity-scoped map.
+    /// All of it describes trades of the identity that wrote it, so
+    /// [`super::Storage::clear_identity_data`] drops it with the rows. What
+    /// is left in the store is device preference: the active node, custom
+    /// nodes, node caches, push token and toggle, developer overrides.
+    pub const IDENTITY_SCOPED_PREFIXES: [&str; 6] = [
+        CHAT_CURSOR_PREFIX,
+        DISPUTE_ADMIN_PREFIX,
+        DISPUTE_MINE_PREFIX,
+        STATUS_CURSOR_PREFIX,
+        INVOICE_STEP_PREFIX,
+        TRADE_WIPED_PREFIX,
+    ];
+
+    /// Build the settings key marking `order_id`'s trade row as wiped.
+    pub fn trade_wiped(order_id: &str) -> String {
+        format!("{TRADE_WIPED_PREFIX}{order_id}")
+    }
 }
 
 /// Storage trait — implemented by both SQLite (native) and IndexedDB (WASM).
@@ -50,7 +224,19 @@ pub trait Storage: Send + Sync {
 
     async fn save_message(&self, msg: &crate::api::types::ChatMessage) -> Result<()>;
     async fn list_messages(&self, trade_id: &str) -> Result<Vec<crate::api::types::ChatMessage>>;
+    /// Unread messages across all trades, including closed or removed trades.
+    /// Notification recovery must not depend on a live chat subscription.
+    async fn list_unread_messages(&self) -> Result<Vec<crate::api::types::ChatMessage>>;
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()>;
+
+    /// `true` if a message with this id was already accepted and stored.
+    ///
+    /// This is the **durable inner-event-id dedup** required by the chat spec:
+    /// both parties hold `K_sign`, so either can re-wrap a previously received
+    /// inner event inside a fresh outer one ("I sent the fiat", replayed). An
+    /// in-memory LRU is not enough — an evicted entry makes the message
+    /// replayable again — so the check must reach persisted history.
+    async fn message_exists(&self, id: &str) -> Result<bool>;
 
     async fn save_relay(&self, relay: &crate::api::types::RelayInfo) -> Result<()>;
     async fn delete_relay(&self, url: &str) -> Result<()>;
@@ -63,13 +249,8 @@ pub trait Storage: Send + Sync {
     /// imported identity starts with a fresh trade key counter.
     async fn delete_identity(&self) -> Result<()>;
 
-    async fn save_queued_message(
-        &self,
-        msg: &crate::queue::outbox::QueuedMessage,
-    ) -> Result<()>;
-    async fn list_queued_messages(
-        &self,
-    ) -> Result<Vec<crate::queue::outbox::QueuedMessage>>;
+    async fn save_queued_message(&self, msg: &crate::queue::outbox::QueuedMessage) -> Result<()>;
+    async fn list_queued_messages(&self) -> Result<Vec<crate::queue::outbox::QueuedMessage>>;
     async fn update_queued_message_status(
         &self,
         id: &str,
@@ -94,6 +275,16 @@ pub trait Storage: Send + Sync {
     /// Delete ALL trade key entries. Used on identity deletion — the
     /// order→index mappings belong to the removed identity's derivation tree.
     async fn clear_trade_keys(&self) -> Result<()>;
+
+    /// Delete everything the current identity produced: trades, chat
+    /// messages and their cached attachments, payout claims, the outbound
+    /// queue, the cached order book
+    /// (its `is_mine` marks are the identity's) and the per-order settings
+    /// ([`settings_keys::IDENTITY_SCOPED_PREFIXES`] and the retained-nodes
+    /// map). Used on identity deletion, next to [`Self::clear_trade_keys`]:
+    /// a new user must start as on a fresh install (issue #533). Relays,
+    /// the node choice and preferences stay — they belong to the device.
+    async fn clear_identity_data(&self) -> Result<()>;
 
     // ── Settings / Mostro node ────────────────────────────────────────────────
 
@@ -126,15 +317,18 @@ pub trait Storage: Send + Sync {
         order_id: &str,
     ) -> Result<Option<crate::api::types::TradeInfo>>;
 
+    /// Delete a persisted trade by the order ID it is associated with.
+    ///
+    /// Chat messages are keyed separately (`messages.trade_id` holds the
+    /// order id, no FK) and are deliberately NOT touched here. No-op when
+    /// no matching trade exists.
+    async fn delete_trade_by_order_id(&self, order_id: &str) -> Result<()>;
+
     /// Update the order ID inside a persisted trade (e.g. local UUID → daemon UUID).
     ///
     /// Loads the trade whose `order.id == old_order_id`, replaces `order.id`
     /// with `new_order_id`, and re-saves it. No-op when no matching trade exists.
-    async fn update_trade_order_id(
-        &self,
-        old_order_id: &str,
-        new_order_id: &str,
-    ) -> Result<()>;
+    async fn update_trade_order_id(&self, old_order_id: &str, new_order_id: &str) -> Result<()>;
 
     /// Update fields on a persisted trade identified by `order.id`.
     ///
@@ -147,4 +341,91 @@ pub trait Storage: Send + Sync {
         hold_invoice: Option<String>,
         amount_sats: Option<u64>,
     ) -> Result<()>;
+
+    /// Persist the counterparty (taker) reputation snapshot on a trade
+    /// identified by `order.id` (issue #305). No-op when no matching trade
+    /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no
+    /// snapshot, so this is only called when one was carried.
+    async fn update_trade_peer_reputation(
+        &self,
+        order_id: &str,
+        rating: f64,
+        reviews: u32,
+        days: u32,
+    ) -> Result<()>;
+
+    /// Replace the anti-abuse bond attached to a trade (`$.bond`), keeping
+    /// every other field. Used for the bond's own transitions — requested,
+    /// re-requested, locked, released — which move no other trade field.
+    async fn update_trade_bond(
+        &self,
+        order_id: &str,
+        bond: &crate::api::types::BondInfo,
+    ) -> Result<()>;
+
+    /// Set the durable "local user rated this trade" marker (`rated_at`, unix
+    /// seconds) on the trade identified by `order.id` (issue #339). Written
+    /// after `submit_rating` publishes so the rated state and the
+    /// duplicate-rating guard survive a restart. No-op when no matching trade
+    /// exists.
+    async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
+
+    /// Record who asked to cancel an active trade cooperatively
+    /// (`$.cooperative_cancel_state`) on the trade identified by `order.id`.
+    /// The status is left alone: the protocol has no cancel-requested status,
+    /// the trade goes on until the counterparty also cancels. No-op when no
+    /// matching trade exists.
+    async fn set_cooperative_cancel_state(
+        &self,
+        order_id: &str,
+        state: crate::api::types::CooperativeCancelState,
+    ) -> Result<()>;
+
+    /// Persist the counterparty's trade pubkey on the trade identified by
+    /// `order.id` (issue #334). Written when a daemon message reveals it, for
+    /// both roles — the trade row is the durable peer record; the in-memory
+    /// session is only a cache. Callers must pass a non-empty pubkey: this
+    /// method never clears an already-known counterparty. No-op when no
+    /// matching trade exists.
+    async fn update_trade_counterparty(
+        &self,
+        order_id: &str,
+        counterparty_pubkey: &str,
+    ) -> Result<()>;
+
+    // ── Bond payout claims (docs/ANTI_ABUSE_BOND.md §6.4) ───────────────────
+
+    /// Insert or replace the claim keyed by its `(node_pubkey, order_id)`.
+    async fn save_bond_claim(&self, claim: &crate::api::types::BondClaim) -> Result<()>;
+
+    /// The claim a node issued for an order, if any.
+    async fn get_bond_claim(
+        &self,
+        node_pubkey: &str,
+        order_id: &str,
+    ) -> Result<Option<crate::api::types::BondClaim>>;
+
+    /// Every claim, most recently changed first.
+    async fn list_bond_claims(&self) -> Result<Vec<crate::api::types::BondClaim>>;
+
+    /// Remove one claim. No-op when absent.
+    async fn delete_bond_claim(&self, node_pubkey: &str, order_id: &str) -> Result<()>;
+
+    // ── Chat attachment cache (#589) ──────────────────────────────────────────
+
+    /// Keep an attachment's blob, **still encrypted**, under its SHA-256, so
+    /// it is not downloaded again. Decrypted bytes are never stored: the cache
+    /// is as unreadable as the copy on the Blossom server. Identity-scoped —
+    /// [`Self::clear_identity_data`] empties it.
+    ///
+    /// The default keeps nothing, for stores that have no cache: a miss only
+    /// costs a download. SQLite and IndexedDB both implement it.
+    async fn save_attachment_blob(&self, _sha256: &str, _blob: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
+    /// The encrypted blob cached under `sha256`, if any.
+    async fn get_attachment_blob(&self, _sha256: &str) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }

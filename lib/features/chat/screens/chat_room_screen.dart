@@ -4,16 +4,44 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/attachments/attachment_flow.dart';
+import 'package:mostro/features/chat/attachments/upload_controller.dart';
+import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/chat/widgets/info_panels.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
+import 'package:mostro/features/chat/widgets/upload_bubble.dart';
+import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
 import 'package:mostro/shared/widgets/nym_avatar.dart';
 import 'package:mostro/src/rust/api/messages.dart' as messages_api;
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
+
+/// How close to the end of the list still counts as "following along".
+///
+/// Roughly one message bubble, so a reader who has scrolled up by even one
+/// message is left where they are.
+const double kFollowThresholdPixels = 80;
+
+/// How long a burst of incoming messages may stay quiet before the room is
+/// marked read once, instead of once per message.
+const Duration kMarkReadDebounce = Duration(milliseconds: 400);
+
+/// Whether an arriving message should scroll the list.
+///
+/// Pinning is the reason this is a decision at all: auto-scrolling
+/// unconditionally yanks a reader away from older messages every time the
+/// counterparty types, and a history burst starts one animation per message.
+bool isPinnedToBottom({
+  required double offset,
+  required double maxScrollExtent,
+}) => maxScrollExtent - offset <= kFollowThresholdPixels;
 
 /// Route: /chat_room/:orderId
 ///
@@ -22,17 +50,15 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 ///
 /// The Rust bridge is fully wired:
 /// - [messages_api.getMessages] seeds message history on open.
-/// - [messages_api.sendMessage] encrypts and publishes outbound messages via
-///   NIP-59 gift wrap, directed to the ECDH shared-key pubkey per the Mostro
-///   P2P chat protocol.
+/// - [messages_api.sendMessage] encrypts and publishes outbound messages as
+///   a Mostro chat envelope (kind 14 signed with the shared key, NIP-44
+///   inner kind 1 signed by the trade key), directed to the ECDH shared-key
+///   pubkey per the Mostro P2P chat protocol.
 /// - [incomingMessageProvider] delivers real-time incoming messages from the
 ///   Rust `subscribe_incoming_chat` background task.
 /// - [messages_api.markAsRead] resets unread count when the room is entered.
 class ChatRoomScreen extends ConsumerStatefulWidget {
-  const ChatRoomScreen({
-    super.key,
-    required this.orderId,
-  });
+  const ChatRoomScreen({super.key, required this.orderId});
 
   final String orderId;
 
@@ -48,6 +74,24 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   /// Message list seeded from bridge history, then appended via stream.
   final List<rust_types.ChatMessage> _messages = [];
+
+  /// Ids already in [_messages]. A replayed envelope is common, and scanning
+  /// the list for every incoming message made dedup O(history) per message.
+  final Set<String> _seenIds = {};
+
+  /// Coalesces mark-read across a burst. A history replay would otherwise
+  /// fire one bridge call per message.
+  Timer? _markReadDebounce;
+
+  /// Rooms notifier captured while the widget is live, so a pending
+  /// mark-read can still be flushed from [dispose], where `ref` is unusable.
+  ChatRoomsNotifier? _roomsNotifier;
+
+  /// Follow animations still in flight (see [_scrollToBottom]). While one
+  /// runs the list lags behind the extent it is heading for, so the position
+  /// alone would misreport a reader who never left the bottom.
+  int _followAnimations = 0;
+
   bool _historyLoaded = false;
 
   final ScrollController _scrollController = ScrollController();
@@ -55,12 +99,21 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    // The ref.listen in build only fires on changes; when the provider is
+    // already alive with data (pushed from a screen that watches the same
+    // family member), there is no change coming — apply the current value.
+    unawaited(
+      _applyTradeIdentity(
+        ref.read(tradeInfoProvider(widget.orderId)).valueOrNull,
+      ),
+    );
     _loadHistory();
     _markRead();
   }
 
   @override
   void dispose() {
+    _flushMarkRead();
     _scrollController.dispose();
     super.dispose();
   }
@@ -78,7 +131,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         // Deduplication uses the same id check as _onIncomingMessage so the
         // invariant is identical in both paths.
         for (final msg in msgs) {
-          if (!_messages.any((m) => m.id == msg.id)) {
+          // This room is the buyer<->seller conversation only: solver
+          // messages from a dispute share the order key in the store but
+          // must never surface here — replying would go to the counterparty,
+          // not the solver (PR #254 review).
+          if (msg.messageType != rust_types.MessageType.peer) continue;
+          if (_seenIds.add(msg.id)) {
             _messages.add(msg);
           }
         }
@@ -93,12 +151,73 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }
 
   Future<void> _markRead() async {
+    final notifications = ref.read(notificationsProvider.notifier);
+    // Record read intent before either storage call yields. The notifier can
+    // mark the persisted card even while its initial load is still pending.
+    final cardRead = notifications.markAsRead(
+      NotificationModel.chatCardId(widget.orderId, fromSolver: false),
+    );
+    await _markReadWith(ref.read(chatRoomsNotifierProvider.notifier));
+    await cardRead;
+  }
+
+  /// [rooms] is passed in rather than read from `ref` so [_flushMarkRead]
+  /// can run it from [dispose].
+  Future<void> _markReadWith(ChatRoomsNotifier? rooms) async {
     try {
       await messages_api.markAsRead(tradeId: widget.orderId);
-      ref.read(chatRoomsNotifierProvider.notifier).markRead(widget.orderId);
+      if (rooms != null && rooms.mounted) rooms.markRead(widget.orderId);
     } catch (e) {
       debugPrint('[chat] markAsRead failed: $e');
     }
+  }
+
+  /// Upserts this trade's room into [chatRoomsNotifierProvider] with the
+  /// peer identity resolved from [trade].
+  ///
+  /// The chat-list screen is the only other place that hydrates the notifier,
+  /// so reaching this screen directly (trade-detail chat chip, deep link)
+  /// would otherwise leave [_resolveRoom] on its empty-handle placeholder and
+  /// the header stuck on the localized "Unknown" fallback.
+  ///
+  /// Cheap while it cannot succeed: [tradeInfoToChatRoom] bails synchronously
+  /// on an empty counterparty (a maker before the reveal), and once the room
+  /// is resolved the guard below skips the rest — so no in-flight bookkeeping
+  /// is needed however often the provider emits.
+  Future<void> _applyTradeIdentity(rust_types.TradeInfo? trade) async {
+    if (trade == null) return;
+    final rooms = ref.read(chatRoomsNotifierProvider);
+    final index = rooms.indexWhere((r) => r.orderId == widget.orderId);
+    if (index >= 0 && rooms[index].peerPubkey.isNotEmpty) return;
+    try {
+      final room = await tradeInfoToChatRoom(trade);
+      if (room == null || !mounted) return;
+      ref
+          .read(chatRoomsNotifierProvider.notifier)
+          .upsertRoom(_withLivePreview(room));
+    } catch (e) {
+      debugPrint('[chat] applyTradeIdentity failed: $e');
+    }
+  }
+
+  /// [tradeInfoToChatRoom] rebuilds the preview from the message store, which
+  /// can lag the entry [_buildRoomPreview] upserted for a message arriving
+  /// mid-hydration — and resurrect an unread count [_markRead] just zeroed.
+  /// [ChatRoomsNotifier.upsertRoom] replaces the room wholesale, so when the
+  /// live entry is at least as recent, keep its preview and take only the
+  /// resolved identity.
+  ChatRoomState _withLivePreview(ChatRoomState hydrated) {
+    final rooms = ref.read(chatRoomsNotifierProvider);
+    final index = rooms.indexWhere((r) => r.orderId == widget.orderId);
+    if (index < 0) return hydrated;
+    final live = rooms[index];
+    if (live.lastMessageAt < hydrated.lastMessageAt) return hydrated;
+    return hydrated.copyWith(
+      lastMessage: live.lastMessage,
+      lastMessageIsOwn: live.lastMessageIsOwn,
+      lastMessageAt: live.lastMessageAt,
+      unreadCount: live.unreadCount,
+    );
   }
 
   Future<void> _onSend(String text) async {
@@ -111,14 +230,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         content: text.trim(),
       );
       if (!mounted) return;
-      setState(() => _messages.add(sent));
-      _scrollToBottom();
-      ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(
-            _buildRoomPreview(
-              lastMsg: sent,
-              rooms: ref.read(chatRoomsNotifierProvider),
-            ),
-          );
+      _addOwnMessage(sent);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -132,21 +244,68 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
   }
 
+  /// Appends a message this device sent and moves the room preview to it.
+  void _addOwnMessage(rust_types.ChatMessage sent) {
+    // Every path that appends to [_messages] must go through [_seenIds], or
+    // an echo of this send arriving on the stream would render it twice.
+    if (_seenIds.add(sent.id)) {
+      setState(() => _messages.add(sent));
+    }
+    _scrollToBottom();
+    ref
+        .read(chatRoomsNotifierProvider.notifier)
+        .upsertRoom(
+          _buildRoomPreview(
+            lastMsg: sent,
+            rooms: ref.read(chatRoomsNotifierProvider),
+          ),
+        );
+  }
+
+  /// Paperclip: pick, confirm, then send (#589). The spinner covers the
+  /// pick and the read; the upload shows its own progress in the list.
   Future<void> _onAttach() async {
-    setState(() => _isAttaching = true);
-    // File attachment via send_file is wired in Rust; UI hook deferred.
-    await Future<void>.delayed(const Duration(seconds: 1));
-    if (mounted) setState(() => _isAttaching = false);
+    if (_isAttaching) return;
+    final picked = await pickAttachmentToSend(
+      context,
+      ref,
+      onBusy: (busy) => setState(() => _isAttaching = busy),
+    );
+    if (picked == null || !mounted) return;
+    _scrollToBottom();
+    final sent = await ref
+        .read(chatUploadsProvider(widget.orderId).notifier)
+        .send(picked.name, picked.bytes);
+    if (sent != null && mounted) _addOwnMessage(sent);
+  }
+
+  Future<void> _retryUpload(String uploadId) async {
+    final sent = await ref
+        .read(chatUploadsProvider(widget.orderId).notifier)
+        .retry(uploadId);
+    if (sent != null && mounted) _addOwnMessage(sent);
   }
 
   // ── Incoming stream ───────────────────────────────────────────────────────
 
   void _onIncomingMessage(rust_types.ChatMessage msg) {
-    if (_messages.any((m) => m.id == msg.id)) return; // deduplicate
+    // Dispute-channel traffic never belongs in the peer room (see
+    // _loadHistory).
+    if (msg.messageType != rust_types.MessageType.peer) return;
+    if (!_seenIds.add(msg.id)) return; // deduplicate
+    // Decide from where the reader is *before* the message is added. The
+    // extent only grows at the next layout, so reading here keeps the
+    // decision about the list they were looking at, whenever that lands.
+    final wasAtBottom = _isPinnedToBottom();
     setState(() => _messages.add(msg));
-    _scrollToBottom();
-    _markRead();
-    ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(
+    // Only follow the conversation if the user was already at the bottom;
+    // otherwise an arriving message yanks them away from what they were
+    // reading, and a burst starts one animation per message.
+    if (wasAtBottom) _scrollToBottom();
+    _scheduleMarkRead();
+    ref
+        .read(chatRoomsNotifierProvider.notifier)
+        .upsertRoom(
           _buildRoomPreview(
             lastMsg: msg,
             rooms: ref.read(chatRoomsNotifierProvider),
@@ -156,41 +315,84 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /// Whether the list is close enough to the end to keep following it.
+  bool _isPinnedToBottom() {
+    // A follow animation still in flight means the reader was at the bottom
+    // and only the animation is behind; do not mistake that for scrolling up.
+    if (_followAnimations > 0) return true;
+    if (!_scrollController.hasClients) return true;
+    final position = _scrollController.position;
+    return isPinnedToBottom(
+      offset: position.pixels,
+      maxScrollExtent: position.maxScrollExtent,
+    );
+  }
+
+  /// Mark the room read once the burst settles, instead of once per message.
+  void _scheduleMarkRead() {
+    _roomsNotifier = ref.read(chatRoomsNotifierProvider.notifier);
+    _markReadDebounce?.cancel();
+    _markReadDebounce = Timer(kMarkReadDebounce, () {
+      if (mounted) _markRead();
+    });
+  }
+
+  /// Runs a pending mark-read now instead of dropping it: the reader saw the
+  /// burst, and leaving within the debounce window must not leave the room
+  /// flagged unread until their next visit.
+  void _flushMarkRead() {
+    final pending = _markReadDebounce;
+    _markReadDebounce = null;
+    if (pending == null || !pending.isActive) return;
+    pending.cancel();
+    unawaited(_markReadWith(_roomsNotifier));
+  }
+
   void _scrollToBottom() {
+    // Counted from the request, not the frame, so a message arriving before
+    // the post-frame callback runs already sees a follow in progress.
+    _followAnimations++;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+      if (!mounted || !_scrollController.hasClients) {
+        _followAnimations--;
+        return;
       }
+      // Interrupting an earlier animation (a newer follow, or the reader
+      // dragging) completes its future, so the counter always drains.
+      _scrollController
+          .animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          )
+          .whenComplete(() => _followAnimations--);
     });
   }
 
   void _toggleTradeInfo() => setState(() {
-        _showTradeInfo = !_showTradeInfo;
-        if (_showTradeInfo) _showUserInfo = false;
-      });
+    _showTradeInfo = !_showTradeInfo;
+    if (_showTradeInfo) _showUserInfo = false;
+  });
 
   void _toggleUserInfo() => setState(() {
-        _showUserInfo = !_showUserInfo;
-        if (_showUserInfo) _showTradeInfo = false;
-      });
+    _showUserInfo = !_showUserInfo;
+    if (_showUserInfo) _showTradeInfo = false;
+  });
 
   ChatRoomState _resolveRoom(List<ChatRoomState> rooms) {
     return rooms.firstWhere(
       (r) => r.orderId == widget.orderId,
-      orElse: () => ChatRoomState(
-        orderId: widget.orderId,
-        peerPubkey: '',
-        // Locale-independent: the localized "Unknown" is resolved at render
-        // time via ChatRoomState.displayHandle, never cached in the model.
-        peerHandle: '',
-        peerIconIndex: 0,
-        peerColorHue: 180,
-        isSelling: false,
-      ),
+      orElse:
+          () => ChatRoomState(
+            orderId: widget.orderId,
+            peerPubkey: '',
+            // Locale-independent: the localized "Unknown" is resolved at render
+            // time via ChatRoomState.displayHandle, never cached in the model.
+            peerHandle: '',
+            peerIconIndex: 0,
+            peerColorHue: 180,
+            isSelling: false,
+          ),
     );
   }
 
@@ -206,9 +408,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // Strategy: start from room.unreadCount (as last set by the bridge) and
     // increment by one only when the incoming message is unread and not ours.
     // _markRead will reset this to 0 once the async call completes.
-    final unread = (lastMsg.isMine || lastMsg.isRead)
-        ? room.unreadCount
-        : room.unreadCount + 1;
+    final unread =
+        (lastMsg.isMine || lastMsg.isRead)
+            ? room.unreadCount
+            : room.unreadCount + 1;
     return room.copyWith(
       lastMessage: lastMsg.content,
       lastMessageIsOwn: lastMsg.isMine,
@@ -235,6 +438,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       (_, next) => next.whenData(_onIncomingMessage),
     );
 
+    // Resolve the peer identity from the trade row, live. Listening (rather
+    // than a one-shot read) keeps the autoDispose provider chain alive, and
+    // rawTradesProvider refetches itself on every trade update — so the
+    // daemon reveal that fills the counterparty (BuyerTookOrder /
+    // HoldInvoicePaymentAccepted) lands here as a fresh emission even while
+    // this screen is open, with no manual refresh or retry bookkeeping. A
+    // one-shot read future would instead go stale (and never resolve) when
+    // that update invalidates the provider mid-await.
+    ref.listen<AsyncValue<rust_types.TradeInfo?>>(
+      tradeInfoProvider(widget.orderId),
+      (_, next) =>
+          next.whenData((trade) => unawaited(_applyTradeIdentity(trade))),
+    );
+
     final l10n = AppLocalizations.of(context);
     final room = _resolveRoom(ref.watch(chatRoomsNotifierProvider));
     final displayHandle = room.displayHandle(l10n);
@@ -242,6 +459,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     if (colors == null) {
       throw StateError('AppColors theme extension must be registered');
     }
+
+    final uploads = ref.watch(chatUploadsProvider(widget.orderId));
 
     final screenWidth = MediaQuery.sizeOf(context).width;
     final showSidePanel = screenWidth >= AppBreakpoints.tablet;
@@ -253,30 +472,31 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         width: 300,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
-          child: _showTradeInfo
-              ? TradeInformationTab(
-                  key: const ValueKey('trade'),
-                  orderId: widget.orderId,
-                )
-              : _showUserInfo
+          child:
+              _showTradeInfo
+                  ? TradeInformationTab(
+                    key: const ValueKey('trade'),
+                    orderId: widget.orderId,
+                  )
+                  : _showUserInfo
                   ? UserInformationTab(
-                      key: const ValueKey('user'),
-                      peerHandle: displayHandle,
-                      peerPubkey: room.peerPubkey,
-                      peerIconIndex: room.peerIconIndex,
-                      peerColorHue: room.peerColorHue,
-                    )
+                    key: const ValueKey('user'),
+                    peerHandle: displayHandle,
+                    peerPubkey: room.peerPubkey,
+                    peerIconIndex: room.peerIconIndex,
+                    peerColorHue: room.peerColorHue,
+                  )
                   : Container(
-                      key: const ValueKey('none'),
-                      color: colors.backgroundCard,
-                      child: Center(
-                        child: Text(
-                          l10n.selectForDetailsHint,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: colors.textSubtle),
-                        ),
+                    key: const ValueKey('none'),
+                    color: colors.backgroundCard,
+                    child: Center(
+                      child: Text(
+                        l10n.selectForDetailsHint,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: colors.textSubtle),
                       ),
                     ),
+                  ),
         ),
       );
     }
@@ -292,85 +512,111 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         if (!showSidePanel)
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 250),
-            child: _showTradeInfo
-                ? TradeInformationTab(
-                    key: const ValueKey('trade'),
-                    orderId: widget.orderId,
-                  )
-                : _showUserInfo
+            child:
+                _showTradeInfo
+                    ? TradeInformationTab(
+                      key: const ValueKey('trade'),
+                      orderId: widget.orderId,
+                    )
+                    : _showUserInfo
                     ? UserInformationTab(
-                        key: const ValueKey('user'),
-                        peerHandle: displayHandle,
-                        peerPubkey: room.peerPubkey,
-                        peerIconIndex: room.peerIconIndex,
-                        peerColorHue: room.peerColorHue,
-                      )
+                      key: const ValueKey('user'),
+                      peerHandle: displayHandle,
+                      peerPubkey: room.peerPubkey,
+                      peerIconIndex: room.peerIconIndex,
+                      peerColorHue: room.peerColorHue,
+                    )
                     : const SizedBox.shrink(key: ValueKey('none')),
           ),
 
         // Message list
         Expanded(
-          child: !_historyLoaded
-              ? const Center(child: CircularProgressIndicator())
-              : _messages.isEmpty
+          child:
+              !_historyLoaded
+                  ? const Center(child: CircularProgressIndicator())
+                  : _messages.isEmpty && uploads.isEmpty
                   ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(AppSpacing.lg),
-                        child: Text(
-                          l10n.noMessagesYet(displayHandle),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: colors.textSubtle),
-                        ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: Text(
+                        l10n.noMessagesYet(displayHandle),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: colors.textSubtle),
                       ),
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: AppSpacing.sm),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final msg = _messages[index];
-                        return MessageBubble(
-                          // Adapt the FRB-generated ChatMessage to the
-                          // Dart-side ChatMessage used by MessageBubble.
-                          message: ChatMessage(
-                            id: msg.id,
-                            tradeId: msg.tradeId,
-                            content: msg.content,
-                            isMine: msg.isMine,
-                            isRead: msg.isRead,
-                            hasAttachment: msg.hasAttachment,
-                            createdAt: msg.createdAt.toInt(),
-                            messageType: _msgTypeStr(msg.messageType),
-                          ),
-                          peerColorHue: room.peerColorHue,
-                        );
-                      },
                     ),
+                  )
+                  : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm,
+                    ),
+                    itemCount: _messages.length + uploads.length,
+                    itemBuilder: (context, index) {
+                      // Files still on their way out follow the history.
+                      if (index >= _messages.length) {
+                        final upload = uploads[index - _messages.length];
+                        return UploadBubble(
+                          key: ValueKey(upload.id),
+                          upload: upload,
+                          onRetry: () => _retryUpload(upload.id),
+                          onDiscard:
+                              () => ref
+                                  .read(
+                                    chatUploadsProvider(
+                                      widget.orderId,
+                                    ).notifier,
+                                  )
+                                  .discard(upload.id),
+                        );
+                      }
+                      final msg = _messages[index];
+                      return MessageBubble(
+                        // Adapt the FRB-generated ChatMessage to the
+                        // Dart-side ChatMessage used by MessageBubble.
+                        message: ChatMessage(
+                          id: msg.id,
+                          tradeId: msg.tradeId,
+                          content: msg.content,
+                          isMine: msg.isMine,
+                          isRead: msg.isRead,
+                          hasAttachment: msg.hasAttachment,
+                          createdAt: msg.createdAt.toInt(),
+                          messageType: _msgTypeStr(msg.messageType),
+                          attachment: msg.attachment,
+                        ),
+                        peerColorHue: room.peerColorHue,
+                      );
+                    },
+                  ),
         ),
 
         // Composition bar
         Padding(
-          padding: EdgeInsets.only(
+          padding: const EdgeInsets.only(
             left: AppSpacing.sm,
             right: AppSpacing.sm,
-            bottom:
-                MediaQuery.of(context).viewInsets.bottom + AppSpacing.sm,
+            bottom: AppSpacing.sm,
             top: AppSpacing.xs,
           ),
-          child: MessageInput(
-            onSendText: _onSend,
-            onAttachFile: _onAttach,
-            isAttaching: _isAttaching || _isSending,
-          ),
+          // A closed trade's conversation opens read-only (handoff 11b), and
+          // nothing is offered until the trade says which it is.
+          child: switch (ref.watch(chatRowStateProvider(widget.orderId))) {
+            ChatRowState(isReadOnly: true) => const _ClosedNotice(),
+            ChatRowState(canCompose: false) => const SizedBox.shrink(),
+            _ => MessageInput(
+              onSendText: _onSend,
+              onAttachFile: _onAttach,
+              isAttaching: _isAttaching || _isSending,
+            ),
+          },
         ),
       ],
     );
 
     return Scaffold(
-      // Keyboard avoidance is handled manually via viewInsets.bottom padding
-      // on the composition bar so the BottomNavBar does not push content twice.
-      resizeToAvoidBottomInset: false,
+      // The Scaffold owns keyboard avoidance: the body ends at the taller of
+      // the keyboard and the BottomNavBar, never their sum, so the composer
+      // must not add viewInsets itself.
       appBar: AppBar(
         leading: const BackButton(),
         title: _AppBarTitle(room: room),
@@ -393,15 +639,16 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           ),
         ],
       ),
-      body: showSidePanel && sidePanel != null
-          ? Row(
-              children: [
-                Expanded(child: chatColumn),
-                const VerticalDivider(width: 1),
-                sidePanel,
-              ],
-            )
-          : chatColumn,
+      body:
+          showSidePanel && sidePanel != null
+              ? Row(
+                children: [
+                  Expanded(child: chatColumn),
+                  const VerticalDivider(width: 1),
+                  sidePanel,
+                ],
+              )
+              : chatColumn,
       bottomNavigationBar: const BottomNavBar(),
     );
   }
@@ -410,10 +657,47 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 String _msgTypeStr(rust_types.MessageType t) => switch (t) {
-      rust_types.MessageType.peer => 'peer',
-      rust_types.MessageType.admin => 'admin',
-      rust_types.MessageType.system => 'system',
-    };
+  rust_types.MessageType.peer => 'peer',
+  rust_types.MessageType.admin => 'admin',
+  rust_types.MessageType.system => 'system',
+};
+
+// ── Closed notice ─────────────────────────────────────────────────────────────
+
+/// Stands in for the composer once the trade has ended: the conversation
+/// stays readable, and says why nothing can be sent.
+class _ClosedNotice extends StatelessWidget {
+  const _ClosedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: book.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: book.border),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 14, color: book.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              AppLocalizations.of(context).chatClosedNotice,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: book.textTertiary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ── AppBar title widget ───────────────────────────────────────────────────────
 

@@ -1,6 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mostro/features/trades/providers/trades_providers.dart';
+import 'package:mostro/shared/utils/platform_int64.dart';
+import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
+import 'package:mostro/src/rust/api/types.dart' as rust_types;
+
 // ── Dispute models ────────────────────────────────────────────────────────────
 
 /// Dispute lifecycle status, matching the Rust `DisputeStatus` enum.
@@ -31,6 +36,7 @@ class DisputeMessage {
     required this.isAdmin,
     required this.createdAt,
     this.nostrEventId,
+    this.attachment,
   });
 
   final String id;
@@ -39,6 +45,10 @@ class DisputeMessage {
   final bool isAdmin;
   final int createdAt;
   final String? nostrEventId;
+
+  /// An image or file sent in the dispute chat (#589 phase 3); [content] is
+  /// then its file name.
+  final rust_types.AttachmentInfo? attachment;
 
   bool get isSystem => !isMine && !isAdmin;
 }
@@ -61,8 +71,8 @@ class DisputeItem {
     this.peerIconIndex = 0,
     this.peerColorHue = 180,
     this.isSelling = false,
-  })  : assert(peerIconIndex >= 0 && peerIconIndex <= 36),
-        assert(peerColorHue >= 0 && peerColorHue <= 359);
+  }) : assert(peerIconIndex >= 0 && peerIconIndex <= 36),
+       assert(peerColorHue >= 0 && peerColorHue <= 359);
 
   final String id;
   final String tradeId;
@@ -138,6 +148,42 @@ class DisputeNotifier extends StateNotifier<List<DisputeItem>> {
     }
   }
 
+  /// Apply what the bridge says about a dispute to the record the UI holds
+  /// for the same trade (#143): status, solver, resolution.
+  ///
+  /// Matched by trade — one dispute per trade — and the UI's own fields
+  /// survive: the read flag, the peer's identity and side, which come from
+  /// the trade rather than the dispute. The id too, so a screen opened on it
+  /// keeps finding it. A dispute the UI did not know is inserted as is.
+  void applyBridgeUpdate(DisputeItem fromBridge) {
+    final idx = state.indexWhere((d) => d.tradeId == fromBridge.tradeId);
+    if (idx < 0) {
+      state = [...state, fromBridge];
+      return;
+    }
+    final current = state[idx];
+    final updated = [...state];
+    // Built whole, not through `copyWith`: a field the bridge reports as
+    // null again (no solver, no resolution) must not keep the old value.
+    updated[idx] = DisputeItem(
+      id: current.id,
+      tradeId: current.tradeId,
+      status: fromBridge.status,
+      initiatedByMe: fromBridge.initiatedByMe,
+      openedAt: fromBridge.openedAt,
+      reason: fromBridge.reason,
+      adminPubkey: fromBridge.adminPubkey,
+      resolution: fromBridge.resolution,
+      resolvedAt: fromBridge.resolvedAt,
+      isRead: current.isRead,
+      peerHandle: current.peerHandle,
+      peerIconIndex: current.peerIconIndex,
+      peerColorHue: current.peerColorHue,
+      isSelling: current.isSelling,
+    );
+    state = updated;
+  }
+
   /// Mark a dispute as read.
   void markRead(String disputeId) {
     state = [
@@ -154,8 +200,8 @@ class DisputeNotifier extends StateNotifier<List<DisputeItem>> {
 /// Empty until bridge events are integrated (Phase 12+).
 final disputeNotifierProvider =
     StateNotifierProvider<DisputeNotifier, List<DisputeItem>>(
-  (_) => DisputeNotifier(),
-);
+      (_) => DisputeNotifier(),
+    );
 
 /// All disputes sorted newest-first.
 ///
@@ -179,19 +225,94 @@ final disputeUnreadCountProvider = Provider<int>((ref) {
 });
 
 /// Look up a single dispute by its ID.
-final disputeByIdProvider =
-    Provider.family<DisputeItem?, String>((ref, id) {
-  return ref.watch(disputeNotifierProvider).where((d) => d.id == id).firstOrNull;
+final disputeByIdProvider = Provider.family<DisputeItem?, String>((ref, id) {
+  return ref
+      .watch(disputeNotifierProvider)
+      .where((d) => d.id == id)
+      .firstOrNull;
 });
 
 /// Look up a dispute by its associated trade ID.
 ///
 /// Used by [TradeDetailScreen] to resolve the correct `disputeId` before
 /// navigating to [DisputeChatScreen].
-final disputeByTradeIdProvider =
-    Provider.family<DisputeItem?, String>((ref, tradeId) {
+final disputeByTradeIdProvider = Provider.family<DisputeItem?, String>((
+  ref,
+  tradeId,
+) {
   return ref
       .watch(disputeNotifierProvider)
       .where((d) => d.tradeId == tradeId)
       .firstOrNull;
 });
+
+// ── Hydration (resume) ────────────────────────────────────────────────────────
+
+/// The bridge's dispute record, as the list shows it. The peer's handle and
+/// side are the row's own concern (they come from the trade, not the
+/// dispute) and stay whatever the UI already set.
+DisputeItem disputeItemFromRust(rust_types.Dispute dispute) => DisputeItem(
+  id: dispute.id,
+  tradeId: dispute.tradeId,
+  status: switch (dispute.status) {
+    rust_types.DisputeStatus.open => DisputeStatus.open,
+    rust_types.DisputeStatus.inReview => DisputeStatus.inReview,
+    rust_types.DisputeStatus.resolved => DisputeStatus.resolved,
+  },
+  initiatedByMe: dispute.initiatedByMe,
+  openedAt: platformInt64ToInt(dispute.openedAt),
+  reason: dispute.reason,
+  adminPubkey: dispute.adminPubkey,
+  resolution: switch (dispute.resolution) {
+    null => null,
+    rust_types.DisputeResolution.fundsToBuyer => DisputeResolution.fundsToBuyer,
+    rust_types.DisputeResolution.fundsToSeller =>
+      DisputeResolution.fundsToSeller,
+    rust_types.DisputeResolution.cooperativeCancel =>
+      DisputeResolution.cooperativeCancel,
+  },
+  resolvedAt:
+      dispute.resolvedAt == null
+          ? null
+          : platformInt64ToInt(dispute.resolvedAt),
+  isRead: dispute.isRead,
+);
+
+/// Trade statuses under which the bridge cannot hold a dispute: the trade
+/// ended without one. Everything else is queried, because a dispute's record
+/// and the row's status are written by different arms — `admin-took-dispute`
+/// creates an `InReview` dispute without touching the status, so the row can
+/// still read `active`, `fiatSent` or `inProgress` while a dispute exists.
+const _undisputableStatuses = {
+  rust_types.OrderStatus.success,
+  rust_types.OrderStatus.canceled,
+  rust_types.OrderStatus.expired,
+  rust_types.OrderStatus.cooperativelyCanceled,
+};
+
+/// Re-read every dispute the bridge knows for the trades that can own one
+/// and upsert it: the read flag the UI manages survives (`upsert` keeps it),
+/// and a dispute opened by the peer while the process was suspended appears
+/// without a restart — the shape of the v1 bug this exists to prevent
+/// (MostroP2P/mobile#675). Assumes the trade list was hydrated first.
+Future<void> hydrateDisputes(
+  ProviderContainer container, {
+  Future<rust_types.Dispute?> Function({required String tradeId})? getDispute,
+}) async {
+  final lookup = getDispute ?? disputes_api.getDispute;
+  final trades = await container.read(rawTradesProvider.future);
+  final notifier = container.read(disputeNotifierProvider.notifier);
+  for (final trade in trades) {
+    if (_undisputableStatuses.contains(trade.order.status)) continue;
+    final rust_types.Dispute? dispute;
+    try {
+      dispute = await lookup(tradeId: trade.order.id);
+    } catch (e) {
+      debugPrint(
+        '[disputes] hydrate: getDispute(${trade.order.id}) failed: $e',
+      );
+      continue;
+    }
+    if (dispute != null) notifier.upsert(disputeItemFromRust(dispute));
+  }
+}

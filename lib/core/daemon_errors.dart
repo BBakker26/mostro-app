@@ -1,0 +1,109 @@
+import 'package:mostro/l10n/app_localizations.dart';
+
+/// Whether [error] is the daemon's `NotAllowedByStatus`: the order is not in
+/// the state the request assumed. The Rust core still words this CantDo as
+/// prose; the marker is matched either way.
+bool isStatusRejection(Object error) {
+  final raw = error.toString();
+  return raw.contains('NotAllowedByStatus') ||
+      raw.contains('not allowed in the current order status');
+}
+
+/// Central mapping from the stable error markers the Rust core emits to
+/// localized, actionable messages.
+///
+/// Every daemon-bound action can now fail with a node-capability marker —
+/// the compatibility gate runs on all wraps, not only create/take — and some
+/// Rust wrappers prepend their own context (`ProtocolError: ...`,
+/// `RateUserDispatchFailed: ...`) while interpolating the inner error, so the
+/// marker is matched by substring anywhere in the message.
+///
+/// Returns [fallback] when the error carries no known marker, so each screen
+/// keeps its action-specific generic failure text.
+String localizedDaemonError(
+  AppLocalizations l10n,
+  Object error, {
+  required String fallback,
+}) {
+  final raw = error.toString();
+  // The selected node speaks a wire protocol this v2-native client does not:
+  // it would never read the request, so picking another node is the fix.
+  if (raw.contains('UnsupportedNodeProtocol')) {
+    return l10n.nodeProtocolUnsupported;
+  }
+  // The node's capability fetch has not completed (startup or node switch):
+  // the send failed closed and a retry a moment later usually succeeds.
+  if (raw.contains('NodeCapabilitiesUnknown')) {
+    return l10n.nodeCapabilitiesUnknown;
+  }
+  // The node is in maintenance mode (mostro-core 0.14.6 `MaintenanceMode`):
+  // it refuses new orders and takes until it comes back. Waiting or picking
+  // another node in Settings are the only remedies.
+  if (raw.contains('MaintenanceMode')) {
+    return l10n.mostroMaintenanceMode;
+  }
+  // The local trade-key counter is behind the node's. Create and take resync
+  // it and retry once (mostro::trade_index), so this is a second refusal.
+  if (raw.contains('InvalidTradeIndex')) {
+    return l10n.invalidTradeIndexError;
+  }
+  // The daemon refused the buyer invoice: wrong amount, too short an expiry
+  // for its payout window, or not an invoice at all. The Rust core words the
+  // CantDo as "invalid Lightning invoice"; the marker is matched either way.
+  if (raw.contains('InvalidInvoice') ||
+      raw.contains('invalid Lightning invoice')) {
+    return l10n.invoiceRejected;
+  }
+  // A second add-invoice while an earlier one still waits for the daemon:
+  // refused before it was sent, so the first keeps its reply.
+  if (raw.contains('InvoiceSubmitInFlight')) {
+    return l10n.invoiceSubmitInFlight;
+  }
+  // Payout claim submission (docs/ANTI_ABUSE_BOND.md §6.4).
+  if (raw.contains('InvoiceAmountMismatch')) {
+    return l10n.bondClaimErrorAmount;
+  }
+  if (raw.contains('BondClaimExpired')) {
+    return l10n.bondClaimErrorExpired;
+  }
+  if (raw.contains('BondClaimRejected')) {
+    return l10n.bondClaimErrorRejected;
+  }
+  if (raw.contains('ClaimNotClaimable') || raw.contains('ClaimNotFound')) {
+    return l10n.bondClaimErrorNotClaimable;
+  }
+  if (raw.contains('TradeKeyMissing')) {
+    return l10n.bondClaimErrorNoKey;
+  }
+  // A maker's cancel lost to its own bond, which locked first: the order is
+  // published and is cancelled from its screen (docs/ANTI_ABUSE_BOND.md §6.2).
+  if (raw.contains('BondAlreadyLocked')) {
+    return l10n.bondAlreadyLocked;
+  }
+  // The daemon never answered within the reply window.
+  if (raw.contains('NoDaemonResponse')) {
+    return l10n.sessionTimeoutMessage;
+  }
+  // No relay accepted the event: every relay refused it, timed out or was
+  // unreachable (one that timed out may still have forwarded it, so the daemon
+  // is not guaranteed to have missed it). Not a timeout: the remedy is the
+  // relay list, and a shared message sent users hunting for a network problem
+  // their device did not have.
+  if (raw.contains('NoRelayAccepted')) {
+    return l10n.noRelayAcceptedMessage;
+  }
+  // No durable storage: no trade key can be derived (issue #249).
+  if (raw.contains('StorageUnavailable')) {
+    return l10n.storageUnavailable;
+  }
+  // The trade has not reached the state where the daemon accepts a dispute.
+  if (raw.contains('TradeNotDisputable')) {
+    return l10n.tradeNotDisputable;
+  }
+  // A dispute for this trade already exists, or one is still in flight: the
+  // open is a duplicate either way, and retrying it changes nothing.
+  if (raw.contains('DisputeAlreadyOpen')) {
+    return l10n.disputeAlreadyOpen;
+  }
+  return fallback;
+}

@@ -3030,6 +3030,19 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your deposit was already paid, so the order is published. Cancel it from the order screen.';
 
   @override
+  String get bondCancelRefusedTitle => 'The node didn\'t cancel the deposit';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'This Mostro node may not support cancelling an unpaid deposit yet, or your deposit was just paid. If you haven\'t paid it, you can remove the order from this device. If the invoice is paid later, the order will still be published.';
+
+  @override
+  String get bondRemoveFromDevice => 'Remove from this device';
+
+  @override
+  String get bondKeepWaiting => 'Keep waiting';
+
+  @override
   String createOrderBondNoticeEstimate(String sats) {
     return 'This node asks you to lock a refundable deposit of ≈ $sats sats before the order is published; it comes back when the trade ends honestly.';
   }

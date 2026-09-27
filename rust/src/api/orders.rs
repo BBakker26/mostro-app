@@ -4209,9 +4209,10 @@ async fn dispatch_mostro_message(
 
             // A refused maker cancel (mostro#996) has its own record: the
             // create's, on the same key, still waits for its `new-order`.
-            if let Some(waiter) =
-                crate::mostro::pending::take_maker_cancel(trade_pubkey_hex, kind.request_id)
-            {
+            if let Some(waiter) = crate::mostro::pending::take_maker_cancel_refusal(
+                trade_pubkey_hex,
+                kind.request_id,
+            ) {
                 crate::api::logging::blog_warn(
                     "daemon-msg",
                     format!("CantDo: reason={reason} — answering the maker's bond cancel"),
@@ -5356,8 +5357,9 @@ const MAKER_BOND_LOCK_POLL: std::time::Duration = std::time::Duration::from_mill
 /// §6.2). Since mostro#996 the daemon closes it unpublished and cancels the
 /// bond's hold invoice; the `canceled` arm wipes the row, and this returns
 /// once it has. A `NotAllowedByStatus` is either a bond that locked first
-/// or a daemon without #996: [`settle_refused_maker_cancel`] tells them
-/// apart. Markers: `NotWaitingBond`, `BondAlreadyLocked`, `NoDaemonResponse`.
+/// or a daemon without #996: [`settle_refused_maker_cancel`] looks for the
+/// lock and never wipes on a guess. Markers: `NotWaitingBond`,
+/// `BondAlreadyLocked`, `MakerCancelRefused`, `NoDaemonResponse`.
 async fn cancel_maker_bond(order_id: &str) -> Result<()> {
     use crate::mostro::pending::{
         detach_maker_cancel, register_maker_cancel, remove_maker_cancel, MakerCancelReply,
@@ -5444,10 +5446,16 @@ async fn maker_bond_window_row(order_id: &str) -> Result<crate::api::types::Trad
 /// The daemon refused the maker's cancel with `NotAllowedByStatus`. Either
 /// the bond locked first — the order is published and its `new-order` is on
 /// its way — or the daemon predates mostro#996 and refuses every cancel in
-/// the window. Waits up to `grace` for the lock to show on the row: a row
-/// that left the window is a live order (`BondAlreadyLocked`), a row that is
-/// gone was closed meanwhile, and a row still waiting falls back to the
-/// local abandon — the only way out an older daemon offers.
+/// the window. The wire does not tell them apart, and the node advertises
+/// nothing that would, so nothing is wiped on a guess: a late `new-order`
+/// must still find the row. Waits up to `grace` for the lock to show on the
+/// row, then looks at the public book under the order's guard:
+/// - the row left the window, or the book carries the order (reconciled
+///   to the lock, as the sweep does): `BondAlreadyLocked`;
+/// - the row is gone (closed meanwhile): done;
+/// - no evidence either way: `MakerCancelRefused`, the row kept. Only the
+///   user knows whether they paid; the screen offers
+///   [`abandon_maker_bond`] as their explicit choice.
 async fn settle_refused_maker_cancel(order_id: &str, grace: std::time::Duration) -> Result<()> {
     use crate::api::types::OrderStatus;
     let db = crate::db::app_db::db().ok_or_else(|| anyhow::anyhow!("StorageUnavailable"))?;
@@ -5465,29 +5473,49 @@ async fn settle_refused_maker_cancel(order_id: &str, grace: std::time::Duration)
         }
         crate::rt::time::sleep(MAKER_BOND_LOCK_POLL.min(grace)).await;
     }
+    let _guard = lock_order(order_id).await;
+    let Some(trade) = db.get_trade_by_order_id(order_id).await? else {
+        return Ok(());
+    };
+    if trade.order.status != OrderStatus::WaitingMakerBond
+        || reconcile_published_maker_order(order_id, &trade).await
+    {
+        return Err(anyhow::anyhow!("BondAlreadyLocked"));
+    }
     crate::api::logging::blog_info(
         "orders",
         format!(
-            "maker bond cancel refused and no lock seen for order={}: the daemon predates \
-             mostro#996, abandoning locally",
+            "maker bond cancel refused for order={} with no sign of a lock: kept, \
+             the user decides",
             crate::api::logging::short_id(order_id),
         ),
     );
-    match abandon_maker_bond(order_id).await {
-        // The lock landed between the last look and the abandon's guard.
-        Err(e) if e.to_string() == "NotWaitingBond" => Err(anyhow::anyhow!("BondAlreadyLocked")),
-        Err(e) if e.to_string() == "TradeNotFound" => Ok(()),
-        other => other,
-    }
+    Err(anyhow::anyhow!("MakerCancelRefused"))
 }
 
-/// Walk away from a maker bond without the daemon: the fallback of
-/// [`settle_refused_maker_cancel`] for a daemon that refuses every cancel in
-/// the window (before mostro#996) and expires the unpaid order on its own,
-/// so the client only wipes its side (docs/ANTI_ABUSE_BOND.md §6.2).
-/// Nothing was published and nothing was charged. The update goes out first
-/// (after the wipe there is no row to poll); the create's pending record goes
-/// with the row so a `new-order` for it can no longer be read as a bond lock.
+/// When the public book carries a maker's order still parked on its bond,
+/// the daemon published it — the bond locked and its `new-order` is late.
+/// Applies the lock to the row, as the sweep does, and says whether it did.
+/// Callers hold the order's guard.
+async fn reconcile_published_maker_order(
+    order_id: &str,
+    trade: &crate::api::types::TradeInfo,
+) -> bool {
+    if !maker_order_is_published(order_id).await {
+        return false;
+    }
+    lock_maker_bond(order_id, trade, trade.trade_key_index).await;
+    true
+}
+
+/// Drop a maker's bond window from this device only — the user's explicit
+/// choice after the daemon refused the cancel (`MakerCancelRefused`): a
+/// daemon before mostro#996 refuses every cancel in the window and expires
+/// the unpaid order on its own (docs/ANTI_ABUSE_BOND.md §6.2). An order the
+/// public book shows as published is not dropped: its lock is reconciled
+/// and `BondAlreadyLocked` returned. The update goes out first (after the
+/// wipe there is no row to poll); the create's pending record goes with the
+/// row so a `new-order` for it can no longer be read as a bond lock.
 pub(crate) async fn abandon_maker_bond(order_id: &str) -> Result<()> {
     let oid = order_id.to_string();
     // The guard first, then the row: a `new-order` handled between the
@@ -5495,6 +5523,9 @@ pub(crate) async fn abandon_maker_bond(order_id: &str) -> Result<()> {
     // which is then a live trade nobody abandons.
     let _guard = lock_order(&oid).await;
     let trade = maker_bond_window_row(&oid).await?;
+    if reconcile_published_maker_order(&oid, &trade).await {
+        return Err(anyhow::anyhow!("BondAlreadyLocked"));
+    }
     let now = crate::rt::unix_now();
     emit_trade_update_with(
         &oid,
@@ -18164,10 +18195,12 @@ mod tests {
         );
     }
 
-    /// A daemon without mostro#996 refuses the cancel and nothing locks
-    /// within the grace: the local abandon of before.
+    /// A refusal with no sign of a lock is ambiguous — an older daemon, or a
+    /// lock whose `new-order` is late — so nothing is wiped: the caller
+    /// learns the cancel was refused, and the row waits for either the
+    /// user's choice or the confirmation.
     #[tokio::test]
-    async fn a_refused_maker_cancel_with_no_lock_falls_back_to_the_abandon() {
+    async fn a_refused_maker_cancel_with_no_evidence_keeps_the_order() {
         let db = bond_test_db().await;
         let order_id = uuid::Uuid::new_v4().to_string();
         db.save_trade(&bonded_maker_row(
@@ -18181,17 +18214,198 @@ mod tests {
         .unwrap();
         let mut updates = trade_updates_tx().subscribe();
 
+        let err = settle_refused_maker_cancel(&order_id, std::time::Duration::from_millis(50))
+            .await
+            .expect_err("refused, nothing decided");
+
+        assert_eq!(err.to_string(), "MakerCancelRefused");
+        let kept = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .unwrap()
+            .expect("kept");
+        assert_eq!(
+            kept.order.status,
+            crate::api::types::OrderStatus::WaitingMakerBond
+        );
+        assert!(drain_reasoned(&mut updates, &order_id).is_empty());
+    }
+
+    /// The lock's `new-order` landing after the grace still confirms the
+    /// row the refused cancel left in place.
+    #[tokio::test]
+    async fn a_confirmation_later_than_the_grace_still_publishes_the_order() {
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            36,
+        ))
+        .await
+        .unwrap();
         settle_refused_maker_cancel(&order_id, std::time::Duration::from_millis(50))
             .await
-            .expect("abandoned locally");
+            .expect_err("refused");
 
-        assert!(db.get_trade_by_order_id(&order_id).await.unwrap().is_none());
+        dispatch_mostro_message(
+            correlated_message(
+                order_uuid,
+                936,
+                Action::NewOrder,
+                Some(Payload::Order(pending_small_order(order_uuid))),
+                2_000,
+            ),
+            "test-maker-cancel-late-lock",
+            "ff00ff76",
+            36,
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, crate::api::types::OrderStatus::Pending);
+        assert_eq!(
+            row.bond.unwrap().state,
+            crate::api::types::BondState::Locked
+        );
+    }
+
+    /// The public book already carries the order: the daemon published it,
+    /// so the refusal is the lock's, and the row is reconciled to it.
+    #[tokio::test]
+    async fn a_refused_maker_cancel_whose_order_is_public_reconciles_the_lock() {
+        let db = bond_test_db().await;
+        let order_id = uuid::Uuid::new_v4().to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            37,
+        ))
+        .await
+        .unwrap();
+        order_book().upsert_order(dummy_order_info(&order_id)).await;
+
+        let err = settle_refused_maker_cancel(&order_id, std::time::Duration::from_millis(50))
+            .await
+            .expect_err("the order is live");
+
+        assert_eq!(err.to_string(), "BondAlreadyLocked");
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, crate::api::types::OrderStatus::Pending);
+        assert_eq!(
+            row.bond.unwrap().state,
+            crate::api::types::BondState::Locked
+        );
+    }
+
+    /// The user's explicit "remove from this device" never drops an order
+    /// the public book shows as published.
+    #[tokio::test]
+    async fn abandoning_a_published_maker_order_reconciles_the_lock() {
+        let db = bond_test_db().await;
+        let order_id = uuid::Uuid::new_v4().to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            38,
+        ))
+        .await
+        .unwrap();
+        order_book().upsert_order(dummy_order_info(&order_id)).await;
+
+        let err = abandon_maker_bond(&order_id)
+            .await
+            .expect_err("published orders are not dropped");
+
+        assert_eq!(err.to_string(), "BondAlreadyLocked");
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, crate::api::types::OrderStatus::Pending);
+    }
+
+    /// A cancel that timed out and was retried: the first cancel's late
+    /// `canceled` is still the user's own, and it settles the retry too.
+    #[tokio::test]
+    async fn a_late_canceled_for_a_superseded_cancel_reads_as_the_users() {
+        use crate::mostro::pending::{
+            detach_maker_cancel, register_maker_cancel, MakerCancelReply,
+        };
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        db.save_trade(&bonded_maker_row(
+            &order_id,
+            Some(BOND_BOLT11),
+            None,
+            None,
+            39,
+        ))
+        .await
+        .unwrap();
+        let key = "ff00ff79";
+        let _first = register_maker_cancel(key, 911);
+        detach_maker_cancel(key, 911);
+        let retry = register_maker_cancel(key, 912);
+        let mut updates = trade_updates_tx().subscribe();
+
+        dispatch_mostro_message(
+            correlated_message(order_uuid, 911, Action::Canceled, None, 2_000),
+            "test-maker-cancel-superseded",
+            key,
+            39,
+        )
+        .await;
+
+        assert!(matches!(retry.await, Ok(MakerCancelReply::Canceled)));
         assert_eq!(
             drain_reasoned(&mut updates, &order_id),
             vec![(
                 crate::api::types::OrderStatus::Canceled,
                 Some(crate::api::types::TradeUpdateReason::UserCanceled)
             )]
+        );
+    }
+
+    /// A late `cant-do` for a superseded cancel answers nobody: the retry
+    /// keeps waiting for its own reply.
+    #[tokio::test]
+    async fn a_late_cant_do_for_a_superseded_cancel_leaves_the_retry_waiting() {
+        use crate::mostro::pending::{
+            detach_maker_cancel, register_maker_cancel, take_maker_cancel,
+        };
+        let _db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let key = "ff00ff80";
+        let _first = register_maker_cancel(key, 921);
+        detach_maker_cancel(key, 921);
+        let mut retry = register_maker_cancel(key, 922);
+
+        dispatch_mostro_message(
+            correlated_message(
+                order_uuid,
+                921,
+                Action::CantDo,
+                Some(Payload::CantDo(Some(
+                    mostro_core::error::CantDoReason::NotAllowedByStatus,
+                ))),
+                2_000,
+            ),
+            "test-maker-cancel-superseded-refusal",
+            key,
+            40,
+        )
+        .await;
+
+        assert!(retry.try_recv().is_err(), "the retry is not answered");
+        assert!(
+            take_maker_cancel(key, Some(922)).is_some(),
+            "the retry's record survives"
         );
     }
 

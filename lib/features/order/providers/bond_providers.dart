@@ -74,6 +74,14 @@ final cancelBondWindowProvider =
       (ref) => (orderId) => orders_api.cancelOrder(orderId: orderId),
     );
 
+/// A maker's explicit "remove from this device" behind a seam, offered only
+/// once the node refused the cancel (`MakerCancelRefused`,
+/// docs/ANTI_ABUSE_BOND.md §6.2).
+final abandonBondedOrderProvider =
+    Provider<Future<void> Function(String orderId)>(
+      (ref) => (orderId) => bond_api.abandonBondedOrder(orderId: orderId),
+    );
+
 /// The core's on-demand expiry of one bond window (what its periodic sweep
 /// would do next): called when the pay-bond countdown ends so the row does
 /// not linger as "pay deposit" in the lists.

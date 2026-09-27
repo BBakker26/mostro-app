@@ -5152,6 +5152,30 @@ abstract class AppLocalizations {
   /// **'Your deposit was already paid, so the order is published. Cancel it from the order screen.'**
   String get bondAlreadyLocked;
 
+  /// Pay-bond screen, maker: dialog title when the node refused the cancel and no lock was seen (MakerCancelRefused)
+  ///
+  /// In en, this message translates to:
+  /// **'The node didn\'t cancel the deposit'**
+  String get bondCancelRefusedTitle;
+
+  /// Body of that dialog: an older node, or a deposit just paid; removing only affects this device
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node may not support cancelling an unpaid deposit yet, or your deposit was just paid. If you haven\'t paid it, you can remove the order from this device. If the invoice is paid later, the order will still be published.'**
+  String get bondCancelRefusedBody;
+
+  /// Dialog action: drop the order locally (explicit user choice)
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from this device'**
+  String get bondRemoveFromDevice;
+
+  /// Dialog action: keep the order and stay on the deposit screen
+  ///
+  /// In en, this message translates to:
+  /// **'Keep waiting'**
+  String get bondKeepWaiting;
+
   /// Create-order preview notice on a maker-bond node with the core estimate; sats is a formatted figure
   ///
   /// In en, this message translates to:

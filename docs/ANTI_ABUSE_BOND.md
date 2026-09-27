@@ -467,13 +467,22 @@ Rules:
   - `canceled` on that nonce: the `canceled` arm wipes the row with `UserCanceled`,
     then wakes the cancel, which also drops the create's detached record.
   - `NotAllowedByStatus`: the bond locked first, or the daemon predates #996. Both
-    look the same on the wire, so `settle_refused_maker_cancel` watches the row for
-    up to 5 s. A row that left the window (the lock's `new-order` moved it to
-    `Pending`) is a live order: `BondAlreadyLocked`, and the screen says to cancel it
-    from the order. A row still waiting falls back to the local wipe of before
-    (`abandon_maker_bond`): the hold invoice then expires server-side.
-  - No answer: `NoDaemonResponse`, the row stays. The registry keeps the nonce, so a
-    late `canceled` is still read as the user's own.
+    look the same on the wire, and the node advertises nothing that tells them apart
+    (mostrod main still reports 0.18.8, like the release without #996). So
+    `settle_refused_maker_cancel` **never wipes on a guess**: a `new-order` that
+    arrives later must still find the row. It watches the row for up to 5 s, then
+    looks at the public book under the order's guard.
+    - The row left the window, or the book carries the order: the order is live.
+      The row is reconciled to the lock (as the sweep does), the call returns
+      `BondAlreadyLocked`, and the screen says to cancel it from the order.
+    - No evidence either way: `MakerCancelRefused`, the row kept. Only the user
+      knows whether they paid, so the screen asks. **Remove from this device**
+      runs `abandon_bonded_order`, the local wipe, which still refuses an order the
+      book shows published. **Keep waiting** leaves the row to the confirmation or
+      the local expiry.
+  - No answer: `NoDaemonResponse`, the row stays. The registry keeps the nonce —
+    and those of earlier timed-out attempts a retry superseded — so a late
+    `canceled` for any of them is still read as the user's own.
   Copy says nothing was published and nothing was charged.
 - **Deadline notice.** A `canceled` with no matching cancel in the maker's window is
   the daemon's payment deadline (mostro#994): the row is wiped with `BondExpired`, and

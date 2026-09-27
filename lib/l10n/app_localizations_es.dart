@@ -3054,6 +3054,19 @@ class AppLocalizationsEs extends AppLocalizations {
       'Tu depósito ya se pagó, así que la orden está publicada. Cancélala desde la pantalla de la orden.';
 
   @override
+  String get bondCancelRefusedTitle => 'El nodo no canceló el depósito';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Puede que este nodo Mostro aún no permita cancelar un depósito sin pagar, o que tu depósito se acabe de pagar. Si no lo pagaste, puedes quitar la orden de este dispositivo. Si el invoice se paga después, la orden igual se publicará.';
+
+  @override
+  String get bondRemoveFromDevice => 'Quitar de este dispositivo';
+
+  @override
+  String get bondKeepWaiting => 'Seguir esperando';
+
+  @override
   String createOrderBondNoticeEstimate(String sats) {
     return 'Este nodo te pide bloquear un depósito reembolsable de ≈ $sats sats antes de publicar la orden; vuelve al terminar la operación de buena fe.';
   }

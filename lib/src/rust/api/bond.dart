@@ -27,6 +27,15 @@ Future<BigInt?> estimateBondSats({required BigInt orderAmountSats}) => RustLib
     .api
     .crateApiBondEstimateBondSats(orderAmountSats: orderAmountSats);
 
+/// Drop an order parked at `WaitingMakerBond` from this device only — the
+/// user's explicit choice once the daemon refused the cancel
+/// (`MakerCancelRefused`: a daemon before mostro#996, or a lock whose
+/// confirmation has not arrived). Emits `Canceled` with `UserCanceled`. An
+/// order the public book shows as published is kept and reconciled.
+/// Markers: `TradeNotFound`, `NotWaitingBond`, `BondAlreadyLocked`.
+Future<void> abandonBondedOrder({required String orderId}) =>
+    RustLib.instance.api.crateApiBondAbandonBondedOrder(orderId: orderId);
+
 /// Close the bond window of `order_id` now if its deadline passed unpaid —
 /// what the periodic sweep would do on its next pass. The pay-bond screen
 /// calls it when its countdown ends, so a row does not linger as "pay

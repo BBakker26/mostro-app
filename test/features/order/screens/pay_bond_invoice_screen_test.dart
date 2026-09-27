@@ -41,6 +41,7 @@ Future<void> _pump(
   bool? slashOnTimeout,
   Future<TradeInfo> Function(String)? requestAgain,
   Future<void> Function(String)? cancel,
+  Future<void> Function(String)? abandon,
   Future<bool> Function(String)? closeExpired,
 }) async {
   SharedPreferences.setMockInitialValues({
@@ -68,6 +69,8 @@ Future<void> _pump(
         if (requestAgain != null)
           requestBondInvoiceAgainProvider.overrideWithValue(requestAgain),
         if (cancel != null) cancelBondWindowProvider.overrideWithValue(cancel),
+        if (abandon != null)
+          abandonBondedOrderProvider.overrideWithValue(abandon),
         if (closeExpired != null)
           closeExpiredBondWindowProvider.overrideWithValue(closeExpired),
       ],
@@ -248,6 +251,48 @@ void main() {
         ),
         findsOneWidget,
       );
+    });
+
+    testWidgets(
+      'a refused cancel asks before removing the order from this device',
+      (tester) async {
+        final abandoned = <String>[];
+        await _pump(
+          tester,
+          trade: makerTrade(),
+          cancel: (id) async => throw Exception('MakerCancelRefused'),
+          abandon: (id) async => abandoned.add(id),
+        );
+        await tester.ensureVisible(find.text("Don't publish the order"));
+        await tester.tap(find.text("Don't publish the order"));
+        await tester.pumpAndSettle();
+        expect(find.text("The node didn't cancel the deposit"), findsOneWidget);
+        expect(abandoned, isEmpty, reason: 'nothing is dropped on a guess');
+
+        await tester.tap(find.text('Remove from this device'));
+        await tester.pump();
+        await tester.pump();
+        expect(abandoned, ['order-1']);
+      },
+    );
+
+    testWidgets('keeping the order after a refused cancel drops nothing', (
+      tester,
+    ) async {
+      final abandoned = <String>[];
+      await _pump(
+        tester,
+        trade: makerTrade(),
+        cancel: (id) async => throw Exception('MakerCancelRefused'),
+        abandon: (id) async => abandoned.add(id),
+      );
+      await tester.ensureVisible(find.text("Don't publish the order"));
+      await tester.tap(find.text("Don't publish the order"));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep waiting'));
+      await tester.pumpAndSettle();
+      expect(abandoned, isEmpty);
+      expect(find.byType(PayBondInvoiceScreen), findsOneWidget);
     });
 
     testWidgets('a cancel that lost to the bond says the order is live', (

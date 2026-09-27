@@ -267,6 +267,7 @@ class AutomationIds {
   static const String bondOrderId = 'bond.order_id';
   static const String bondExplainer = 'bond.explainer';
   static const String bondCancel = 'bond.cancel';
+  static const String bondRemoveFromDevice = 'bond.remove_from_device';
 
   // Payout claim on a slashed bond (docs/ANTI_ABUSE_BOND.md §6.4)
   static const String bondClaimOrderId = 'bond.claim.order_id';

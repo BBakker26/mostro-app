@@ -3054,6 +3054,19 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il tuo deposito è già stato pagato, quindi l\'ordine è pubblicato. Annullalo dalla schermata dell\'ordine.';
 
   @override
+  String get bondCancelRefusedTitle => 'Il nodo non ha annullato il deposito';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Questo nodo Mostro potrebbe non permettere ancora di annullare un deposito non pagato, oppure il tuo deposito è appena stato pagato. Se non l\'hai pagato, puoi rimuovere l\'ordine da questo dispositivo. Se la fattura viene pagata più tardi, l\'ordine verrà comunque pubblicato.';
+
+  @override
+  String get bondRemoveFromDevice => 'Rimuovi da questo dispositivo';
+
+  @override
+  String get bondKeepWaiting => 'Continua ad aspettare';
+
+  @override
   String createOrderBondNoticeEstimate(String sats) {
     return 'Questo nodo ti chiede di bloccare un deposito rimborsabile di ≈ $sats sats prima di pubblicare l\'ordine; torna quando lo scambio finisce onestamente.';
   }

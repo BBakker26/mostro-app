@@ -289,13 +289,16 @@ answer decides the outcome, within 10 s.
   the bond invoice. The row is wiped with `Canceled` / `UserCanceled` before the
   call returns.
 - `NotAllowedByStatus`: the bond locked first, or the daemon predates #996. The
-  call watches the row for 5 s. If the lock's `new-order` moves it to `Pending`,
-  the order is live and the call fails with `BondAlreadyLocked`. If it is still
-  waiting, the row is wiped locally as an older daemon requires, and the unpaid
-  invoice expires server-side.
+  call watches the row for 5 s, then checks the public book under the order's
+  guard. If the row moved to `Pending`, or the book carries the order, the order
+  is live: the row is reconciled to the lock, and the call fails with
+  `BondAlreadyLocked`. With no evidence either way nothing is wiped: the call
+  fails with `MakerCancelRefused`, and the user may drop the order from this
+  device with `abandon_bonded_order` (see `contracts/bond.md`).
 - Any other `CantDo`: the call fails with the daemon's reason.
 - No answer: `NoDaemonResponse`, and the row stays. A late `canceled` still wipes
-  it as the user's own cancel.
+  it as the user's own cancel, including one answering an earlier attempt that a
+  retry superseded.
 
 A `canceled` with no cancel of this client behind it is the daemon's payment
 deadline (mostro#994): the row is wiped with `Canceled` / `BondExpired`.
@@ -303,8 +306,8 @@ deadline (mostro#994): the row is wiped with `Canceled` / `BondExpired`.
 **Errors**: no trade-key binding for the order (`no persisted trade key for
 order …`), trade-key or identity load failures, and publish failures. Daemon
 rejections arrive later as `CantDo`; this call does not wait for them, except in
-the maker's bond window (`BondAlreadyLocked`, `NoDaemonResponse`, the
-`CantDo` reason).
+the maker's bond window (`BondAlreadyLocked`, `MakerCancelRefused`,
+`NoDaemonResponse`, the `CantDo` reason).
 
 ---
 

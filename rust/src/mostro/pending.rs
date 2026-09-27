@@ -614,7 +614,16 @@ struct MakerCancel {
     /// `None` once the caller stopped waiting: a late reply is still
     /// recognized as the user's own cancel, never as the payment deadline.
     tx: Option<tokio::sync::oneshot::Sender<MakerCancelReply>>,
+    /// Nonces of earlier cancels on this key that timed out and were then
+    /// retried. Each may still be answered, and its `canceled` is the user's
+    /// own as much as the retry's.
+    superseded: Vec<u64>,
 }
+
+/// How many timed-out cancels one key remembers. Each needs a user retry
+/// after a 10 s timeout; past this the oldest is forgotten, and its late
+/// `canceled` reads as the payment deadline.
+const MAX_SUPERSEDED_MAKER_CANCELS: usize = 8;
 
 /// Maker cancels in flight, keyed by trade pubkey. Apart from
 /// [`pending_requests`] because that key still holds the create's record,
@@ -628,39 +637,76 @@ fn maker_cancels() -> &'static std::sync::Mutex<HashMap<String, MakerCancel>> {
 }
 
 /// Register a maker's cancel on `trade_pubkey_hex` before it is published,
-/// and hand back the channel its reply arrives on. A newer cancel replaces
-/// an older one: only the latest caller is waiting.
+/// and hand back the channel its reply arrives on. A retry takes the key
+/// over but keeps the nonces it replaces answerable (`superseded`).
 pub(crate) fn register_maker_cancel(
     trade_pubkey_hex: &str,
     request_id: u64,
 ) -> tokio::sync::oneshot::Receiver<MakerCancelReply> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     if let Ok(mut map) = maker_cancels().lock() {
+        let superseded = match map.remove(trade_pubkey_hex) {
+            Some(MakerCancel {
+                request_id: replaced,
+                mut superseded,
+                ..
+            }) => {
+                superseded.push(replaced);
+                let excess = superseded
+                    .len()
+                    .saturating_sub(MAX_SUPERSEDED_MAKER_CANCELS);
+                superseded.drain(..excess);
+                superseded
+            }
+            None => Vec::new(),
+        };
         map.insert(
             trade_pubkey_hex.to_string(),
             MakerCancel {
                 request_id,
                 tx: Some(tx),
+                superseded,
             },
         );
     }
     rx
 }
 
-/// The maker's cancel a reply echoing `got` answers, consumed. `None` when
-/// the reply is not one: no cancel on this key, or another nonce. The inner
-/// `Option` is the waiter, absent once the caller timed out.
+/// A `canceled` echoing any cancel this key sent — the live one or one a
+/// retry superseded — closes the order for all of them: the record is
+/// consumed and its live waiter, if any, handed back. `None` when the reply
+/// answers no cancel of this key.
 pub(crate) fn take_maker_cancel(
     trade_pubkey_hex: &str,
     got: Option<u64>,
 ) -> Option<Option<tokio::sync::oneshot::Sender<MakerCancelReply>>> {
     let mut map = maker_cancels().lock().ok()?;
-    match map.get(trade_pubkey_hex) {
-        Some(c) if request_id_matches(c.request_id, got) => {
-            map.remove(trade_pubkey_hex).map(|c| c.tx)
-        }
-        _ => None,
+    let answers = map.get(trade_pubkey_hex).is_some_and(|c| {
+        request_id_matches(c.request_id, got) || got.is_some_and(|id| c.superseded.contains(&id))
+    });
+    if !answers {
+        return None;
     }
+    map.remove(trade_pubkey_hex).map(|c| c.tx)
+}
+
+/// A `cant-do` echoing a cancel of this key. The live one's is consumed and
+/// its waiter handed back; a superseded one's only drops that nonce and
+/// answers nobody (`Some(None)`) — the retry waits for its own reply.
+pub(crate) fn take_maker_cancel_refusal(
+    trade_pubkey_hex: &str,
+    got: Option<u64>,
+) -> Option<Option<tokio::sync::oneshot::Sender<MakerCancelReply>>> {
+    let mut map = maker_cancels().lock().ok()?;
+    let entry = map.get_mut(trade_pubkey_hex)?;
+    if let Some(pos) = got.and_then(|id| entry.superseded.iter().position(|n| *n == id)) {
+        entry.superseded.remove(pos);
+        return Some(None);
+    }
+    if !request_id_matches(entry.request_id, got) {
+        return None;
+    }
+    map.remove(trade_pubkey_hex).map(|c| c.tx)
 }
 
 /// The caller stopped waiting (timeout): keep the record for a late reply.
@@ -674,14 +720,24 @@ pub(crate) fn detach_maker_cancel(trade_pubkey_hex: &str, request_id: u64) {
     }
 }
 
-/// The cancel never left the device: nothing can answer it.
+/// The cancel never left the device: nothing can answer it. The nonces it
+/// superseded still can, so they stay, waiterless.
 pub(crate) fn remove_maker_cancel(trade_pubkey_hex: &str, request_id: u64) {
     if let Ok(mut map) = maker_cancels().lock() {
-        if map
-            .get(trade_pubkey_hex)
-            .is_some_and(|c| c.request_id == request_id)
-        {
-            map.remove(trade_pubkey_hex);
+        let Some(entry) = map.get_mut(trade_pubkey_hex) else {
+            return;
+        };
+        if entry.request_id != request_id {
+            return;
+        }
+        match entry.superseded.pop() {
+            Some(previous) => {
+                entry.request_id = previous;
+                entry.tx = None;
+            }
+            None => {
+                map.remove(trade_pubkey_hex);
+            }
         }
     }
 }

@@ -3066,6 +3066,20 @@ class AppLocalizationsDe extends AppLocalizations {
       'Deine Einlage wurde bereits bezahlt, die Order ist veröffentlicht. Storniere sie auf dem Order-Bildschirm.';
 
   @override
+  String get bondCancelRefusedTitle =>
+      'Der Node hat die Einlage nicht storniert';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Dieser Mostro-Node unterstützt das Stornieren einer unbezahlten Einlage vielleicht noch nicht, oder deine Einlage wurde gerade bezahlt. Wenn du sie nicht bezahlt hast, kannst du die Order von diesem Gerät entfernen. Wird die Rechnung später bezahlt, wird die Order trotzdem veröffentlicht.';
+
+  @override
+  String get bondRemoveFromDevice => 'Von diesem Gerät entfernen';
+
+  @override
+  String get bondKeepWaiting => 'Weiter warten';
+
+  @override
   String createOrderBondNoticeEstimate(String sats) {
     return 'Dieser Node verlangt eine rückzahlbare Einlage von ≈ $sats Sats, bevor die Order veröffentlicht wird; sie kommt zurück, wenn der Handel ehrlich endet.';
   }

@@ -76,13 +76,10 @@ class CashuEscrowController {
   Future<CashuEscrowQuote> quote(String orderId) =>
       cashu_api.cashuEscrowQuote(orderId: orderId);
 
-  /// Fund the escrow and submit it to the daemon.
-  ///
-  /// Throws `CashuInsufficientFunds` when the wallet cannot cover
-  /// `amount + fee`, `NotTheSeller` when called for the wrong side, or a
-  /// `CashuLockFailed` marker when the mint refuses the swap.
-  Future<CashuEscrowQuote> lock(String orderId) =>
-      cashu_api.lockEscrow(orderId: orderId);
+  /// Fund the escrow and submit it to the daemon — or re-send the one already
+  /// recorded, which swaps nothing. Throws a stable marker on failure
+  /// (`cashu_error_messages.dart`).
+  Future<void> lock(String orderId) => cashu_api.lockEscrow(orderId: orderId);
 }
 
 final cashuEscrowControllerProvider = Provider<CashuEscrowController>(

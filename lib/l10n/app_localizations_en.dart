@@ -4050,4 +4050,16 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get lockEscrowOrderMovedOn =>
       'The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade\'s status will update when the node reports it.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Lock the escrow to start the trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Lock your ecash in the escrow at the node\'s mint. That starts the trade, and it comes back to you if the node disappears.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.';
 }

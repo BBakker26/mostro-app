@@ -36,7 +36,7 @@ class TradeCard extends ConsumerWidget {
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toString();
     final needsAction = row.state.needsAction;
-    final cashu = ref.watch(isCashuAvailableProvider);
+    final cashu = ref.watch(isCashuModeProvider);
 
     return Material(
       color: book.surface,

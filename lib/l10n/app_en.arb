@@ -4269,5 +4269,11 @@
   "lockEscrowNoAnswer": "The node has not answered yet. Your escrow is recorded; retrying re-sends the same one.",
   "@lockEscrowNoAnswer": {"description": "Escrow error — no daemon answer within the wait; the token is recorded and re-sent on retry"},
   "lockEscrowOrderMovedOn": "The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade's status will update when the node reports it.",
-  "@lockEscrowOrderMovedOn": {"description": "Escrow error — a re-sent escrow was refused because the order no longer waits for it (CashuEscrowOrderMovedOn); not reported as locked"}
+  "@lockEscrowOrderMovedOn": {"description": "Escrow error — a re-sent escrow was refused because the order no longer waits for it (CashuEscrowOrderMovedOn); not reported as locked"},
+  "tradeHeadlineWaitingPaymentSellerCashu": "Lock the escrow to start the trade",
+  "@tradeHeadlineWaitingPaymentSellerCashu": {"description": "Trade screen headline for the seller while it must lock the Cashu escrow (the hold-invoice step on a Cashu node)"},
+  "tradeWaitingPaymentSellerInstructionCashu": "Lock your ecash in the escrow at the node's mint. That starts the trade, and it comes back to you if the node disappears.",
+  "@tradeWaitingPaymentSellerInstructionCashu": {"description": "Trade screen instruction for the seller on a Cashu node: lock the escrow"},
+  "tradeBodyWaitingPaymentBuyerCashu": "They're locking the sats in escrow. Once it's locked, it's your turn to pay the fiat.",
+  "@tradeBodyWaitingPaymentBuyerCashu": {"description": "Trade screen body for the buyer while the seller locks the Cashu escrow"}
 }

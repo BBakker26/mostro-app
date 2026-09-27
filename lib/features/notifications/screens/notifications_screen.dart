@@ -223,7 +223,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
             ? context.push(
               sellerFundingPath(
                 n.orderId!,
-                cashu: ref.read(isCashuAvailableProvider),
+                cashu: ref.read(isCashuModeProvider),
               ),
             )
             : noId();

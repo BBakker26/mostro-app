@@ -436,7 +436,7 @@ abstract class RustLibApi extends BaseApi {
     PlatformInt64? createdAt,
   });
 
-  Future<CashuEscrowQuote> crateApiCashuLockEscrow({required String orderId});
+  Future<void> crateApiCashuLockEscrow({required String orderId});
 
   Future<String> crateApiNwcMakeInvoice({
     required BigInt amountSats,
@@ -4265,7 +4265,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<CashuEscrowQuote> crateApiCashuLockEscrow({required String orderId}) {
+  Future<void> crateApiCashuLockEscrow({required String orderId}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -4279,7 +4279,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_cashu_escrow_quote,
+          decodeSuccessData: sse_decode_unit,
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiCashuLockEscrowConstMeta,

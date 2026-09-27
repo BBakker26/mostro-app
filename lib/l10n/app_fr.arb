@@ -1245,5 +1245,8 @@
   "lockEscrowMintUnavailableAtNode": "Le nœud n'a pas pu joindre le mint pour vérifier votre escrow. Réessayez : le même escrow est renvoyé, rien n'est verrouillé deux fois.",
   "lockEscrowRejectedGeneric": "Le nœud a refusé l'escrow. Il reste enregistré sur cet appareil ; réessayez dans un instant.",
   "lockEscrowNoAnswer": "Le nœud n'a pas encore répondu. Votre escrow est enregistré ; réessayer renvoie le même.",
-  "lockEscrowOrderMovedOn": "Le nœud indique que cet ordre n'attend plus l'escrow. Votre escrow reste enregistré sur cet appareil ; le statut du trade se mettra à jour quand le nœud le signalera."
+  "lockEscrowOrderMovedOn": "Le nœud indique que cet ordre n'attend plus l'escrow. Votre escrow reste enregistré sur cet appareil ; le statut du trade se mettra à jour quand le nœud le signalera.",
+  "tradeHeadlineWaitingPaymentSellerCashu": "Verrouillez l'escrow pour démarrer le trade",
+  "tradeWaitingPaymentSellerInstructionCashu": "Verrouillez votre ecash dans l'escrow au mint du nœud. Cela démarre le trade, et il vous revient si le nœud disparaît.",
+  "tradeBodyWaitingPaymentBuyerCashu": "Ils verrouillent les sats dans l'escrow. Une fois verrouillé, c'est à vous de payer le fiat."
 }

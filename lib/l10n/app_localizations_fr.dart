@@ -4114,4 +4114,16 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get lockEscrowOrderMovedOn =>
       'Le nœud indique que cet ordre n\'attend plus l\'escrow. Votre escrow reste enregistré sur cet appareil ; le statut du trade se mettra à jour quand le nœud le signalera.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Verrouillez l\'escrow pour démarrer le trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Verrouillez votre ecash dans l\'escrow au mint du nœud. Cela démarre le trade, et il vous revient si le nœud disparaît.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Ils verrouillent les sats dans l\'escrow. Une fois verrouillé, c\'est à vous de payer le fiat.';
 }

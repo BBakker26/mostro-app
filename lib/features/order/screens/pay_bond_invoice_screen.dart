@@ -311,7 +311,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
             context.push(
               sellerFundingPath(
                 widget.orderId,
-                cashu: ref.read(isCashuAvailableProvider),
+                cashu: ref.read(isCashuModeProvider),
               ),
             );
           }

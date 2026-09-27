@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +30,10 @@ class _FakeEscrow extends CashuEscrowController {
 
   int balance;
   final int fee;
+
+  /// When set, the next quote waits on it: lets a test finish a newer quote
+  /// before an older one.
+  Completer<void>? hold;
   final Object? quoteError;
   final Object? lockError;
 
@@ -51,16 +57,22 @@ class _FakeEscrow extends CashuEscrowController {
   Future<CashuEscrowQuote> quote(String orderId) async {
     quotes++;
     if (quoteError != null) throw quoteError!;
-    return _current();
+    // Read now, returned later: a held call reports the balance it saw.
+    final seen = _current();
+    final gate = hold;
+    if (gate != null) {
+      hold = null;
+      await gate.future;
+    }
+    return seen;
   }
 
   @override
-  Future<CashuEscrowQuote> lock(String orderId) async {
+  Future<void> lock(String orderId) async {
     if (lockError != null) {
       if (lockRecords) pending = true;
       throw lockError!;
     }
-    return _current();
   }
 }
 
@@ -76,13 +88,17 @@ class _FakeWallet extends CashuWalletController {
   );
 }
 
-Future<void> _pump(WidgetTester tester, {required _FakeEscrow escrow}) async {
+Future<void> _pump(
+  WidgetTester tester, {
+  required _FakeEscrow escrow,
+  Stream<CashuWalletStatus>? walletChanges,
+}) async {
   final container = createContainer(
     overrides: [
       cashuEscrowControllerProvider.overrideWithValue(escrow),
       cashuWalletControllerProvider.overrideWithValue(const _FakeWallet()),
       cashuWalletProvider.overrideWith(
-        (ref) => const Stream<CashuWalletStatus>.empty(),
+        (ref) => walletChanges ?? const Stream<CashuWalletStatus>.empty(),
       ),
     ],
   );
@@ -173,6 +189,44 @@ void main() {
       await tester.tap(find.text('Fund your wallet'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('funded'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Lock escrow'), findsOneWidget);
+      expect(find.text('Fund your wallet'), findsNothing);
+    });
+
+    testWidgets('an older quote never replaces a newer one', (tester) async {
+      // CodeRabbit on #238: a balance change and the funding route's return
+      // can both reload; the one that started first may finish last.
+      final escrow = _FakeEscrow(balance: 100);
+      final wallet = StreamController<CashuWalletStatus>();
+      addTearDown(wallet.close);
+      await _pump(tester, escrow: escrow, walletChanges: wallet.stream);
+
+      // A balance event starts a reload that reads the old balance and is
+      // held back...
+      final older = Completer<void>();
+      escrow.hold = older;
+      wallet.add(
+        CashuWalletStatus(
+          connected: true,
+          mintUrl: 'https://mint.example.com',
+          balanceSats: BigInt.from(100),
+          missingCapabilities: const [],
+        ),
+      );
+      await tester.pump();
+
+      // ...while the reload after funding reads the new one and lands first.
+      await tester.tap(find.text('Fund your wallet'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('funded'));
+      await tester.pumpAndSettle();
+      expect(find.text('Lock escrow'), findsOneWidget);
+
+      // The older one finishes last: it must not bring "fund your wallet"
+      // back.
+      older.complete();
       await tester.pumpAndSettle();
 
       expect(find.text('Lock escrow'), findsOneWidget);

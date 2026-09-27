@@ -4078,4 +4078,16 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get lockEscrowOrderMovedOn =>
       'El nodo dice que esta orden ya no espera el escrow. Tu escrow sigue guardado en este dispositivo; el estado del trade se actualizará cuando el nodo lo informe.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Bloquea el escrow para empezar el trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Bloquea tu ecash en el escrow de la mint del nodo. Eso inicia el trade, y vuelve a ti si el nodo desaparece.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Están bloqueando los sats en el escrow. Cuando esté bloqueado, te toca pagar el fiat.';
 }

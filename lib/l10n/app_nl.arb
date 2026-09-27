@@ -1245,5 +1245,8 @@
   "lockEscrowMintUnavailableAtNode": "De node kon de mint niet bereiken om je escrow te controleren. Probeer het opnieuw: dezelfde escrow wordt opnieuw verstuurd, niets wordt twee keer vergrendeld.",
   "lockEscrowRejectedGeneric": "De node heeft de escrow geweigerd. Hij blijft op dit apparaat opgeslagen; probeer het zo meteen opnieuw.",
   "lockEscrowNoAnswer": "De node heeft nog niet geantwoord. Je escrow is opgeslagen; opnieuw proberen verstuurt dezelfde.",
-  "lockEscrowOrderMovedOn": "De node zegt dat deze order niet meer op de escrow wacht. Je escrow blijft op dit apparaat opgeslagen; de status van de trade wordt bijgewerkt zodra de node die meldt."
+  "lockEscrowOrderMovedOn": "De node zegt dat deze order niet meer op de escrow wacht. Je escrow blijft op dit apparaat opgeslagen; de status van de trade wordt bijgewerkt zodra de node die meldt.",
+  "tradeHeadlineWaitingPaymentSellerCashu": "Vergrendel de escrow om de trade te starten",
+  "tradeWaitingPaymentSellerInstructionCashu": "Vergrendel je ecash in de escrow bij de mint van de node. Dat start de trade, en het komt naar je terug als de node verdwijnt.",
+  "tradeBodyWaitingPaymentBuyerCashu": "Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen."
 }

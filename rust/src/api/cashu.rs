@@ -127,10 +127,16 @@ async fn active_wallet() -> Result<Arc<CashuWallet>> {
 
 /// Fail closed unless the active node was positively identified as Cashu.
 fn ensure_enabled() -> Result<()> {
-    if !escrow_mode::is_cashu_mode() {
-        bail!("CashuNotEnabled");
+    if escrow_mode::is_cashu_mode() {
+        return Ok(());
     }
-    Ok(())
+    // A Cashu node with no mint to reach: the seller is routed to the escrow
+    // screen on the mode alone (there is no hold invoice on such a node), so
+    // it must say what is missing rather than "not Cashu".
+    if escrow_mode::get_resolved().mode.is_cashu() {
+        bail!("CashuMintUnknown");
+    }
+    bail!("CashuNotEnabled")
 }
 
 async fn snapshot() -> CashuWalletStatus {
@@ -410,17 +416,23 @@ fn escrow_op_lock(order_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 /// Escrows swapped but not written to their trade row (the store refused the
 /// write), held for the life of the process. The swap already happened: a
 /// retry must find this token instead of swapping again.
-fn held_escrows() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
-    static HELD: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-        std::sync::OnceLock::new();
+/// `(mint_url, token)` per order: a re-send must name the mint the token
+/// lives at, not whatever the node resolves to now.
+type HeldEscrows = std::sync::Mutex<std::collections::HashMap<String, (String, String)>>;
+
+fn held_escrows() -> &'static HeldEscrows {
+    static HELD: std::sync::OnceLock<HeldEscrows> = std::sync::OnceLock::new();
     HELD.get_or_init(Default::default)
 }
 
-fn hold_unrecorded_escrow(order_id: &str, token: &str) {
+fn hold_unrecorded_escrow(order_id: &str, mint_url: &str, token: &str) {
     held_escrows()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(order_id.to_string(), token.to_string());
+        .insert(
+            order_id.to_string(),
+            (mint_url.to_string(), token.to_string()),
+        );
 }
 
 fn forget_held_escrow(order_id: &str) {
@@ -430,16 +442,22 @@ fn forget_held_escrow(order_id: &str) {
         .remove(order_id);
 }
 
-/// The escrow already swapped for `order_id`: the one on its row, else one
-/// held because the row could not be written. `None` means none exists yet.
-fn recorded_or_held_escrow(order_id: &str, recorded: Option<&str>) -> Option<String> {
-    recorded.map(str::to_string).or_else(|| {
-        held_escrows()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(order_id)
-            .cloned()
-    })
+/// The escrow already swapped for `order_id`, as `(mint_url, token)`: the one
+/// on its row, else one held because the row could not be written. `None`
+/// means none exists yet.
+fn recorded_or_held_escrow(
+    order_id: &str,
+    recorded: Option<(&str, &str)>,
+) -> Option<(String, String)> {
+    recorded
+        .map(|(mint, token)| (mint.to_string(), token.to_string()))
+        .or_else(|| {
+            held_escrows()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(order_id)
+                .cloned()
+        })
 }
 
 /// How many times a freshly swapped escrow is written before it is held in
@@ -469,12 +487,11 @@ const RECORD_ATTEMPTS: usize = 3;
 /// `CashuEscrowRequestMissing`, `CashuWrongTradeKey`, `DeviceClockInvalid`,
 /// `CashuEscrowNotPersisted`, `CashuEscrowRejected: <reason>`,
 /// `NoDaemonResponse`, plus the `CashuLockFailed` markers from construction.
-pub async fn lock_escrow(order_id: String) -> Result<crate::api::types::CashuEscrowQuote> {
+pub async fn lock_escrow(order_id: String) -> Result<()> {
     ensure_enabled()?;
     let op = escrow_op_lock(&order_id);
     let _op = op.lock().await;
 
-    let quote = cashu_escrow_quote(order_id.clone()).await?;
     let trade = load_trade(&order_id).await?;
 
     // Only the seller funds an escrow. A buyer reaching this is a bug, but it
@@ -516,12 +533,33 @@ pub async fn lock_escrow(order_id: String) -> Result<crate::api::types::CashuEsc
         crate::cashu::escrow::EscrowParties::from_xonly_hex(&buyer_hex, &seller_hex, &mostro_hex)?;
 
     // A token already swapped — on the row, or held because the row could
-    // not be written — is re-sent as is: never a second swap.
-    let existing = recorded_or_held_escrow(&order_id, trade.cashu_escrow_token.as_deref());
+    // not be written — is re-sent as is, at the mint it was locked at: never
+    // a second swap, and no quote, connection or balance needed for it.
+    // A recorded token is never built again, even on a row that lost its mint
+    // (every write sets both): it goes to the node's resolved mint, and a
+    // mismatch comes back as `invalid_mint_url`, which retires it.
+    let fallback_mint = escrow_mode::get_resolved()
+        .config
+        .mint_url
+        .unwrap_or_default();
+    let recorded = trade.cashu_escrow_token.as_deref().map(|token| {
+        (
+            trade
+                .cashu_mint_url
+                .as_deref()
+                .unwrap_or(fallback_mint.as_str()),
+            token,
+        )
+    });
+    let existing = recorded_or_held_escrow(&order_id, recorded);
     let resubmission = existing.is_some();
-    let escrow_token = match existing {
-        Some(token) => token,
-        None => build_and_record_escrow(&order_id, &quote, &parties).await?,
+    let (mint_url, escrow_token) = match existing {
+        Some(pair) => pair,
+        None => {
+            let quote = cashu_escrow_quote(order_id.clone()).await?;
+            let token = build_and_record_escrow(&order_id, &quote, &parties).await?;
+            (quote.mint_url, token)
+        }
     };
 
     let submitted = submit_escrow(
@@ -531,7 +569,7 @@ pub async fn lock_escrow(order_id: String) -> Result<crate::api::types::CashuEsc
         &seller_keys,
         &mostro_pubkey,
         &escrow_token,
-        &quote.mint_url,
+        &mint_url,
         &buyer_hex,
         &seller_hex,
     )
@@ -548,13 +586,13 @@ pub async fn lock_escrow(order_id: String) -> Result<crate::api::types::CashuEsc
     // the store still refuses, say so rather than let the seller believe this
     // device keeps a copy it can reclaim after a restart.
     if recorded_or_held_escrow(&order_id, None).is_some() {
-        record_escrow_token(&order_id, &quote.mint_url, &escrow_token)
+        record_escrow_token(&order_id, &mint_url, &escrow_token)
             .await
             .map_err(|e| anyhow::anyhow!("CashuEscrowNotPersisted: {e}"))?;
         forget_held_escrow(&order_id);
     }
     log::info!("[cashu] escrow locked for order={order_id}");
-    Ok(quote)
+    Ok(())
 }
 
 /// Build the escrow and record it against the trade. From the swap on, the
@@ -602,7 +640,7 @@ async fn build_and_record_escrow(
     }
     if let Err(e) = &recorded {
         log::error!("[cashu] escrow built but not recorded for order={order_id}, held: {e}");
-        hold_unrecorded_escrow(order_id, &escrow);
+        hold_unrecorded_escrow(order_id, &quote.mint_url, &escrow);
     }
 
     // Verify what we just built before handing it over. The daemon runs the
@@ -639,7 +677,7 @@ async fn record_escrow_token(order_id: &str, mint_url: &str, token: &str) -> Res
 async fn retire_escrow_token(order_id: &str) -> Result<()> {
     let db = crate::db::app_db::db().ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable"))?;
     let mut trade = load_trade(order_id).await?;
-    let held = recorded_or_held_escrow(order_id, None);
+    let held = recorded_or_held_escrow(order_id, None).map(|(_, token)| token);
     let retired: Vec<String> = trade
         .cashu_escrow_token
         .take()
@@ -1029,22 +1067,46 @@ mod tests {
     #[tokio::test]
     async fn an_escrow_that_could_not_be_recorded_is_still_found_by_the_retry() {
         // Arrange — the swap happened but the row could not be written: the
-        // token is held for the process instead.
+        // token is held for the process instead, with the mint it lives at.
         let order_id = uuid::Uuid::new_v4().to_string();
-        hold_unrecorded_escrow(&order_id, "cashuB-held");
+        hold_unrecorded_escrow(&order_id, "https://mint.a", "cashuB-held");
 
         // Act — the retry looks before it builds.
         let found = recorded_or_held_escrow(&order_id, None);
 
-        // Assert — the held token, never a second swap.
-        assert_eq!(found.as_deref(), Some("cashuB-held"));
-        // A recorded token wins over a held one.
+        // Assert — the held token at its own mint, never a second swap.
         assert_eq!(
-            recorded_or_held_escrow(&order_id, Some("cashuB-row")).as_deref(),
-            Some("cashuB-row")
+            found,
+            Some(("https://mint.a".to_string(), "cashuB-held".to_string()))
+        );
+        // A recorded token wins over a held one, with the mint it was locked at.
+        assert_eq!(
+            recorded_or_held_escrow(&order_id, Some(("https://mint.b", "cashuB-row"))),
+            Some(("https://mint.b".to_string(), "cashuB-row".to_string()))
         );
         forget_held_escrow(&order_id);
         assert_eq!(recorded_or_held_escrow(&order_id, None), None);
+    }
+
+    #[tokio::test]
+    // The globals lock must span the call it guards; nothing else in this
+    // test awaits on it.
+    #[allow(clippy::await_holding_lock)]
+    async fn a_cashu_node_without_a_mint_says_so_rather_than_not_cashu() {
+        // Arrange — the node runs Cashu (override) but names no mint: routing
+        // sends the seller to the escrow screen, which must explain why it
+        // cannot lock, not claim the node is not Cashu.
+        let _g = escrow_lock();
+        escrow_mode::set_overrides(escrow_mode::EscrowOverrides {
+            mode: escrow_mode::EscrowModeOverride::ForceCashu,
+            mint_url: None,
+        });
+
+        // Act
+        let err = lock_escrow("any-order".to_string()).await.unwrap_err();
+
+        // Assert
+        assert_eq!(err.to_string(), "CashuMintUnknown");
     }
 
     #[tokio::test]

@@ -4103,4 +4103,16 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get lockEscrowOrderMovedOn =>
       'Der Node meldet, dass diese Order nicht mehr auf den Escrow wartet. Dein Escrow bleibt auf diesem Gerät gespeichert; der Status des Trades aktualisiert sich, sobald der Node ihn meldet.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Sperre den Escrow, um den Trade zu starten';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Sperre dein Ecash im Escrow bei der Mint des Nodes. Das startet den Trade, und es kommt zu dir zurück, falls der Node verschwindet.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Die Gegenseite sperrt die Sats im Escrow. Sobald er gesperrt ist, bist du dran, den Fiat-Betrag zu zahlen.';
 }

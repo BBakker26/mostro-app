@@ -829,6 +829,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       TradeStatus.waitingPayment =>
         isBuyer
             ? l10n.tradeHeadlineWaitingPaymentBuyer
+            : ref.watch(isCashuModeProvider)
+            ? l10n.tradeHeadlineWaitingPaymentSellerCashu
             : l10n.tradeHeadlineWaitingPaymentSeller,
       TradeStatus.inProgress => l10n.tradeHeadlineInProgress,
       TradeStatus.waitingBond => l10n.tradeHeadlineWaitingBond,
@@ -875,6 +877,11 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         isBuyer
             ? l10n.tradeWaitingInvoiceBuyerInstruction
             : l10n.tradeWaitingInvoiceSellerInstruction,
+      // On a Cashu node the seller locks an escrow, not a hold invoice.
+      TradeStatus.waitingPayment when ref.watch(isCashuModeProvider) =>
+        isBuyer
+            ? l10n.tradeBodyWaitingPaymentBuyerCashu
+            : l10n.tradeWaitingPaymentSellerInstructionCashu,
       TradeStatus.waitingPayment =>
         isBuyer
             ? l10n.tradeBodyWaitingPaymentBuyer
@@ -1076,17 +1083,17 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       // On a Cashu node the seller's funding step is the escrow lock.
       TradePrimaryAction.payHoldInvoice => TradePrimarySpec(
         label:
-            ref.read(isCashuAvailableProvider)
+            ref.read(isCashuModeProvider)
                 ? l10n.lockEscrowConfirm
                 : l10n.payHoldInvoiceButton,
         icon:
-            ref.read(isCashuAvailableProvider) ? Icons.lock_outline : Icons.bolt,
+            ref.read(isCashuModeProvider) ? Icons.lock_outline : Icons.bolt,
         automationId: AutomationIds.tradePayInvoice,
         onPressed:
             () async => context.push(
               sellerFundingPath(
                 widget.orderId,
-                cashu: ref.read(isCashuAvailableProvider),
+                cashu: ref.read(isCashuModeProvider),
               ),
             ),
       ),

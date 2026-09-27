@@ -4084,4 +4084,16 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get lockEscrowOrderMovedOn =>
       'De node zegt dat deze order niet meer op de escrow wacht. Je escrow blijft op dit apparaat opgeslagen; de status van de trade wordt bijgewerkt zodra de node die meldt.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Vergrendel de escrow om de trade te starten';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Vergrendel je ecash in de escrow bij de mint van de node. Dat start de trade, en het komt naar je terug als de node verdwijnt.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen.';
 }

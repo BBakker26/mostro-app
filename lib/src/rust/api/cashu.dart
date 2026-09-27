@@ -104,7 +104,7 @@ Future<CashuEscrowQuote> cashuEscrowQuote({required String orderId}) =>
 /// `CashuEscrowRequestMissing`, `CashuWrongTradeKey`, `DeviceClockInvalid`,
 /// `CashuEscrowNotPersisted`, `CashuEscrowRejected: <reason>`,
 /// `NoDaemonResponse`, plus the `CashuLockFailed` markers from construction.
-Future<CashuEscrowQuote> lockEscrow({required String orderId}) =>
+Future<void> lockEscrow({required String orderId}) =>
     RustLib.instance.api.crateApiCashuLockEscrow(orderId: orderId);
 
 /// Subscribe to wallet changes.

@@ -6789,6 +6789,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade\'s status will update when the node reports it.'**
   String get lockEscrowOrderMovedOn;
+
+  /// Trade screen headline for the seller while it must lock the Cashu escrow (the hold-invoice step on a Cashu node)
+  ///
+  /// In en, this message translates to:
+  /// **'Lock the escrow to start the trade'**
+  String get tradeHeadlineWaitingPaymentSellerCashu;
+
+  /// Trade screen instruction for the seller on a Cashu node: lock the escrow
+  ///
+  /// In en, this message translates to:
+  /// **'Lock your ecash in the escrow at the node\'s mint. That starts the trade, and it comes back to you if the node disappears.'**
+  String get tradeWaitingPaymentSellerInstructionCashu;
+
+  /// Trade screen body for the buyer while the seller locks the Cashu escrow
+  ///
+  /// In en, this message translates to:
+  /// **'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.'**
+  String get tradeBodyWaitingPaymentBuyerCashu;
 }
 
 class _AppLocalizationsDelegate

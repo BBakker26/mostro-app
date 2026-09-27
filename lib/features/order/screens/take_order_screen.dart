@@ -214,7 +214,9 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       var cashu = false;
       if (!bondFirst) {
         try {
-          cashu = (await ref.read(escrowModeProvider.future)).isCashuAvailable;
+          // The mode, not the gate: a Cashu node sends no hold invoice, so a
+          // seller goes to the escrow screen even when its mint is missing.
+          cashu = (await ref.read(escrowModeProvider.future)).mode == 'cashu';
         } catch (e, st) {
           debugPrint('[TakeOrderScreen] escrow mode read failed: $e\n$st');
         }

@@ -544,8 +544,9 @@ departs from the plan above, this is what holds:
   while the order is active with `cashu-escrow-locked` again, and a **different**
   token with `invalid_cashu_token`. So `lock_escrow` serializes per order, records
   the token on the trade **before** anything else can fail (and before publishing),
-  and re-sends a recorded token as is — a retry never swaps twice. The re-send also
-  runs by itself when the relay pool comes online (`resubmit_pending_escrows`).
+  and re-sends a recorded token as is — a retry never swaps twice. A re-send names
+  the mint the token was locked at and needs no quote, connection or balance. It
+  also runs by itself when the relay pool comes online (`resubmit_pending_escrows`).
 - **Rejections** (`settle_escrow_rejection`): `invalid_cashu_token` /
   `invalid_mint_url` retire the token to `cashu_rejected_escrow_tokens` — the daemon
   never stored it, and it refunds to the seller at its locktime — so the next attempt
@@ -562,7 +563,10 @@ departs from the plan above, this is what holds:
   only through its locktime refund.
 - **Routing.** Every entry to the seller's funding step goes through
   `sellerFundingPath` (trade card and verb, trade screen, status listener,
-  notification, end of the bond window).
+  notification, end of the bond window, take flow), decided on the node's **mode**
+  (`isCashuModeProvider`), not on whether its mint is usable: a Cashu node sends no
+  hold invoice, so a missing mint shows up on the escrow screen as
+  `CashuMintUnknown`. The wallet itself stays gated on `isCashuAvailableProvider`.
 
 - **Done when:** full happy-path segment against a Track-A daemon + nutshell:
   take → seller locks → daemon validates → buyer notified → `fiat-sent` works;

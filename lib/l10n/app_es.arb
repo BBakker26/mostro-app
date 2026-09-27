@@ -1245,5 +1245,8 @@
   "lockEscrowMintUnavailableAtNode": "El nodo no pudo contactar la mint para verificar tu escrow. Reintenta: se reenvía el mismo escrow, nada se bloquea dos veces.",
   "lockEscrowRejectedGeneric": "El nodo rechazó el escrow. Sigue guardado en este dispositivo; reintenta en un momento.",
   "lockEscrowNoAnswer": "El nodo todavía no respondió. Tu escrow está guardado; reintentar reenvía el mismo.",
-  "lockEscrowOrderMovedOn": "El nodo dice que esta orden ya no espera el escrow. Tu escrow sigue guardado en este dispositivo; el estado del trade se actualizará cuando el nodo lo informe."
+  "lockEscrowOrderMovedOn": "El nodo dice que esta orden ya no espera el escrow. Tu escrow sigue guardado en este dispositivo; el estado del trade se actualizará cuando el nodo lo informe.",
+  "tradeHeadlineWaitingPaymentSellerCashu": "Bloquea el escrow para empezar el trade",
+  "tradeWaitingPaymentSellerInstructionCashu": "Bloquea tu ecash en el escrow de la mint del nodo. Eso inicia el trade, y vuelve a ti si el nodo desaparece.",
+  "tradeBodyWaitingPaymentBuyerCashu": "Están bloqueando los sats en el escrow. Cuando esté bloqueado, te toca pagar el fiat."
 }

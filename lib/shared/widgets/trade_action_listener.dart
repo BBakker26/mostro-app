@@ -88,7 +88,7 @@ class _TradeActionListenerState extends ConsumerState<TradeActionListener> {
       ),
       OrderStatus.waitingPayment => sellerFundingPath(
         update.orderId,
-        cashu: ref.read(isCashuAvailableProvider),
+        cashu: ref.read(isCashuModeProvider),
       ),
       // The anti-abuse bond: only ever the taker's row, whichever side.
       OrderStatus.waitingTakerBond => AppRoute.payBondPath(update.orderId),

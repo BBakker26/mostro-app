@@ -32,6 +32,11 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
   String? _error;
   bool _locking = false;
 
+  /// The latest quote request. Loads overlap — a balance change and the
+  /// return from the funding route can both start one — and only the newest
+  /// may land, or an older, lower balance would bring "fund your wallet" back.
+  int _quoteRequest = 0;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +47,7 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
   /// arrived — but not after a failed lock, whose message must stay visible
   /// next to the re-send it leads to.
   Future<void> _loadQuote({bool clearError = false}) async {
+    final request = ++_quoteRequest;
     if (clearError) setState(() => _error = null);
     try {
       // Connect first: the quote reports the balance, and an unconnected wallet
@@ -50,9 +56,11 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
       await ref.read(cashuWalletControllerProvider).connect();
       final quote =
           await ref.read(cashuEscrowControllerProvider).quote(widget.orderId);
-      if (mounted) setState(() => _quote = quote);
+      if (mounted && request == _quoteRequest) setState(() => _quote = quote);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted && request == _quoteRequest) {
+        setState(() => _error = e.toString());
+      }
     }
   }
 

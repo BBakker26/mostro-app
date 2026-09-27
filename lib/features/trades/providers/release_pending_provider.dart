@@ -25,9 +25,17 @@ const kReleaseConfirmationTimeout = Duration(seconds: 90);
 
 class ReleasePendingNotifier extends Notifier<Map<String, ReleaseWait>> {
   final _timers = <String, Timer>{};
+  int _generation = 0;
+
+  /// Bumped by every rebuild — an identity reset invalidates this provider,
+  /// and Riverpod re-runs [build] on the same instance. A caller that spans
+  /// an await captures it first and hands it to [start], so a release the
+  /// previous identity published is not recorded into the next one's state.
+  int get generation => _generation;
 
   @override
   Map<String, ReleaseWait> build() {
+    _generation++;
     ref.onDispose(() {
       for (final timer in _timers.values) {
         timer.cancel();
@@ -37,8 +45,10 @@ class ReleasePendingNotifier extends Notifier<Map<String, ReleaseWait>> {
     return const {};
   }
 
-  /// A release of [orderId] was published.
-  void start(String orderId) {
+  /// A release of [orderId] was published. With [since], only if no rebuild
+  /// (identity reset) happened after that [generation] was read.
+  void start(String orderId, {int? since}) {
+    if (since != null && since != _generation) return;
     _timers.remove(orderId)?.cancel();
     _timers[orderId] = Timer(kReleaseConfirmationTimeout, () {
       _timers.remove(orderId);

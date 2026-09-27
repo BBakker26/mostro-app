@@ -540,6 +540,42 @@ void main() {
       await tester.pump(kReleaseConfirmationTimeout);
     });
 
+    testWidgets('a release that lands after the seller left still waits', (
+      tester,
+    ) async {
+      // Codex / ermeme on #604: the wait was recorded only while the screen
+      // was mounted. Leaving mid-publication dropped it, and reopening the
+      // unchanged fiat-sent trade offered Release again.
+      // Arrange — a publication that is still in flight.
+      final publication = Completer<void>();
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-left',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        releaseOrder: (_) => publication.future,
+      );
+      await confirmRelease(tester);
+
+      // Act — the seller leaves, then the publication succeeds.
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const SizedBox.shrink(),
+        ),
+      );
+      publication.complete();
+      await tester.pump();
+
+      // Assert — the wait is recorded, so a reopened screen will not offer
+      // Release while the node settles.
+      expect(
+        container.read(releasePendingProvider)['order-release-left'],
+        ReleaseWait.waiting,
+      );
+      await tester.pump(kReleaseConfirmationTimeout);
+    });
+
     testWidgets('the wait ends as soon as the order moves', (tester) async {
       // Arrange: broadcast, because the release re-reads the status and
       // the screen subscribes again.

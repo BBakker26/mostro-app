@@ -409,14 +409,20 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     if (confirmed != true) {
       throw const MostroActionAborted();
     }
+    // Held across the publication: the wait must be recorded even if the
+    // seller leaves this screen before it completes, or a reopened screen
+    // offers Release again while the node settles (#604 review).
+    final pending = ref.read(releasePendingProvider.notifier);
+    final generation = pending.generation;
     try {
       await ref.read(releaseOrderActionProvider)(widget.orderId);
-      if (!mounted) return;
       // Publishing release confirms neither escrow settlement nor payout. Stay
       // here until the live status reaches Success before offering rating —
       // and don't offer Release again meanwhile: the daemon answers only once
-      // the hold invoice settled, often tens of seconds later.
-      ref.read(releasePendingProvider.notifier).start(widget.orderId);
+      // the hold invoice settled, often tens of seconds later. Recorded before
+      // the mounted check, which only guards the UI below.
+      pending.start(widget.orderId, since: generation);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppLocalizations.of(context).releaseSentNotice)),
       );

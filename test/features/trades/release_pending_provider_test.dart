@@ -40,4 +40,18 @@ void main() {
 
     expect(container.read(releasePendingProvider), isEmpty);
   });
+
+  // A release published by the previous identity must not land in the next
+  // one's state: the screen holds the notifier across the publication, and
+  // an identity reset during it disposes that notifier.
+  test('a release published across an identity reset is not recorded', () {
+    final notifier = container.read(releasePendingProvider.notifier);
+    final before = notifier.generation;
+
+    container.invalidate(releasePendingProvider);
+    container.read(releasePendingProvider);
+    notifier.start('order-a', since: before);
+
+    expect(container.read(releasePendingProvider), isEmpty);
+  });
 }

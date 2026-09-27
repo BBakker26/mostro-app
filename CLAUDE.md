@@ -235,8 +235,9 @@ bridged by flutter_rust_bridge.
   user's session. The stores are process-wide and tests run in parallel, which is why the
   identity lifecycle test calls `delete_identity_inner(false)`.
 - **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
-  the NIP-69 `created_at` tag (mostro#971), capped at the event's time and falling back to it on
-  older nodes. The event's own `created_at` moves on every revision of the addressable event, so
+  the NIP-69 `published_at` tag (mostro#1000), then the legacy `created_at` tag (daemon builds
+  between mostro#971 and #1000), then the event's time on older nodes; a tag value is capped at
+  the event's time. The event's own `created_at` moves on every revision of the addressable event, so
   anything that must pick the **newest revision** has to read the event, not the order —
   `node_stats::dedup_latest` carries it alongside as `Revision`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon

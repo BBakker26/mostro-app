@@ -3062,8 +3062,22 @@ class AppLocalizationsDe extends AppLocalizations {
       'Warte auf deine Einlage — noch nicht veröffentlicht';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Diese Order kann nicht storniert werden, solange ihre Einlage aussteht. Verwirf sie stattdessen auf dem Einlage-Bildschirm.';
+  String get bondAlreadyLocked =>
+      'Deine Einlage wurde bereits bezahlt, die Order ist veröffentlicht. Storniere sie auf dem Order-Bildschirm.';
+
+  @override
+  String get bondCancelRefusedTitle =>
+      'Der Node hat die Einlage nicht storniert';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Dieser Mostro-Node unterstützt das Stornieren einer unbezahlten Einlage vielleicht noch nicht, oder deine Einlage wurde gerade bezahlt. Wenn du sie nicht bezahlt hast, kannst du die Order von diesem Gerät entfernen. Wird die Rechnung später bezahlt, wird die Order trotzdem veröffentlicht.';
+
+  @override
+  String get bondRemoveFromDevice => 'Von diesem Gerät entfernen';
+
+  @override
+  String get bondKeepWaiting => 'Weiter warten';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

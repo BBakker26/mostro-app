@@ -75,10 +75,10 @@ String localizedDaemonError(
   if (raw.contains('TradeKeyMissing')) {
     return l10n.bondClaimErrorNoKey;
   }
-  // A cancel during the maker's bond window: the daemon would refuse it
-  // (docs/ANTI_ABUSE_BOND.md §2.8); the pay-bond screen offers Abandon.
-  if (raw.contains('BondCancelNotAllowed')) {
-    return l10n.bondCancelNotAllowed;
+  // A maker's cancel lost to its own bond, which locked first: the order is
+  // published and is cancelled from its screen (docs/ANTI_ABUSE_BOND.md §6.2).
+  if (raw.contains('BondAlreadyLocked')) {
+    return l10n.bondAlreadyLocked;
   }
   // The daemon never answered within the reply window.
   if (raw.contains('NoDaemonResponse')) {

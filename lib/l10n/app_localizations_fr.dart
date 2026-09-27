@@ -3058,8 +3058,21 @@ class AppLocalizationsFr extends AppLocalizations {
       'En attente de votre dépôt — pas encore publié';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Cet ordre ne peut pas être annulé tant que son dépôt est en attente. Abandonnez-le depuis l\'écran du dépôt.';
+  String get bondAlreadyLocked =>
+      'Votre dépôt a déjà été payé : l\'ordre est publié. Annulez-le depuis l\'écran de l\'ordre.';
+
+  @override
+  String get bondCancelRefusedTitle => 'Le nœud n\'a pas annulé le dépôt';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Ce nœud Mostro ne permet peut-être pas encore d\'annuler un dépôt impayé, ou votre dépôt vient d\'être payé. Si vous ne l\'avez pas payé, vous pouvez retirer l\'ordre de cet appareil. Si la facture est payée plus tard, l\'ordre sera tout de même publié.';
+
+  @override
+  String get bondRemoveFromDevice => 'Retirer de cet appareil';
+
+  @override
+  String get bondKeepWaiting => 'Continuer d\'attendre';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

@@ -3049,8 +3049,21 @@ class AppLocalizationsNl extends AppLocalizations {
       'Wacht op je borg, nog niet gepubliceerd';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Deze order kan niet worden geannuleerd zolang de borg openstaat. Laat hem vallen vanuit het borgscherm.';
+  String get bondAlreadyLocked =>
+      'Je borg is al betaald, dus de order is gepubliceerd. Annuleer hem vanaf het orderscherm.';
+
+  @override
+  String get bondCancelRefusedTitle => 'De node heeft de borg niet geannuleerd';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Deze Mostro-node ondersteunt het annuleren van een onbetaalde borg misschien nog niet, of je borg is net betaald. Heb je hem niet betaald, dan kun je de order van dit apparaat verwijderen. Wordt de factuur later betaald, dan wordt de order toch gepubliceerd.';
+
+  @override
+  String get bondRemoveFromDevice => 'Verwijderen van dit apparaat';
+
+  @override
+  String get bondKeepWaiting => 'Blijven wachten';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {

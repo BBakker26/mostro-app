@@ -372,8 +372,7 @@ pub(crate) async fn publish_chat_payload_for(
 struct PublishedChat {
     /// The signed inner event: the message's durable identity.
     inner: nostr_sdk::prelude::Event,
-    /// Whether at least one relay accepted the envelope. `send_event` returns
-    /// `Ok` even when every relay rejected it.
+    /// Whether at least one relay accepted the envelope.
     delivered: bool,
 }
 
@@ -414,38 +413,16 @@ async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<Publis
         crate::nostr::transport::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
             .await?;
     let pool = crate::api::nostr::get_pool().map_err(|_| anyhow!("relay pool not ready"))?;
-    let output = pool
-        .client()
-        .send_event(&outer)
-        .await
-        .map_err(|e| anyhow!("publish failed: {e}"))?;
-    // Envelope metadata only — chat plaintext never enters a log record.
-    let eid = outer.id.to_hex();
-    for relay in output.success.keys() {
-        crate::api::logging::blog_info(
-            "publish",
-            format!(
-                "ev={} kind=14 relay={} OK",
-                crate::api::logging::short_id(&eid),
-                crate::api::logging::display_relay(&relay.to_string()),
-            ),
-        );
-    }
-    for (relay, err) in &output.failed {
-        crate::api::logging::blog_warn(
-            "publish",
-            format!(
-                "ev={} kind=14 relay={} FAIL: {}",
-                crate::api::logging::short_id(&eid),
-                crate::api::logging::display_relay(&relay.to_string()),
-                crate::api::logging::sanitize_relay_text(err),
-            ),
-        );
-    }
-    Ok(PublishedChat {
-        inner,
-        delivered: !output.success.is_empty(),
-    })
+    // Back on the first relay that accepts it: the message is in the
+    // conversation from then on, and a relay that never answers no longer
+    // holds it back for its 10 s timeout. The rest keep sending and logging.
+    let delivered = match crate::nostr::publish::publish_event(&pool.client(), &outer).await {
+        Ok(()) => true,
+        // Nobody took it: kept, as before, under the id it would have had.
+        Err(e) if e.to_string() == "NoRelayAccepted" => false,
+        Err(e) => return Err(anyhow!("publish failed: {e}")),
+    };
+    Ok(PublishedChat { inner, delivered })
 }
 
 /// Send an encrypted text message to the trade counterparty.

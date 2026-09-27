@@ -434,9 +434,11 @@ const RESYNC_CONNECT_WAIT: std::time::Duration = std::time::Duration::from_secs(
 /// SDK reconnects on its own schedule, and nothing else re-checks that every
 /// subscription survived or that the outbox drained. One pass, in order:
 ///
-/// 1. **Reconnect nudge.** `connect()` spawns a connection task for every
-///    relay that has none (a relay whose first attempt failed never got one)
-///    and is a no-op for the rest; the wait is bounded, and the pool's own
+/// 1. **Reconnect nudge.** Every relay the OS cut while the app was away is
+///    bounced so it reconnects now instead of after its retry interval
+///    (`relay_probe::reconnect_disconnected_now`). Then `connect()` spawns a
+///    connection task for every relay that has none (a relay whose first
+///    attempt failed never got one); the wait is bounded, and the pool's own
 ///    state is what gets reported.
 /// 2. **Subscriptions.** The bulk kind-14 filter is re-issued under its stable
 ///    id (the relay replaces it in place and replays the node's history; the
@@ -511,6 +513,16 @@ async fn run_resync() -> ResyncOutcome {
         };
     };
     let client = pool.client();
+    // Relays the OS cut while the app was away sit in their retry interval,
+    // which `connect()` cannot shorten: bounce them first, so a message the
+    // daemon sent meanwhile arrives now rather than 10–60 s from now.
+    let woken = crate::nostr::relay_probe::reconnect_disconnected_now(&client).await;
+    if woken > 0 {
+        crate::api::logging::blog_info(
+            "relay",
+            format!("resume: reconnecting {woken} dropped relay(s) now"),
+        );
+    }
     client.connect().and_wait(RESYNC_CONNECT_WAIT).await;
     let online = pool.connection_state().await == ConnectionState::Online;
     log::info!("[nostr] resync: reconnect nudge settled, online={online}");

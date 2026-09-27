@@ -15,9 +15,9 @@ import 'package:mostro/src/rust/api/types.dart';
 /// a hold invoice, the seller locks a 2-of-3 token at the node's mint and
 /// submits it. Same place in the flow, same finality.
 ///
-/// Everything is shown before the seller commits, because the numbers are not
-/// obvious: the escrow is the order amount, the fee is a *separate* token worth
-/// the whole Mostro fee, and both leave the wallet at once.
+/// Everything is shown before the seller commits. Once an escrow is locked and
+/// recorded, the screen only ever offers to re-send that same token: the core
+/// knows (`CashuEscrowQuote.pendingSubmission`), so a retry never swaps twice.
 class LockEscrowScreen extends ConsumerStatefulWidget {
   const LockEscrowScreen({super.key, required this.orderId});
 
@@ -32,22 +32,17 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
   String? _error;
   bool _locking = false;
 
-  /// True once a lock attempt has swapped funds at the mint but the submission
-  /// may not have reached the node.
-  ///
-  /// The token is persisted before the publish result is checked, and the
-  /// daemon's handler is idempotent on a re-submission — so retrying is both
-  /// safe and the only way out of a lost publish. Without this the seller is
-  /// left with locked funds and a trade that looks stuck.
-  bool _needsRetry = false;
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadQuote());
   }
 
-  Future<void> _loadQuote() async {
+  /// [clearError] once the reason for the last error may be gone — funds
+  /// arrived — but not after a failed lock, whose message must stay visible
+  /// next to the re-send it leads to.
+  Future<void> _loadQuote({bool clearError = false}) async {
+    if (clearError) setState(() => _error = null);
     try {
       // Connect first: the quote reports the balance, and an unconnected wallet
       // reports zero — which would send the seller off to fund a wallet that is
@@ -72,37 +67,43 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
           .showSnackBar(SnackBar(content: Text(l10n.lockEscrowSubmitted)));
       context.go(AppRoute.tradeDetailPath(widget.orderId));
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _locking = false;
-          _error = e.toString();
-          // Anything past the mint swap leaves a token behind. The markers
-          // below are raised *before* it, so those are clean failures.
-          _needsRetry = !_isPreLockFailure(e.toString());
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _locking = false;
+        _error = e.toString();
+      });
+      // Whether an escrow is now recorded — and the button must re-send it —
+      // is the core's to say, not a guess from the error.
+      await _loadQuote();
     }
   }
 
-  /// Failures raised before any funds move, so there is nothing to retry.
-  bool _isPreLockFailure(String raw) => const [
-        'CashuInsufficientFunds',
-        'CashuNodeFeeUnknown',
-        'CashuEscrowRequestMissing',
-        'CashuWrongTradeKey',
-        'CashuNotEnabled',
-        'CashuNotConnected',
-        'NotTheSeller',
-        'DeviceClockInvalid',
-        'InvalidEscrowParties',
-      ].any(raw.contains);
+  /// Funding happens on the wallet screen. Coming back must show the new
+  /// balance, or the only way forward stays "fund your wallet".
+  Future<void> _fundWallet() async {
+    await context.push(AppRoute.cashuWallet);
+    if (mounted) await _loadQuote(clearError: true);
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final colors = Theme.of(context).extension<AppColors>()!;
     final quote = _quote;
-    final short = quote != null && quote.balanceSats < quote.totalSats;
+    final pending = quote?.pendingSubmission ?? false;
+    // A recorded escrow re-sends without touching the balance.
+    final short =
+        quote != null && !pending && quote.balanceSats < quote.totalSats;
+
+    // Ecash can also arrive while this screen is open (a paste on another
+    // screen, a sync): a balance change re-reads the quote.
+    ref.listen(cashuWalletProvider, (previous, next) {
+      final before = previous?.valueOrNull?.balanceSats;
+      final after = next.valueOrNull?.balanceSats;
+      if (after != null && after != before && !_locking) {
+        _loadQuote(clearError: true);
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -126,7 +127,9 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
             const Center(child: CircularProgressIndicator())
           else if (quote != null) ...[
             _Row(label: l10n.lockEscrowAmount, value: '${quote.amountSats}'),
-            _Row(label: l10n.lockEscrowFee, value: '${quote.feeSats}'),
+            // No fee token until the daemon collects one (TA-1f).
+            if (quote.feeSats > BigInt.zero)
+              _Row(label: l10n.lockEscrowFee, value: '${quote.feeSats}'),
             const Divider(),
             _Row(
               label: l10n.lockEscrowTotal,
@@ -144,7 +147,7 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
               style: TextStyle(color: colors.textSubtle, fontSize: 13),
             ),
           ],
-          if (_needsRetry) ...[
+          if (pending) ...[
             const SizedBox(height: AppSpacing.md),
             Text(
               l10n.lockEscrowPendingSubmission,
@@ -161,7 +164,7 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
           const SizedBox(height: AppSpacing.xl),
           if (short)
             OutlinedButton.icon(
-              onPressed: () => context.push(AppRoute.cashuWallet),
+              onPressed: _fundWallet,
               icon: const Icon(Icons.account_balance_wallet_outlined),
               label: Text(l10n.lockEscrowFundWallet),
             )
@@ -174,7 +177,7 @@ class _LockEscrowScreenState extends ConsumerState<LockEscrowScreen> {
                       width: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text(_needsRetry
+                  : Text(pending
                       ? l10n.lockEscrowRetry
                       : l10n.lockEscrowConfirm),
             ),

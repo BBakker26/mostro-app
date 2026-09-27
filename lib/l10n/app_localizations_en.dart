@@ -3976,10 +3976,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your wallet does not hold enough for the escrow and the fee.';
 
   @override
-  String get lockEscrowFeeUnknown =>
-      'This node has not published its fee yet. Try again in a moment.';
-
-  @override
   String get lockEscrowNotTheSeller => 'Only the seller funds the escrow.';
 
   @override
@@ -4022,4 +4018,36 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get lockEscrowPendingSubmission =>
       'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'This node has not published its mint, so there is nowhere to lock the escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'The escrow reached the node, but this device could not save a copy of it. The trade can go on, but this device cannot reclaim the escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'The node did not accept this escrow. It was set aside — it comes back to you when its lock expires — and the next attempt locks a new one.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'The node uses a different mint. This escrow was set aside — it comes back to you when its lock expires. Check the node\'s mint before trying again.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'The node could not reach the mint to check your escrow. Try again: the same escrow is re-sent, nothing is locked twice.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'The node refused the escrow. It stays recorded on this device; try again in a moment.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'The node has not answered yet. Your escrow is recorded; retrying re-sends the same one.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade\'s status will update when the node reports it.';
 }

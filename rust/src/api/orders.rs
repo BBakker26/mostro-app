@@ -1400,6 +1400,7 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
         cashu_mint_url: None,
         cashu_escrow_token: None,
         cashu_locked_at: None,
+        cashu_rejected_escrow_tokens: Vec::new(),
     };
     if let Some(db) = crate::db::app_db::db() {
         if let Err(e) = persist_trade_row(db, &trade).await {
@@ -1681,6 +1682,7 @@ async fn take_order_once(
         cashu_mint_url: None,
         cashu_escrow_token: None,
         cashu_locked_at: None,
+        cashu_rejected_escrow_tokens: Vec::new(),
     };
 
     // The other side of the race guarded in `dispatch_mostro_message`: this
@@ -2122,6 +2124,7 @@ fn trade_row_from_small_order(
         cashu_mint_url: None,
         cashu_escrow_token: None,
         cashu_locked_at: None,
+        cashu_rejected_escrow_tokens: Vec::new(),
     })
 }
 
@@ -4063,6 +4066,7 @@ async fn dispatch_mostro_message(
         Action::WaitingSellerToPay
         | Action::WaitingBuyerInvoice
         | Action::BuyerInvoiceAccepted
+        | Action::CashuEscrowLocked
         | Action::FiatSentOk
         | Action::HoldInvoicePaymentSettled
         | Action::HoldInvoicePaymentCanceled
@@ -4086,6 +4090,18 @@ async fn dispatch_mostro_message(
                     log::debug!("[orders] daemon-msg {:?} has no order id", kind.action);
                     return;
                 }
+            };
+            // The seller's escrow submission is answered here (phase C5).
+            // Taken before the gate — a re-submission's answer may be a replay
+            // the gate drops, and it is still the answer — and woken when this
+            // arm returns, so the lock screen finds the trade already active.
+            let _cashu_lock = if kind.action == Action::CashuEscrowLocked {
+                CashuLockWake(crate::mostro::pending::take_cashu_lock(
+                    trade_pubkey_hex,
+                    kind.request_id,
+                ))
+            } else {
+                CashuLockWake(None)
             };
             if status_arm_gate(&row_state, &kind.action, &order_id) {
                 return;
@@ -4283,6 +4299,21 @@ async fn dispatch_mostro_message(
                 }
                 other => format!("Order rejected by Mostro: {other}"),
             };
+
+            // A refused escrow submission (phase C5) has its own record, for
+            // the same reason: the seller's key may hold another request's.
+            if let Some(waiter) =
+                crate::mostro::pending::take_cashu_lock(trade_pubkey_hex, kind.request_id)
+            {
+                crate::api::logging::blog_warn(
+                    "daemon-msg",
+                    format!("CantDo: reason={reason} — answering the seller's escrow"),
+                );
+                if let Some(tx) = waiter {
+                    let _ = tx.send(crate::mostro::pending::CashuLockReply::Rejected { reason });
+                }
+                return;
+            }
 
             // A refused maker cancel (mostro#996) has its own record: the
             // create's, on the same key, still waits for its `new-order`.
@@ -4795,6 +4826,7 @@ fn restored_bond_row(
         cashu_mint_url: None,
         cashu_escrow_token: None,
         cashu_locked_at: None,
+        cashu_rejected_escrow_tokens: Vec::new(),
     }
 }
 
@@ -5736,6 +5768,20 @@ fn take_user_cancel(order_id: &str) -> bool {
         .lock()
         .map(|mut set| set.remove(order_id))
         .unwrap_or(false)
+}
+
+/// Wakes a seller's escrow submission with `Locked` when dropped, so every
+/// exit of the status-sync arm answers it — after the arm's own writes.
+struct CashuLockWake(
+    Option<Option<tokio::sync::oneshot::Sender<crate::mostro::pending::CashuLockReply>>>,
+);
+
+impl Drop for CashuLockWake {
+    fn drop(&mut self) {
+        if let Some(Some(tx)) = self.0.take() {
+            let _ = tx.send(crate::mostro::pending::CashuLockReply::Locked);
+        }
+    }
 }
 
 /// Wakes a maker's bond cancel with `canceled` when dropped, so every exit
@@ -13481,6 +13527,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         }
     }
 
@@ -14814,6 +14861,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         })
         .await
         .expect("save the trade row");
@@ -14937,6 +14985,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         })
         .await
         .expect("save the trade row");
@@ -15055,6 +15104,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         })
         .await
         .expect("save the trade row");
@@ -15365,6 +15415,7 @@ mod tests {
                 cashu_mint_url: None,
                 cashu_escrow_token: None,
                 cashu_locked_at: None,
+                cashu_rejected_escrow_tokens: Vec::new(),
             }
         };
         db.save_trade(&row(&fixed_id, fixed, TradeRole::Seller))
@@ -16282,6 +16333,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         })
         .await
         .expect("save the pre-reveal row");
@@ -16549,6 +16601,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         }
     }
 
@@ -18314,6 +18367,133 @@ mod tests {
             take_matching_request(key, Some(941)).is_none(),
             "the create's record is gone"
         );
+    }
+
+    /// A seller's row waiting to fund a Cashu escrow (phase C5).
+    fn cashu_seller_row(order_id: &str, trade_index: u32) -> crate::api::types::TradeInfo {
+        let mut trade = seam_trade_row(order_id, crate::api::types::OrderStatus::WaitingPayment);
+        trade.role = TradeRole::Seller;
+        trade.trade_key_index = trade_index;
+        trade.cashu_escrow_token = Some("cashuB-recorded".to_string());
+        trade
+    }
+
+    /// `cashu-escrow-locked` on the seller's submission nonce answers the
+    /// waiting `lock_escrow`, after the row is already active.
+    #[tokio::test]
+    async fn a_cashu_escrow_locked_answers_the_seller_and_activates_the_trade() {
+        use crate::mostro::pending::{register_cashu_lock, CashuLockReply};
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        db.save_trade(&cashu_seller_row(&order_id, 51)).await.unwrap();
+        let key = "ff00ff91";
+        let rx = register_cashu_lock(key, 991);
+
+        dispatch_mostro_message(
+            correlated_message(order_uuid, 991, Action::CashuEscrowLocked, None, 2_000),
+            "test-cashu-locked-seller",
+            key,
+            51,
+        )
+        .await;
+
+        assert!(matches!(rx.await, Ok(CashuLockReply::Locked)));
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, crate::api::types::OrderStatus::Active);
+    }
+
+    /// The buyer's copy carries no nonce: it only activates the buyer's trade.
+    #[tokio::test]
+    async fn the_buyers_cashu_escrow_locked_activates_its_trade() {
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut row = seam_trade_row(&order_id, crate::api::types::OrderStatus::WaitingPayment);
+        row.role = TradeRole::Buyer;
+        row.trade_key_index = 52;
+        db.save_trade(&row).await.unwrap();
+        let mut updates = trade_updates_tx().subscribe();
+
+        dispatch_mostro_message(
+            daemon_message(order_uuid, Action::CashuEscrowLocked, None, 2_000),
+            "test-cashu-locked-buyer",
+            "ff00ff92",
+            52,
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, crate::api::types::OrderStatus::Active);
+        assert!(drain_reasoned(&mut updates, &order_id)
+            .iter()
+            .any(|(status, _)| *status == crate::api::types::OrderStatus::Active));
+    }
+
+    /// A `cant-do` on the submission nonce reaches the seller with its reason.
+    #[tokio::test]
+    async fn a_cant_do_on_the_escrow_answers_the_seller() {
+        use crate::mostro::pending::{register_cashu_lock, CashuLockReply};
+        let _db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let key = "ff00ff93";
+        let rx = register_cashu_lock(key, 993);
+
+        dispatch_mostro_message(
+            correlated_message(
+                order_uuid,
+                993,
+                Action::CantDo,
+                Some(Payload::CantDo(Some(
+                    mostro_core::error::CantDoReason::InvalidCashuToken,
+                ))),
+                2_000,
+            ),
+            "test-cashu-lock-refused",
+            key,
+            53,
+        )
+        .await;
+
+        match rx.await {
+            Ok(CashuLockReply::Rejected { reason }) => assert_eq!(reason, "InvalidCashuToken"),
+            other => panic!("expected the rejection, got {other:?}"),
+        }
+    }
+
+    /// The escrow request is the only message naming the buyer's per-order
+    /// trade key; the escrow is locked to it, so it must reach the row.
+    #[tokio::test]
+    async fn the_escrow_request_stores_both_trade_keys_on_the_row() {
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut row = cashu_seller_row(&order_id, 54);
+        row.cashu_escrow_token = None;
+        db.save_trade(&row).await.unwrap();
+        let buyer = "0000000000000000000000000000000000000000000000000000000000000002";
+        let seller = "0000000000000000000000000000000000000000000000000000000000000003";
+        let mut request = pending_small_order(order_uuid);
+        request.status = Some(mostro_core::order::Status::WaitingPayment);
+        request.buyer_trade_pubkey = Some(buyer.to_string());
+        request.seller_trade_pubkey = Some(seller.to_string());
+
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::WaitingSellerToPay,
+                Some(Payload::Order(request)),
+                2_000,
+            ),
+            "test-cashu-escrow-request",
+            "ff00ff94",
+            54,
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.buyer_trade_pubkey.as_deref(), Some(buyer));
+        assert_eq!(row.seller_trade_pubkey.as_deref(), Some(seller));
     }
 
     /// A `cant-do` on the maker's cancel nonce reaches the cancel, and the

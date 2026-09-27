@@ -1200,6 +1200,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1276,6 +1277,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1375,6 +1377,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1459,6 +1462,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1541,6 +1545,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         // Maker-shaped row (empty peer) and a poisoned pre-fix row (daemon
         // pubkey seeded by the old take path).
@@ -2148,6 +2153,7 @@ mod tests {
                 cashu_mint_url: None,
                 cashu_escrow_token: None,
                 cashu_locked_at: None,
+                cashu_rejected_escrow_tokens: Vec::new(),
             })
             .await
             .unwrap();

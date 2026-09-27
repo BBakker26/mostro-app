@@ -198,6 +198,10 @@ async fn on_pool_online() {
     fetch_and_set_node_capabilities().await;
     drop(capabilities_pending);
     let _ = flush_message_queue().await;
+    // A seller's escrow recorded but never confirmed (the app died or lost
+    // the relays mid-submission) is re-sent now, the same token, no second
+    // swap. Detached: it waits on the daemon, and nothing here may.
+    crate::rt::spawn(crate::api::cashu::resubmit_pending_escrows());
     // Rebuild chat listeners for persisted active trades — sessions are
     // in-memory, so after a restart nothing else would resubscribe.
     // Idempotent: orders with a live chat task are skipped by the

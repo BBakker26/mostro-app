@@ -23,7 +23,17 @@ String cashuErrorMessage(Object error, AppLocalizations l10n) {
 /// prefix of another must come first, or the broader one would shadow it.
 final Map<String, String Function(AppLocalizations)> _messages = {
   'CashuInsufficientFunds': (l) => l.lockEscrowInsufficientFunds,
-  'CashuNodeFeeUnknown': (l) => l.lockEscrowFeeUnknown,
+  'CashuMintUnknown': (l) => l.lockEscrowMintUnknown,
+  // The daemon's answers to a submission (phase C5). Each reason says what
+  // happened to the recorded escrow, which is what the seller must know.
+  'CashuEscrowRejected: InvalidCashuToken': (l) => l.lockEscrowRejectedToken,
+  'CashuEscrowRejected: InvalidMintUrl': (l) => l.lockEscrowRejectedMint,
+  'CashuEscrowRejected: CashuMintUnavailable': (l) =>
+      l.lockEscrowMintUnavailableAtNode,
+  'CashuEscrowRejected': (l) => l.lockEscrowRejectedGeneric,
+  'CashuEscrowOrderMovedOn': (l) => l.lockEscrowOrderMovedOn,
+  'CashuEscrowNotPersisted': (l) => l.lockEscrowNotRecorded,
+  'NoDaemonResponse': (l) => l.lockEscrowNoAnswer,
   'CashuEscrowRequestMissing': (l) => l.lockEscrowRequestMissing,
   'CashuWrongTradeKey': (l) => l.lockEscrowWrongTradeKey,
   'CashuLocktimeNotReached': (l) => l.lockEscrowLocktimeNotReached,

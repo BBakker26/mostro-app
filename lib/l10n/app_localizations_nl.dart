@@ -4009,10 +4009,6 @@ class AppLocalizationsNl extends AppLocalizations {
       'Je portemonnee bevat niet genoeg voor de escrow en de vergoeding.';
 
   @override
-  String get lockEscrowFeeUnknown =>
-      'Deze node heeft zijn vergoeding nog niet gepubliceerd. Probeer het zo meteen opnieuw.';
-
-  @override
   String get lockEscrowNotTheSeller =>
       'Alleen de verkoper financiert de escrow.';
 
@@ -4056,4 +4052,36 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get lockEscrowPendingSubmission =>
       'Je escrow is vergrendeld, maar de node heeft het nog niet bevestigd. Opnieuw proberen is veilig — hij wordt niet een tweede keer vergrendeld.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Deze node heeft zijn mint niet gepubliceerd, dus er is geen plek om de escrow te vergrendelen.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'De escrow heeft de node bereikt, maar dit apparaat kon er geen kopie van opslaan. De trade kan doorgaan, maar dit apparaat kan de escrow niet terugvorderen.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'De node heeft deze escrow niet geaccepteerd. Hij is opzijgezet — hij komt naar je terug als zijn vergrendeling afloopt — en de volgende poging vergrendelt een nieuwe.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'De node gebruikt een andere mint. Deze escrow is opzijgezet — hij komt naar je terug als zijn vergrendeling afloopt. Controleer de mint van de node voordat je het opnieuw probeert.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'De node kon de mint niet bereiken om je escrow te controleren. Probeer het opnieuw: dezelfde escrow wordt opnieuw verstuurd, niets wordt twee keer vergrendeld.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'De node heeft de escrow geweigerd. Hij blijft op dit apparaat opgeslagen; probeer het zo meteen opnieuw.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'De node heeft nog niet geantwoord. Je escrow is opgeslagen; opnieuw proberen verstuurt dezelfde.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'De node zegt dat deze order niet meer op de escrow wacht. Je escrow blijft op dit apparaat opgeslagen; de status van de trade wordt bijgewerkt zodra de node die meldt.';
 }

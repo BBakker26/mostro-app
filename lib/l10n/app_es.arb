@@ -1227,7 +1227,6 @@
   "lockEscrowFundWallet": "Carg\u00e1 tu billetera",
   "lockEscrowSubmitted": "Custodia bloqueada y enviada",
   "lockEscrowInsufficientFunds": "Tu billetera no alcanza para la custodia m\u00e1s la comisi\u00f3n.",
-  "lockEscrowFeeUnknown": "Este nodo todav\u00eda no public\u00f3 su comisi\u00f3n. Prob\u00e1 de nuevo en un momento.",
   "lockEscrowNotTheSeller": "Solo el vendedor financia la custodia.",
   "lockEscrowInvalidToken": "No se pudo construir la custodia correctamente. No se envi\u00f3 nada.",
   "lockEscrowFailed": "El mint no pudo bloquear la custodia. Tus fondos no se movieron.",
@@ -1238,5 +1237,13 @@
   "lockEscrowLocktimeNotReached": "La custodia sigue bloqueada. Vas a poder recuperarla vos mismo cuando pase el locktime.",
   "lockEscrowClockInvalid": "El reloj de tu dispositivo est\u00e1 mal, as\u00ed que la custodia no se puede fechar bien. Correg\u00ed la fecha e intent\u00e1 de nuevo.",
   "lockEscrowRetry": "Reintentar env\u00edo",
-  "lockEscrowPendingSubmission": "Tu custodia est\u00e1 bloqueada pero el nodo no la confirm\u00f3. Reintentar es seguro: no se bloquea una segunda vez."
+  "lockEscrowPendingSubmission": "Tu custodia est\u00e1 bloqueada pero el nodo no la confirm\u00f3. Reintentar es seguro: no se bloquea una segunda vez.",
+  "lockEscrowMintUnknown": "Este nodo no publicó su mint, así que no hay dónde bloquear el escrow.",
+  "lockEscrowNotRecorded": "El escrow llegó al nodo, pero este dispositivo no pudo guardar una copia. El trade puede seguir, pero desde este dispositivo no podrás recuperar el escrow.",
+  "lockEscrowRejectedToken": "El nodo no aceptó este escrow. Quedó apartado —vuelve a ti cuando venza su bloqueo— y el próximo intento bloquea uno nuevo.",
+  "lockEscrowRejectedMint": "El nodo usa otra mint. Este escrow quedó apartado —vuelve a ti cuando venza su bloqueo—. Revisa la mint del nodo antes de reintentar.",
+  "lockEscrowMintUnavailableAtNode": "El nodo no pudo contactar la mint para verificar tu escrow. Reintenta: se reenvía el mismo escrow, nada se bloquea dos veces.",
+  "lockEscrowRejectedGeneric": "El nodo rechazó el escrow. Sigue guardado en este dispositivo; reintenta en un momento.",
+  "lockEscrowNoAnswer": "El nodo todavía no respondió. Tu escrow está guardado; reintentar reenvía el mismo.",
+  "lockEscrowOrderMovedOn": "El nodo dice que esta orden ya no espera el escrow. Tu escrow sigue guardado en este dispositivo; el estado del trade se actualizará cuando el nodo lo informe."
 }

@@ -2613,6 +2613,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         assert!(chat_still_relevant(&base));
 
@@ -2690,6 +2691,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         }
     }
 

@@ -1227,7 +1227,6 @@
   "lockEscrowFundWallet": "Ricarica il portafoglio",
   "lockEscrowSubmitted": "Deposito bloccato e inviato",
   "lockEscrowInsufficientFunds": "Il tuo portafoglio non copre deposito e commissione.",
-  "lockEscrowFeeUnknown": "Questo nodo non ha ancora pubblicato la sua commissione. Riprova tra poco.",
   "lockEscrowNotTheSeller": "Solo il venditore finanzia il deposito.",
   "lockEscrowInvalidToken": "Non \u00e8 stato possibile costruire il deposito correttamente. Non \u00e8 stato inviato nulla.",
   "lockEscrowFailed": "La mint non ha potuto bloccare il deposito. I tuoi fondi non si sono mossi.",
@@ -1238,5 +1237,13 @@
   "lockEscrowLocktimeNotReached": "Il deposito \u00e8 ancora bloccato. Potrai recuperarlo tu stesso una volta scaduto il blocco.",
   "lockEscrowClockInvalid": "L'orologio del tuo dispositivo \u00e8 errato, quindi il deposito non pu\u00f2 essere datato correttamente. Correggi la data e riprova.",
   "lockEscrowRetry": "Riprova l'invio",
-  "lockEscrowPendingSubmission": "Il tuo deposito \u00e8 bloccato ma il nodo non lo ha confermato. Riprovare \u00e8 sicuro: non verr\u00e0 bloccato una seconda volta."
+  "lockEscrowPendingSubmission": "Il tuo deposito \u00e8 bloccato ma il nodo non lo ha confermato. Riprovare \u00e8 sicuro: non verr\u00e0 bloccato una seconda volta.",
+  "lockEscrowMintUnknown": "Questo nodo non ha pubblicato il suo mint, quindi non c'è dove bloccare l'escrow.",
+  "lockEscrowNotRecorded": "L'escrow è arrivato al nodo, ma questo dispositivo non ha potuto salvarne una copia. Il trade può continuare, ma da questo dispositivo non potrai recuperare l'escrow.",
+  "lockEscrowRejectedToken": "Il nodo non ha accettato questo escrow. È stato messo da parte — torna a te quando scade il suo blocco — e il prossimo tentativo ne blocca uno nuovo.",
+  "lockEscrowRejectedMint": "Il nodo usa un altro mint. Questo escrow è stato messo da parte — torna a te quando scade il suo blocco. Controlla il mint del nodo prima di riprovare.",
+  "lockEscrowMintUnavailableAtNode": "Il nodo non ha potuto contattare il mint per verificare il tuo escrow. Riprova: viene rinviato lo stesso escrow, niente viene bloccato due volte.",
+  "lockEscrowRejectedGeneric": "Il nodo ha rifiutato l'escrow. Resta salvato su questo dispositivo; riprova tra un momento.",
+  "lockEscrowNoAnswer": "Il nodo non ha ancora risposto. Il tuo escrow è salvato; riprovare rinvia lo stesso.",
+  "lockEscrowOrderMovedOn": "Il nodo dice che questo ordine non attende più l'escrow. Il tuo escrow resta salvato su questo dispositivo; lo stato del trade si aggiornerà quando il nodo lo comunicherà."
 }

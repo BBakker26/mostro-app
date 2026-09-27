@@ -4004,10 +4004,6 @@ class AppLocalizationsEs extends AppLocalizations {
       'Tu billetera no alcanza para la custodia más la comisión.';
 
   @override
-  String get lockEscrowFeeUnknown =>
-      'Este nodo todavía no publicó su comisión. Probá de nuevo en un momento.';
-
-  @override
   String get lockEscrowNotTheSeller => 'Solo el vendedor financia la custodia.';
 
   @override
@@ -4050,4 +4046,36 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get lockEscrowPendingSubmission =>
       'Tu custodia está bloqueada pero el nodo no la confirmó. Reintentar es seguro: no se bloquea una segunda vez.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Este nodo no publicó su mint, así que no hay dónde bloquear el escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'El escrow llegó al nodo, pero este dispositivo no pudo guardar una copia. El trade puede seguir, pero desde este dispositivo no podrás recuperar el escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'El nodo no aceptó este escrow. Quedó apartado —vuelve a ti cuando venza su bloqueo— y el próximo intento bloquea uno nuevo.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'El nodo usa otra mint. Este escrow quedó apartado —vuelve a ti cuando venza su bloqueo—. Revisa la mint del nodo antes de reintentar.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'El nodo no pudo contactar la mint para verificar tu escrow. Reintenta: se reenvía el mismo escrow, nada se bloquea dos veces.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'El nodo rechazó el escrow. Sigue guardado en este dispositivo; reintenta en un momento.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'El nodo todavía no respondió. Tu escrow está guardado; reintentar reenvía el mismo.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'El nodo dice que esta orden ya no espera el escrow. Tu escrow sigue guardado en este dispositivo; el estado del trade se actualizará cuando el nodo lo informe.';
 }

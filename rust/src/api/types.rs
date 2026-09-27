@@ -402,6 +402,12 @@ pub struct TradeInfo {
     /// this — this is for display and for ordering.
     #[serde(default)]
     pub cashu_locked_at: Option<i64>,
+    /// Escrow tokens the daemon rejected for good (`invalid_cashu_token`,
+    /// `invalid_mint_url`): it did not store them, so a retry must build a new
+    /// one. Kept, never dropped — each is the seller's money, reclaimable
+    /// through the refund path once its locktime passes.
+    #[serde(default)]
+    pub cashu_rejected_escrow_tokens: Vec<String>,
 }
 
 /// Who posted the bond — a *posting-timing* role, not the buyer/seller side
@@ -1149,8 +1155,9 @@ pub struct CashuEscrowQuote {
     pub order_id: String,
     /// The escrow itself: exactly the order amount.
     pub amount_sats: u64,
-    /// The whole Mostro fee, funded as a separate token. Zero on a node that
-    /// charges none.
+    /// The Mostro fee funded with the lock. Zero until the daemon collects a
+    /// fee token (its TA-1f): today it ignores one, so building it would only
+    /// cost the seller.
     pub fee_sats: u64,
     /// `amount_sats + fee_sats` — what the wallet must actually hold.
     pub total_sats: u64,
@@ -1161,6 +1168,10 @@ pub struct CashuEscrowQuote {
     pub mint_url: String,
     /// Days the escrow stays locked before the seller can reclaim it alone.
     pub locktime_days: u32,
+    /// An escrow is already locked for this trade and recorded, but the node
+    /// has not confirmed it: the next `lock_escrow` re-sends that same token
+    /// and swaps nothing.
+    pub pending_submission: bool,
 }
 
 /// The settlement backend the active Mostro node runs, as resolved by

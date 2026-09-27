@@ -1227,7 +1227,6 @@
   "lockEscrowFundWallet": "Wallet aufladen",
   "lockEscrowSubmitted": "Treuhand gesperrt und gesendet",
   "lockEscrowInsufficientFunds": "Dein Guthaben deckt Treuhand und Geb\u00fchr nicht.",
-  "lockEscrowFeeUnknown": "Dieser Node hat seine Geb\u00fchr noch nicht ver\u00f6ffentlicht. Versuche es gleich erneut.",
   "lockEscrowNotTheSeller": "Nur der Verk\u00e4ufer finanziert die Treuhand.",
   "lockEscrowInvalidToken": "Die Treuhand konnte nicht korrekt erstellt werden. Es wurde nichts gesendet.",
   "lockEscrowFailed": "Die Mint konnte die Treuhand nicht sperren. Dein Geld wurde nicht bewegt.",
@@ -1238,5 +1237,13 @@
   "lockEscrowLocktimeNotReached": "Die Treuhand ist noch gesperrt. Nach Ablauf der Sperrfrist kannst du sie selbst zur\u00fcckholen.",
   "lockEscrowClockInvalid": "Die Uhr deines Ger\u00e4ts geht falsch, daher l\u00e4sst sich die Treuhand nicht korrekt datieren. Korrigiere das Datum und versuche es erneut.",
   "lockEscrowRetry": "Senden erneut versuchen",
-  "lockEscrowPendingSubmission": "Deine Treuhand ist gesperrt, aber der Node hat sie nicht best\u00e4tigt. Ein erneuter Versuch ist sicher \u2014 es wird kein zweites Mal gesperrt."
+  "lockEscrowPendingSubmission": "Deine Treuhand ist gesperrt, aber der Node hat sie nicht best\u00e4tigt. Ein erneuter Versuch ist sicher \u2014 es wird kein zweites Mal gesperrt.",
+  "lockEscrowMintUnknown": "Dieser Node hat seine Mint nicht veröffentlicht, daher gibt es keinen Ort, um den Escrow zu sperren.",
+  "lockEscrowNotRecorded": "Der Escrow hat den Node erreicht, aber dieses Gerät konnte keine Kopie speichern. Der Trade kann weiterlaufen, aber dieses Gerät kann den Escrow nicht zurückfordern.",
+  "lockEscrowRejectedToken": "Der Node hat diesen Escrow nicht angenommen. Er wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft — und der nächste Versuch sperrt einen neuen.",
+  "lockEscrowRejectedMint": "Der Node verwendet eine andere Mint. Dieser Escrow wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft. Prüfe die Mint des Nodes, bevor du es erneut versuchst.",
+  "lockEscrowMintUnavailableAtNode": "Der Node konnte die Mint nicht erreichen, um deinen Escrow zu prüfen. Versuche es erneut: derselbe Escrow wird erneut gesendet, nichts wird doppelt gesperrt.",
+  "lockEscrowRejectedGeneric": "Der Node hat den Escrow abgelehnt. Er bleibt auf diesem Gerät gespeichert; versuche es gleich noch einmal.",
+  "lockEscrowNoAnswer": "Der Node hat noch nicht geantwortet. Dein Escrow ist gespeichert; ein erneuter Versuch sendet denselben.",
+  "lockEscrowOrderMovedOn": "Der Node meldet, dass diese Order nicht mehr auf den Escrow wartet. Dein Escrow bleibt auf diesem Gerät gespeichert; der Status des Trades aktualisiert sich, sobald der Node ihn meldet."
 }

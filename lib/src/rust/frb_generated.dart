@@ -7577,8 +7577,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CashuEscrowQuote dco_decode_cashu_escrow_quote(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return CashuEscrowQuote(
       orderId: dco_decode_String(arr[0]),
       amountSats: dco_decode_u_64(arr[1]),
@@ -7587,6 +7587,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       balanceSats: dco_decode_u_64(arr[4]),
       mintUrl: dco_decode_String(arr[5]),
       locktimeDays: dco_decode_u_32(arr[6]),
+      pendingSubmission: dco_decode_bool(arr[7]),
     );
   }
 
@@ -8511,8 +8512,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TradeInfo dco_decode_trade_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 23)
-      throw Exception('unexpected arr length: expect 23 but see ${arr.length}');
+    if (arr.length != 24)
+      throw Exception('unexpected arr length: expect 24 but see ${arr.length}');
     return TradeInfo(
       id: dco_decode_String(arr[0]),
       order: dco_decode_order_info(arr[1]),
@@ -8538,6 +8539,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       cashuMintUrl: dco_decode_opt_String(arr[20]),
       cashuEscrowToken: dco_decode_opt_String(arr[21]),
       cashuLockedAt: dco_decode_opt_box_autoadd_i_64(arr[22]),
+      cashuRejectedEscrowTokens: dco_decode_list_String(arr[23]),
     );
   }
 
@@ -10012,6 +10014,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_balanceSats = sse_decode_u_64(deserializer);
     var var_mintUrl = sse_decode_String(deserializer);
     var var_locktimeDays = sse_decode_u_32(deserializer);
+    var var_pendingSubmission = sse_decode_bool(deserializer);
     return CashuEscrowQuote(
       orderId: var_orderId,
       amountSats: var_amountSats,
@@ -10020,6 +10023,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       balanceSats: var_balanceSats,
       mintUrl: var_mintUrl,
       locktimeDays: var_locktimeDays,
+      pendingSubmission: var_pendingSubmission,
     );
   }
 
@@ -11399,6 +11403,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_cashuMintUrl = sse_decode_opt_String(deserializer);
     var var_cashuEscrowToken = sse_decode_opt_String(deserializer);
     var var_cashuLockedAt = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_cashuRejectedEscrowTokens = sse_decode_list_String(deserializer);
     return TradeInfo(
       id: var_id,
       order: var_order,
@@ -11423,6 +11428,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       cashuMintUrl: var_cashuMintUrl,
       cashuEscrowToken: var_cashuEscrowToken,
       cashuLockedAt: var_cashuLockedAt,
+      cashuRejectedEscrowTokens: var_cashuRejectedEscrowTokens,
     );
   }
 
@@ -12964,6 +12970,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.balanceSats, serializer);
     sse_encode_String(self.mintUrl, serializer);
     sse_encode_u_32(self.locktimeDays, serializer);
+    sse_encode_bool(self.pendingSubmission, serializer);
   }
 
   @protected
@@ -14157,6 +14164,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.cashuMintUrl, serializer);
     sse_encode_opt_String(self.cashuEscrowToken, serializer);
     sse_encode_opt_box_autoadd_i_64(self.cashuLockedAt, serializer);
+    sse_encode_list_String(self.cashuRejectedEscrowTokens, serializer);
   }
 
   @protected

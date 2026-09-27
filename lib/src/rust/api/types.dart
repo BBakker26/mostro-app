@@ -576,8 +576,9 @@ class CashuEscrowQuote {
   /// The escrow itself: exactly the order amount.
   final BigInt amountSats;
 
-  /// The whole Mostro fee, funded as a separate token. Zero on a node that
-  /// charges none.
+  /// The Mostro fee funded with the lock. Zero until the daemon collects a
+  /// fee token (its TA-1f): today it ignores one, so building it would only
+  /// cost the seller.
   final BigInt feeSats;
 
   /// `amount_sats + fee_sats` — what the wallet must actually hold.
@@ -593,6 +594,11 @@ class CashuEscrowQuote {
   /// Days the escrow stays locked before the seller can reclaim it alone.
   final int locktimeDays;
 
+  /// An escrow is already locked for this trade and recorded, but the node
+  /// has not confirmed it: the next `lock_escrow` re-sends that same token
+  /// and swaps nothing.
+  final bool pendingSubmission;
+
   const CashuEscrowQuote({
     required this.orderId,
     required this.amountSats,
@@ -601,6 +607,7 @@ class CashuEscrowQuote {
     required this.balanceSats,
     required this.mintUrl,
     required this.locktimeDays,
+    required this.pendingSubmission,
   });
 
   @override
@@ -611,7 +618,8 @@ class CashuEscrowQuote {
       totalSats.hashCode ^
       balanceSats.hashCode ^
       mintUrl.hashCode ^
-      locktimeDays.hashCode;
+      locktimeDays.hashCode ^
+      pendingSubmission.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -624,7 +632,8 @@ class CashuEscrowQuote {
           totalSats == other.totalSats &&
           balanceSats == other.balanceSats &&
           mintUrl == other.mintUrl &&
-          locktimeDays == other.locktimeDays;
+          locktimeDays == other.locktimeDays &&
+          pendingSubmission == other.pendingSubmission;
 }
 
 /// State of the embedded Cashu wallet — phase C2 of `docs/cashu/README.md`.
@@ -1924,6 +1933,12 @@ class TradeInfo {
   /// this — this is for display and for ordering.
   final PlatformInt64? cashuLockedAt;
 
+  /// Escrow tokens the daemon rejected for good (`invalid_cashu_token`,
+  /// `invalid_mint_url`): it did not store them, so a retry must build a new
+  /// one. Kept, never dropped — each is the seller's money, reclaimable
+  /// through the refund path once its locktime passes.
+  final List<String> cashuRejectedEscrowTokens;
+
   const TradeInfo({
     required this.id,
     required this.order,
@@ -1948,6 +1963,7 @@ class TradeInfo {
     this.cashuMintUrl,
     this.cashuEscrowToken,
     this.cashuLockedAt,
+    required this.cashuRejectedEscrowTokens,
   });
 
   @override
@@ -1974,7 +1990,8 @@ class TradeInfo {
       sellerTradePubkey.hashCode ^
       cashuMintUrl.hashCode ^
       cashuEscrowToken.hashCode ^
-      cashuLockedAt.hashCode;
+      cashuLockedAt.hashCode ^
+      cashuRejectedEscrowTokens.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -2003,7 +2020,8 @@ class TradeInfo {
           sellerTradePubkey == other.sellerTradePubkey &&
           cashuMintUrl == other.cashuMintUrl &&
           cashuEscrowToken == other.cashuEscrowToken &&
-          cashuLockedAt == other.cashuLockedAt;
+          cashuLockedAt == other.cashuLockedAt &&
+          cashuRejectedEscrowTokens == other.cashuRejectedEscrowTokens;
 }
 
 /// Final trade outcomes.

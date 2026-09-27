@@ -633,6 +633,7 @@ mod tests {
             cashu_mint_url: None,
             cashu_escrow_token: None,
             cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
 
         let json = serde_json::to_string(&trade).unwrap();

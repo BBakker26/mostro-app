@@ -4040,10 +4040,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Votre portefeuille ne couvre pas le séquestre et les frais.';
 
   @override
-  String get lockEscrowFeeUnknown =>
-      'Ce nœud n\'a pas encore publié ses frais. Réessayez dans un instant.';
-
-  @override
   String get lockEscrowNotTheSeller => 'Seul le vendeur finance le séquestre.';
 
   @override
@@ -4086,4 +4082,36 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get lockEscrowPendingSubmission =>
       'Votre séquestre est verrouillé mais le nœud ne l\'a pas confirmé. Réessayer est sans risque : il ne sera pas verrouillé une seconde fois.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Ce nœud n\'a pas publié son mint : il n\'y a nulle part où verrouiller l\'escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'L\'escrow est arrivé au nœud, mais cet appareil n\'a pas pu en garder une copie. Le trade peut continuer, mais cet appareil ne pourra pas récupérer l\'escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Le nœud n\'a pas accepté cet escrow. Il a été mis de côté — il vous revient à l\'expiration de son verrou — et la prochaine tentative en verrouille un nouveau.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Le nœud utilise un autre mint. Cet escrow a été mis de côté — il vous revient à l\'expiration de son verrou. Vérifiez le mint du nœud avant de réessayer.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Le nœud n\'a pas pu joindre le mint pour vérifier votre escrow. Réessayez : le même escrow est renvoyé, rien n\'est verrouillé deux fois.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Le nœud a refusé l\'escrow. Il reste enregistré sur cet appareil ; réessayez dans un instant.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Le nœud n\'a pas encore répondu. Votre escrow est enregistré ; réessayer renvoie le même.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Le nœud indique que cet ordre n\'attend plus l\'escrow. Votre escrow reste enregistré sur cet appareil ; le statut du trade se mettra à jour quand le nœud le signalera.';
 }

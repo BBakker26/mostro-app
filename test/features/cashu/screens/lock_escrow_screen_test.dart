@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
+import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
 import 'package:mostro/features/cashu/screens/lock_escrow_screen.dart';
@@ -11,24 +13,54 @@ import 'package:mostro/src/rust/api/types.dart';
 
 import '../../../support/provider_harness.dart';
 
-/// Stands in for the Rust bridge so nothing reaches a mint or a relay.
+/// Stands in for the Rust bridge so nothing reaches a mint or a relay. It
+/// keeps the one fact the screen must take from the core rather than guess:
+/// whether an escrow is recorded (`pendingSubmission`) — which a failed lock
+/// may or may not have left behind.
 class _FakeEscrow extends CashuEscrowController {
-  const _FakeEscrow({this.quoteResult, this.quoteError, this.lockError});
+  _FakeEscrow({
+    required this.balance,
+    this.fee = 0,
+    this.quoteError,
+    this.lockError,
+    this.lockRecords = false,
+  });
 
-  final CashuEscrowQuote? quoteResult;
+  int balance;
+  final int fee;
   final Object? quoteError;
   final Object? lockError;
 
+  /// Whether a failing lock got as far as recording an escrow.
+  final bool lockRecords;
+  bool pending = false;
+  int quotes = 0;
+
+  CashuEscrowQuote _current() => CashuEscrowQuote(
+    orderId: 'order-1',
+    amountSats: BigInt.from(10000),
+    feeSats: BigInt.from(fee),
+    totalSats: BigInt.from(10000 + fee),
+    balanceSats: BigInt.from(balance),
+    mintUrl: 'https://mint.example.com',
+    locktimeDays: 15,
+    pendingSubmission: pending,
+  );
+
   @override
   Future<CashuEscrowQuote> quote(String orderId) async {
+    quotes++;
     if (quoteError != null) throw quoteError!;
-    return quoteResult!;
+    return _current();
   }
 
   @override
   Future<CashuEscrowQuote> lock(String orderId) async {
-    if (lockError != null) throw lockError!;
-    return quoteResult!;
+    if (lockError != null) {
+      if (lockRecords) pending = true;
+      throw lockError!;
+    }
+    return _current();
   }
 }
 
@@ -37,36 +69,51 @@ class _FakeWallet extends CashuWalletController {
 
   @override
   Future<CashuWalletStatus> connect() async => CashuWalletStatus(
-        connected: true,
-        mintUrl: 'https://mint.example.com',
-        balanceSats: BigInt.from(100000),
-        missingCapabilities: const [],
-      );
+    connected: true,
+    mintUrl: 'https://mint.example.com',
+    balanceSats: BigInt.from(100000),
+    missingCapabilities: const [],
+  );
 }
 
-CashuEscrowQuote _quote({required int balance}) => CashuEscrowQuote(
-      orderId: 'order-1',
-      amountSats: BigInt.from(10000),
-      feeSats: BigInt.from(60),
-      totalSats: BigInt.from(10060),
-      balanceSats: BigInt.from(balance),
-      mintUrl: 'https://mint.example.com',
-      locktimeDays: 15,
-    );
+Future<void> _pump(WidgetTester tester, {required _FakeEscrow escrow}) async {
+  final container = createContainer(
+    overrides: [
+      cashuEscrowControllerProvider.overrideWithValue(escrow),
+      cashuWalletControllerProvider.overrideWithValue(const _FakeWallet()),
+      cashuWalletProvider.overrideWith(
+        (ref) => const Stream<CashuWalletStatus>.empty(),
+      ),
+    ],
+  );
 
-Future<void> _pump(
-  WidgetTester tester, {
-  required CashuEscrowController escrow,
-}) async {
-  final container = createContainer(overrides: [
-    cashuEscrowControllerProvider.overrideWithValue(escrow),
-    cashuWalletControllerProvider.overrideWithValue(const _FakeWallet()),
-  ]);
+  // A real router: the funding round trip is a push and a pop.
+  final router = GoRouter(
+    routes: [
+      GoRoute(
+        path: '/',
+        builder: (_, _) => const LockEscrowScreen(orderId: 'order-1'),
+      ),
+      GoRoute(
+        path: AppRoute.cashuWallet,
+        builder:
+            (context, _) => Scaffold(
+              body: TextButton(
+                onPressed: () {
+                  escrow.balance = 100000;
+                  context.pop();
+                },
+                child: const Text('funded'),
+              ),
+            ),
+      ),
+    ],
+  );
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(
+      child: MaterialApp.router(
         theme: buildDarkTheme(),
         locale: const Locale('en'),
         localizationsDelegates: const [
@@ -76,7 +123,7 @@ Future<void> _pump(
           GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: const LockEscrowScreen(orderId: 'order-1'),
+        routerConfig: router,
       ),
     ),
   );
@@ -87,38 +134,58 @@ Future<void> _pump(
 
 void main() {
   group('LockEscrowScreen', () {
-    testWidgets('shows what will be locked before anything is committed',
-        (tester) async {
-      await _pump(
-        tester,
-        escrow: _FakeEscrow(quoteResult: _quote(balance: 100000)),
-      );
+    testWidgets('shows what will be locked before anything is committed', (
+      tester,
+    ) async {
+      await _pump(tester, escrow: _FakeEscrow(balance: 100000));
 
-      // Escrow, fee and total are all stated: the fee is a separate token and
-      // its size is not obvious from the order.
-      expect(find.text('10000 Satoshis'), findsOneWidget);
-      expect(find.text('60 Satoshis'), findsOneWidget);
-      expect(find.text('10060 Satoshis'), findsOneWidget);
+      expect(find.text('10000 Satoshis'), findsNWidgets(2));
       expect(find.text('Lock escrow'), findsOneWidget);
+      // No fee token until the daemon collects one (TA-1f): no fee row.
+      expect(find.text('Mostro fee'), findsNothing);
     });
 
-    testWidgets('a short balance offers funding instead of a failure',
-        (tester) async {
-      // The most common seller error must not surface as a mint-side message.
-      await _pump(
-        tester,
-        escrow: _FakeEscrow(quoteResult: _quote(balance: 100)),
-      );
+    testWidgets('a fee, once charged, is stated before the lock', (
+      tester,
+    ) async {
+      await _pump(tester, escrow: _FakeEscrow(balance: 100000, fee: 60));
+
+      expect(find.text('Mostro fee'), findsOneWidget);
+      expect(find.text('60 Satoshis'), findsOneWidget);
+      expect(find.text('10060 Satoshis'), findsOneWidget);
+    });
+
+    testWidgets('a short balance offers funding instead of a failure', (
+      tester,
+    ) async {
+      await _pump(tester, escrow: _FakeEscrow(balance: 100));
 
       expect(find.text('Fund your wallet'), findsOneWidget);
       expect(find.text('Lock escrow'), findsNothing);
     });
 
-    testWidgets('a missing escrow request is explained, not shown as a marker',
-        (tester) async {
+    testWidgets('coming back funded offers the lock', (tester) async {
+      // ermeme on #238: the quote was read once, so a seller who funded the
+      // wallet and came back was still told to fund it.
+      final escrow = _FakeEscrow(balance: 100);
+      await _pump(tester, escrow: escrow);
+
+      await tester.tap(find.text('Fund your wallet'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('funded'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Lock escrow'), findsOneWidget);
+      expect(find.text('Fund your wallet'), findsNothing);
+    });
+
+    testWidgets('a missing escrow request is explained, not shown as a marker', (
+      tester,
+    ) async {
       await _pump(
         tester,
-        escrow: const _FakeEscrow(
+        escrow: _FakeEscrow(
+          balance: 100000,
           quoteError: 'CashuEscrowRequestMissing: nothing stored',
         ),
       );
@@ -127,14 +194,13 @@ void main() {
       expect(find.textContaining('CashuEscrowRequestMissing'), findsNothing);
     });
 
-    testWidgets('a failure before the mint swap offers no retry',
-        (tester) async {
-      // Nothing moved, so offering "retry sending" would misdescribe what
-      // happened.
+    testWidgets('a failure that recorded nothing offers no re-send', (
+      tester,
+    ) async {
       await _pump(
         tester,
         escrow: _FakeEscrow(
-          quoteResult: _quote(balance: 100000),
+          balance: 100000,
           lockError: 'CashuWrongTradeKey: order expects abc',
         ),
       );
@@ -146,15 +212,17 @@ void main() {
       expect(find.textContaining('does not hold the key'), findsOneWidget);
     });
 
-    testWidgets('a failure after the mint swap offers a safe retry',
-        (tester) async {
-      // The funds are locked and the token is persisted; the daemon's handler
-      // is idempotent, so retrying is the only way out of a lost publish.
+    testWidgets('an unanswered submission re-sends the recorded escrow', (
+      tester,
+    ) async {
+      // The core recorded the escrow before publishing; the next tap re-sends
+      // that token, so the screen says so and the balance no longer matters.
       await _pump(
         tester,
         escrow: _FakeEscrow(
-          quoteResult: _quote(balance: 100000),
-          lockError: 'relay publish failed',
+          balance: 100000,
+          lockError: 'NoDaemonResponse',
+          lockRecords: true,
         ),
       );
 
@@ -162,10 +230,30 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Retry sending'), findsOneWidget);
+      expect(find.textContaining('has not answered yet'), findsOneWidget);
       expect(
         find.textContaining('locked but the node has not confirmed'),
         findsOneWidget,
       );
+    });
+
+    testWidgets('a token the node rejected for good says it was set aside', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        escrow: _FakeEscrow(
+          balance: 100000,
+          lockError: 'CashuEscrowRejected: InvalidCashuToken',
+        ),
+      );
+
+      await tester.tap(find.text('Lock escrow'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('set aside'), findsOneWidget);
+      // Retired, so the next attempt locks a new one.
+      expect(find.text('Lock escrow'), findsOneWidget);
     });
   });
 }

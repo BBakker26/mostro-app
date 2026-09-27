@@ -799,6 +799,82 @@ pub(crate) fn remove_maker_cancel(trade_pubkey_hex: &str, request_id: u64) {
     }
 }
 
+// ── Seller's Cashu escrow submission (phase C5) ─────────────────────────────
+
+/// How the daemon answered an `add-cashu-escrow`.
+#[derive(Debug)]
+pub(crate) enum CashuLockReply {
+    /// `cashu-escrow-locked`: the daemon stored the escrow and the order is
+    /// active. Also the answer to a re-submission of the same token.
+    Locked,
+    /// `cant-do`: the caller decides what the reason means for the token,
+    /// and Dart localizes it — no prose travels.
+    Rejected { reason: String },
+}
+
+struct CashuLock {
+    request_id: u64,
+    tx: Option<tokio::sync::oneshot::Sender<CashuLockReply>>,
+}
+
+/// Escrow submissions in flight, keyed by the seller's trade pubkey. Apart
+/// from [`pending_requests`] for the same reason as the maker's cancel: the
+/// key may still hold another request's record. One per key — `lock_escrow`
+/// serializes the submissions of an order.
+static CASHU_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, CashuLock>>> = OnceLock::new();
+
+fn cashu_locks() -> &'static std::sync::Mutex<HashMap<String, CashuLock>> {
+    CASHU_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Register an escrow submission before it is published and hand back the
+/// channel its answer arrives on.
+pub(crate) fn register_cashu_lock(
+    trade_pubkey_hex: &str,
+    request_id: u64,
+) -> tokio::sync::oneshot::Receiver<CashuLockReply> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    if let Ok(mut map) = cashu_locks().lock() {
+        map.insert(
+            trade_pubkey_hex.to_string(),
+            CashuLock {
+                request_id,
+                tx: Some(tx),
+            },
+        );
+    }
+    rx
+}
+
+/// The submission a reply echoing `got` answers, consumed: `Some(waiter)`
+/// (the waiter absent once the caller timed out), `None` when it answers no
+/// submission of this key.
+pub(crate) fn take_cashu_lock(
+    trade_pubkey_hex: &str,
+    got: Option<u64>,
+) -> Option<Option<tokio::sync::oneshot::Sender<CashuLockReply>>> {
+    let mut map = cashu_locks().lock().ok()?;
+    match map.get(trade_pubkey_hex) {
+        Some(l) if request_id_matches(l.request_id, got) => {
+            map.remove(trade_pubkey_hex).map(|l| l.tx)
+        }
+        _ => None,
+    }
+}
+
+/// The submission never left the device, or its caller stopped waiting:
+/// nothing waits on the answer any more.
+pub(crate) fn forget_cashu_lock(trade_pubkey_hex: &str, request_id: u64) {
+    if let Ok(mut map) = cashu_locks().lock() {
+        if map
+            .get(trade_pubkey_hex)
+            .is_some_and(|l| l.request_id == request_id)
+        {
+            map.remove(trade_pubkey_hex);
+        }
+    }
+}
+
 /// Classify the daemon's first reply to a take into a [`DaemonReply`].
 ///
 /// A take's success reply varies by role, order shape and daemon config —

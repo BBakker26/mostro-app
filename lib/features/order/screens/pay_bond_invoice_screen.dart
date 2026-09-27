@@ -29,6 +29,8 @@ import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/nwc_payment_widget.dart';
+import 'package:mostro/features/cashu/seller_funding_route.dart';
+import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show BondInfo, OrderStatus, TradeInfo, TradeRole, TradeUpdate;
 
@@ -306,7 +308,12 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
             ScaffoldMessenger.of(
               context,
             ).showSnackBar(SnackBar(content: Text(l10n.bondLockedNowEscrow)));
-            context.push(AppRoute.payInvoicePath(widget.orderId));
+            context.push(
+              sellerFundingPath(
+                widget.orderId,
+                cashu: ref.read(isCashuAvailableProvider),
+              ),
+            );
           }
         case OrderStatus.waitingBuyerInvoice:
           _navigated = true;

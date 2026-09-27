@@ -6676,12 +6676,6 @@ abstract class AppLocalizations {
   /// **'Your wallet does not hold enough for the escrow and the fee.'**
   String get lockEscrowInsufficientFunds;
 
-  /// Escrow error — the node fee is not known, so the fee token cannot be built
-  ///
-  /// In en, this message translates to:
-  /// **'This node has not published its fee yet. Try again in a moment.'**
-  String get lockEscrowFeeUnknown;
-
   /// Escrow error — the lock was attempted from the buyer side
   ///
   /// In en, this message translates to:
@@ -6747,6 +6741,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.'**
   String get lockEscrowPendingSubmission;
+
+  /// Escrow error — the node published no mint (CashuMintUnknown)
+  ///
+  /// In en, this message translates to:
+  /// **'This node has not published its mint, so there is nowhere to lock the escrow.'**
+  String get lockEscrowMintUnknown;
+
+  /// Escrow error — submitted, but the device could not save the token (CashuEscrowNotPersisted)
+  ///
+  /// In en, this message translates to:
+  /// **'The escrow reached the node, but this device could not save a copy of it. The trade can go on, but this device cannot reclaim the escrow.'**
+  String get lockEscrowNotRecorded;
+
+  /// Escrow error — the daemon answered invalid_cashu_token; the token is retired and kept
+  ///
+  /// In en, this message translates to:
+  /// **'The node did not accept this escrow. It was set aside — it comes back to you when its lock expires — and the next attempt locks a new one.'**
+  String get lockEscrowRejectedToken;
+
+  /// Escrow error — the daemon answered invalid_mint_url; the token is retired and kept
+  ///
+  /// In en, this message translates to:
+  /// **'The node uses a different mint. This escrow was set aside — it comes back to you when its lock expires. Check the node\'s mint before trying again.'**
+  String get lockEscrowRejectedMint;
+
+  /// Escrow error — the daemon could not reach the mint (cashu_mint_unavailable); a retry re-sends the same token
+  ///
+  /// In en, this message translates to:
+  /// **'The node could not reach the mint to check your escrow. Try again: the same escrow is re-sent, nothing is locked twice.'**
+  String get lockEscrowMintUnavailableAtNode;
+
+  /// Escrow error — any other daemon refusal; the token stays recorded
+  ///
+  /// In en, this message translates to:
+  /// **'The node refused the escrow. It stays recorded on this device; try again in a moment.'**
+  String get lockEscrowRejectedGeneric;
+
+  /// Escrow error — no daemon answer within the wait; the token is recorded and re-sent on retry
+  ///
+  /// In en, this message translates to:
+  /// **'The node has not answered yet. Your escrow is recorded; retrying re-sends the same one.'**
+  String get lockEscrowNoAnswer;
+
+  /// Escrow error — a re-sent escrow was refused because the order no longer waits for it (CashuEscrowOrderMovedOn); not reported as locked
+  ///
+  /// In en, this message translates to:
+  /// **'The node says this order is no longer waiting for the escrow. Your escrow stays recorded on this device; the trade\'s status will update when the node reports it.'**
+  String get lockEscrowOrderMovedOn;
 }
 
 class _AppLocalizationsDelegate

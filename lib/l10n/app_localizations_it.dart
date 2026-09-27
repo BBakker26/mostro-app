@@ -4016,10 +4016,6 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il tuo portafoglio non copre deposito e commissione.';
 
   @override
-  String get lockEscrowFeeUnknown =>
-      'Questo nodo non ha ancora pubblicato la sua commissione. Riprova tra poco.';
-
-  @override
   String get lockEscrowNotTheSeller =>
       'Solo il venditore finanzia il deposito.';
 
@@ -4063,4 +4059,36 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get lockEscrowPendingSubmission =>
       'Il tuo deposito è bloccato ma il nodo non lo ha confermato. Riprovare è sicuro: non verrà bloccato una seconda volta.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Questo nodo non ha pubblicato il suo mint, quindi non c\'è dove bloccare l\'escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'L\'escrow è arrivato al nodo, ma questo dispositivo non ha potuto salvarne una copia. Il trade può continuare, ma da questo dispositivo non potrai recuperare l\'escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Il nodo non ha accettato questo escrow. È stato messo da parte — torna a te quando scade il suo blocco — e il prossimo tentativo ne blocca uno nuovo.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Il nodo usa un altro mint. Questo escrow è stato messo da parte — torna a te quando scade il suo blocco. Controlla il mint del nodo prima di riprovare.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Il nodo non ha potuto contattare il mint per verificare il tuo escrow. Riprova: viene rinviato lo stesso escrow, niente viene bloccato due volte.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Il nodo ha rifiutato l\'escrow. Resta salvato su questo dispositivo; riprova tra un momento.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Il nodo non ha ancora risposto. Il tuo escrow è salvato; riprovare rinvia lo stesso.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Il nodo dice che questo ordine non attende più l\'escrow. Il tuo escrow resta salvato su questo dispositivo; lo stato del trade si aggiornerà quando il nodo lo comunicherà.';
 }

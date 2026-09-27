@@ -182,6 +182,7 @@ void main() {
           counterpartyPubkey: rated.counterpartyPubkey,
           currentStep: rated.currentStep,
           tradeKeyIndex: rated.tradeKeyIndex,
+          cashuRejectedEscrowTokens: const [],
           startedAt: rated.startedAt,
           ratedAt: 2000,
         ),

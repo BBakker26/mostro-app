@@ -4028,10 +4028,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Dein Guthaben deckt Treuhand und Gebühr nicht.';
 
   @override
-  String get lockEscrowFeeUnknown =>
-      'Dieser Node hat seine Gebühr noch nicht veröffentlicht. Versuche es gleich erneut.';
-
-  @override
   String get lockEscrowNotTheSeller =>
       'Nur der Verkäufer finanziert die Treuhand.';
 
@@ -4075,4 +4071,36 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get lockEscrowPendingSubmission =>
       'Deine Treuhand ist gesperrt, aber der Node hat sie nicht bestätigt. Ein erneuter Versuch ist sicher — es wird kein zweites Mal gesperrt.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Dieser Node hat seine Mint nicht veröffentlicht, daher gibt es keinen Ort, um den Escrow zu sperren.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'Der Escrow hat den Node erreicht, aber dieses Gerät konnte keine Kopie speichern. Der Trade kann weiterlaufen, aber dieses Gerät kann den Escrow nicht zurückfordern.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Der Node hat diesen Escrow nicht angenommen. Er wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft — und der nächste Versuch sperrt einen neuen.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Der Node verwendet eine andere Mint. Dieser Escrow wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft. Prüfe die Mint des Nodes, bevor du es erneut versuchst.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Der Node konnte die Mint nicht erreichen, um deinen Escrow zu prüfen. Versuche es erneut: derselbe Escrow wird erneut gesendet, nichts wird doppelt gesperrt.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Der Node hat den Escrow abgelehnt. Er bleibt auf diesem Gerät gespeichert; versuche es gleich noch einmal.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Der Node hat noch nicht geantwortet. Dein Escrow ist gespeichert; ein erneuter Versuch sendet denselben.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Der Node meldet, dass diese Order nicht mehr auf den Escrow wartet. Dein Escrow bleibt auf diesem Gerät gespeichert; der Status des Trades aktualisiert sich, sobald der Node ihn meldet.';
 }

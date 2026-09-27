@@ -7953,6 +7953,7 @@ impl SseDecode for crate::api::types::CashuEscrowQuote {
         let mut var_balanceSats = <u64>::sse_decode(deserializer);
         let mut var_mintUrl = <String>::sse_decode(deserializer);
         let mut var_locktimeDays = <u32>::sse_decode(deserializer);
+        let mut var_pendingSubmission = <bool>::sse_decode(deserializer);
         return crate::api::types::CashuEscrowQuote {
             order_id: var_orderId,
             amount_sats: var_amountSats,
@@ -7961,6 +7962,7 @@ impl SseDecode for crate::api::types::CashuEscrowQuote {
             balance_sats: var_balanceSats,
             mint_url: var_mintUrl,
             locktime_days: var_locktimeDays,
+            pending_submission: var_pendingSubmission,
         };
     }
 }
@@ -9477,6 +9479,7 @@ impl SseDecode for crate::api::types::TradeInfo {
         let mut var_cashuMintUrl = <Option<String>>::sse_decode(deserializer);
         let mut var_cashuEscrowToken = <Option<String>>::sse_decode(deserializer);
         let mut var_cashuLockedAt = <Option<i64>>::sse_decode(deserializer);
+        let mut var_cashuRejectedEscrowTokens = <Vec<String>>::sse_decode(deserializer);
         return crate::api::types::TradeInfo {
             id: var_id,
             order: var_order,
@@ -9501,6 +9504,7 @@ impl SseDecode for crate::api::types::TradeInfo {
             cashu_mint_url: var_cashuMintUrl,
             cashu_escrow_token: var_cashuEscrowToken,
             cashu_locked_at: var_cashuLockedAt,
+            cashu_rejected_escrow_tokens: var_cashuRejectedEscrowTokens,
         };
     }
 }
@@ -10922,6 +10926,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::CashuEscrowQuote {
             self.balance_sats.into_into_dart().into_dart(),
             self.mint_url.into_into_dart().into_dart(),
             self.locktime_days.into_into_dart().into_dart(),
+            self.pending_submission.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12087,6 +12092,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::TradeInfo {
             self.cashu_mint_url.into_into_dart().into_dart(),
             self.cashu_escrow_token.into_into_dart().into_dart(),
             self.cashu_locked_at.into_into_dart().into_dart(),
+            self.cashu_rejected_escrow_tokens
+                .into_into_dart()
+                .into_dart(),
         ]
         .into_dart()
     }
@@ -12977,6 +12985,7 @@ impl SseEncode for crate::api::types::CashuEscrowQuote {
         <u64>::sse_encode(self.balance_sats, serializer);
         <String>::sse_encode(self.mint_url, serializer);
         <u32>::sse_encode(self.locktime_days, serializer);
+        <bool>::sse_encode(self.pending_submission, serializer);
     }
 }
 
@@ -14266,6 +14275,7 @@ impl SseEncode for crate::api::types::TradeInfo {
         <Option<String>>::sse_encode(self.cashu_mint_url, serializer);
         <Option<String>>::sse_encode(self.cashu_escrow_token, serializer);
         <Option<i64>>::sse_encode(self.cashu_locked_at, serializer);
+        <Vec<String>>::sse_encode(self.cashu_rejected_escrow_tokens, serializer);
     }
 }
 

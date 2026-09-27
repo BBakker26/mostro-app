@@ -143,6 +143,7 @@ A seller (taker of a buy order) completes a trade. They must pay a hold Lightnin
 3. **Given** the trade is active, **When** the seller views Trade Detail, **Then** they see instructions to contact the buyer with payment details, a disabled "waiting for the buyer" primary state, a secondary row with outlined Cancel and Dispute buttons, and a persistent chat chip for Contact.
 4. **Given** the buyer confirms "Fiat Sent", **When** the seller views Trade Detail, **Then** the status changes to "Fiat Sent" and a "Release" button becomes available.
 5. **Given** the seller taps "Release", **When** the confirmation modal appears, **Then** tapping "Yes" releases the sats and transitions to the success/rating screen.
+6. **Given** the seller confirmed the release, **When** the daemon has not yet settled the hold invoice (it can take tens of seconds), **Then** Release shows as "Releasing… waiting for the node" and cannot be pressed again; the wait ends when the order moves, and after 90 s without a move Release is offered again with a notice (a retry is safe: a daemon that already released refuses it).
 
 ---
 

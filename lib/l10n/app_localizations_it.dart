@@ -766,6 +766,17 @@ class AppLocalizationsIt extends AppLocalizations {
   String get releaseFailed => 'Rilascio fallito. Riprovare.';
 
   @override
+  String get releasePendingLabel => 'Rilascio in corso… in attesa del nodo';
+
+  @override
+  String get releaseSentNotice =>
+      'Rilascio inviato. Il nodo può impiegare fino a un minuto per confermarlo.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'Il nodo non ha ancora confermato il rilascio. Se l\'ordine non si aggiorna, puoi rilasciare di nuovo.';
+
+  @override
   String get cancelTradeButton => 'Annulla scambio';
 
   @override

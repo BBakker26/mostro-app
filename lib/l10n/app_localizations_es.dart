@@ -769,6 +769,17 @@ class AppLocalizationsEs extends AppLocalizations {
       'Error al liberar. Por favor, inténtelo de nuevo.';
 
   @override
+  String get releasePendingLabel => 'Liberando… esperando al nodo';
+
+  @override
+  String get releaseSentNotice =>
+      'Liberación enviada. El nodo puede tardar hasta un minuto en confirmarla.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'El nodo todavía no confirmó la liberación. Si la orden no se actualiza, puedes liberar de nuevo.';
+
+  @override
   String get cancelTradeButton => 'Cancelar intercambio';
 
   @override

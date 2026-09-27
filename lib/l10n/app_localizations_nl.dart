@@ -766,6 +766,17 @@ class AppLocalizationsNl extends AppLocalizations {
   String get releaseFailed => 'Vrijgeven is mislukt. Probeer het opnieuw.';
 
   @override
+  String get releasePendingLabel => 'Vrijgeven… wachten op de node';
+
+  @override
+  String get releaseSentNotice =>
+      'Vrijgave verzonden. De node kan tot een minuut nodig hebben om die te bevestigen.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'De node heeft de vrijgave nog niet bevestigd. Als de order niet bijwerkt, kun je opnieuw vrijgeven.';
+
+  @override
   String get cancelTradeButton => 'Trade annuleren';
 
   @override

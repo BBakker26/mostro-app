@@ -9,6 +9,7 @@ import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/shared/providers/session_provider.dart';
 
@@ -45,6 +46,8 @@ Future<void> resetIdentityScopedState(ProviderContainer container) async {
   // cleanup must not hold up the swap, and the sweep never throws.
   unawaited(container.read(attachmentLauncherProvider).sweep());
   container.invalidate(disputeNotifierProvider);
+  // Releases the previous user published and is still waiting on.
+  container.invalidate(releasePendingProvider);
   // Persisted (sembast), so it needs a real wipe, not just an invalidation.
   final notices = container.read(notificationsProvider).length;
   await container.read(notificationsProvider.notifier).wipeForIdentityChange();

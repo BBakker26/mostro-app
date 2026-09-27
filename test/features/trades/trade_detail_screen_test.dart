@@ -16,6 +16,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/rate/screens/rate_counterpart_screen.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
+import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
@@ -494,8 +495,114 @@ void main() {
       expect(find.byType(TradeDetailScreen), findsOneWidget);
       expect(find.text(_en.releaseFailed), findsNothing);
       expect(find.text(_en.tradeCompletedTitle), findsNothing);
-      // Drain the button's success indication before disposing its widget.
-      await tester.pump(const Duration(seconds: 2));
+      // Drain the button's success indication and the release's wait for
+      // the node before disposing the screen.
+      await tester.pump(kReleaseConfirmationTimeout);
+    });
+
+    /// Confirms Release on the sheet and lets the publish land.
+    Future<void> confirmRelease(WidgetTester tester) async {
+      await tester.tap(find.text(_en.confirmReleaseSatsButton));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.tap(find.text(_en.releaseSheetConfirm));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+    }
+
+    FilledButton filledButton(WidgetTester tester, String label) =>
+        tester.widget<FilledButton>(_filledButtonWithText(label));
+
+    // A seller pressed Release three times: the node took ~30 s to settle
+    // the hold invoice, and the button came back after the first publish.
+    testWidgets('a published release is not offered again while it waits', (
+      tester,
+    ) async {
+      // Arrange
+      final released = <String>[];
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-wait',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        releaseOrder: (id) async => released.add(id),
+      );
+
+      // Act
+      await confirmRelease(tester);
+      await tester.pump(const Duration(seconds: 5));
+
+      // Assert
+      expect(released, ['order-release-wait']);
+      expect(find.text(_en.releaseSentNotice), findsOneWidget);
+      expect(find.text(_en.confirmReleaseSatsButton), findsNothing);
+      expect(filledButton(tester, _en.releasePendingLabel).onPressed, isNull);
+      await tester.pump(kReleaseConfirmationTimeout);
+    });
+
+    testWidgets('the wait ends as soon as the order moves', (tester) async {
+      // Arrange: broadcast, because the release re-reads the status and
+      // the screen subscribes again.
+      final updates = StreamController<OrderStatus>.broadcast();
+      addTearDown(() => unawaited(updates.close()));
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-moves',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        statusUpdates: updates.stream,
+        releaseOrder: (_) async {},
+      );
+      updates.add(OrderStatus.fiatSent);
+      await _settle(tester);
+      await confirmRelease(tester);
+      expect(
+        container.read(releasePendingProvider)['order-release-moves'],
+        ReleaseWait.waiting,
+      );
+
+      // Act: the node settled the hold invoice.
+      updates.add(OrderStatus.settledHoldInvoice);
+      await _settle(tester);
+
+      // Assert
+      expect(
+        container.read(releasePendingProvider),
+        isNot(contains('order-release-moves')),
+      );
+      expect(find.text(_en.releasePendingLabel), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('Release comes back when the node never confirms', (
+      tester,
+    ) async {
+      // Arrange
+      final released = <String>[];
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-overdue',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        releaseOrder: (id) async => released.add(id),
+      );
+      await confirmRelease(tester);
+
+      // Act
+      await tester.pump(kReleaseConfirmationTimeout);
+      // Frames for the earlier snackbar to leave and this one to come in.
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+
+      // Assert
+      expect(find.text(_en.releaseUnconfirmedNotice), findsOneWidget);
+      expect(
+        filledButton(tester, _en.confirmReleaseSatsButton).onPressed,
+        isNotNull,
+      );
+      expect(released, hasLength(1));
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('Back on the release sheet releases nothing', (tester) async {

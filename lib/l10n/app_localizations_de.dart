@@ -768,6 +768,17 @@ class AppLocalizationsDe extends AppLocalizations {
       'Freigabe fehlgeschlagen. Bitte erneut versuchen.';
 
   @override
+  String get releasePendingLabel => 'Freigabe läuft… warte auf den Node';
+
+  @override
+  String get releaseSentNotice =>
+      'Freigabe gesendet. Der Node kann bis zu einer Minute brauchen, um sie zu bestätigen.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'Der Node hat die Freigabe noch nicht bestätigt. Wenn sich die Order nicht aktualisiert, kannst du erneut freigeben.';
+
+  @override
   String get cancelTradeButton => 'Handel abbrechen';
 
   @override

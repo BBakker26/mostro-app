@@ -251,7 +251,8 @@ The user receives in-app notifications for all trade lifecycle events: order tak
 
 1. **Given** a trade event occurs, **When** the app receives it, **Then** a notification card appears in the Notifications screen with an icon, title, subtitle, and timestamp.
 2. **Given** there are unread notifications, **When** the user looks at the app bar, **Then** the bell shows a numbered badge (pill shape, dark gold) with the unread count and animates.
-3. **Given** the user taps a notification, **When** they navigate to the relevant screen, **Then** the notification is marked as read and its indicator disappears.
+3. **Given** the user taps a notification, **When** they navigate to the relevant screen, **Then** the notification is marked as read and its indicator disappears. The only exception is the resolver's chat card: it opens the trade, and only the dispute chat marks it read (#610).
+3a. **Given** a trade has unread notifications, **When** the user taps "Go to trade" on its card, or opens that trade's detail screen from anywhere, **Then** every notification of that trade is marked read except its chat cards. Seeing the trade is not reading its messages: the chat screens own those cards and mark them read when opened (#610).
 4. **Given** the user opens the overflow menu in Notifications, **When** they tap "Mark all as read", **Then** all notifications are marked read and the badge disappears.
 
 ---

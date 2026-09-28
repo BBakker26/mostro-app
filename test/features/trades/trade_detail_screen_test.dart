@@ -11,6 +11,8 @@ import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
+import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
@@ -59,9 +61,12 @@ Future<ProviderContainer> _pumpTradeDetail(
   Locale locale = const Locale('en'),
   List<TradeInfo>? trades,
   bool privacyMode = false,
+  NotificationsNotifier? notifications,
 }) async {
   final container = createContainer(
     overrides: [
+      if (notifications != null)
+        notificationsProvider.overrideWith((_) => notifications),
       if (privacyMode)
         privacyModeProvider.overrideWith(
           (ref) => PrivacyModeNotifier(initialValue: true),
@@ -258,6 +263,54 @@ Finder _anyPopupMenuItem() =>
 final _en = AppLocalizationsEn();
 
 void main() {
+  testWidgets('opening the trade reads its notices, not its chat card (#610)', (
+    tester,
+  ) async {
+    // Arrange
+    final notifications = NotificationsNotifier();
+    final chatCardId = NotificationModel.chatCardId(
+      'order-610',
+      fromSolver: false,
+    );
+    for (final n in [
+      NotificationModel.tradeStatus(
+        orderId: 'order-610',
+        status: 'active',
+        at: DateTime.utc(2026),
+      ),
+      NotificationModel.chatMessages(
+        tradeId: 'order-610',
+        fromSolver: false,
+        count: 1,
+        at: DateTime.utc(2026),
+      ),
+      NotificationModel.tradeStatus(
+        orderId: 'other-order',
+        status: 'active',
+        at: DateTime.utc(2026),
+      ),
+    ]) {
+      await notifications.add(n);
+    }
+
+    // Act
+    await _pumpTradeDetail(
+      tester,
+      orderId: 'order-610',
+      isBuyer: true,
+      status: OrderStatus.active,
+      notifications: notifications,
+    );
+
+    // Assert
+    final read = {for (final n in notifications.state) n.id: n.isRead};
+    expect(read, {
+      'trade-order-610-active': true,
+      chatCardId: false,
+      'trade-other-order-active': false,
+    });
+  });
+
   group('8a · waiting for the counterpart to lock the sats', () {
     testWidgets(
       'buyer: amber chip, no chat, lock note, Cancel trade alone, no dispute',

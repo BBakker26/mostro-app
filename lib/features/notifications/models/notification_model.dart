@@ -275,6 +275,11 @@ class NotificationModel {
   /// trade rather than the peer chat.
   bool get isSolverChatCard => _isChatCard && _chatFromSolver;
 
+  /// False for chat notices, which only their chat screen marks read: opening
+  /// the trade is not reading its messages. Mirrored by the store's filter in
+  /// `SembastNotificationsStore.markRead`.
+  bool get readsWithTrade => type != NotificationType.message;
+
   /// Classification for the Disputes filter, including persisted status cards
   /// whose type stays tradeUpdate so tapping still opens the trade detail.
   bool get isDisputeNotification =>

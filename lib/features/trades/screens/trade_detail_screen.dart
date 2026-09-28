@@ -16,6 +16,7 @@ import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
+import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
@@ -108,6 +109,11 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     );
     _loadExpiresAt();
     _scheduleTick();
+    // Looking at the trade reads its notices (issue #610), whichever way the
+    // user got here. Its chat cards stay for the chat screen.
+    unawaited(
+      ref.read(notificationsProvider.notifier).markOrderAsRead(widget.orderId),
+    );
   }
 
   @override
@@ -1123,8 +1129,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
             ref.read(isCashuModeProvider)
                 ? l10n.lockEscrowConfirm
                 : l10n.payHoldInvoiceButton,
-        icon:
-            ref.read(isCashuModeProvider) ? Icons.lock_outline : Icons.bolt,
+        icon: ref.read(isCashuModeProvider) ? Icons.lock_outline : Icons.bolt,
         automationId: AutomationIds.tradePayInvoice,
         onPressed:
             () async => context.push(

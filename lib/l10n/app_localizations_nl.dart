@@ -1948,23 +1948,21 @@ class AppLocalizationsNl extends AppLocalizations {
   String get tradeWord => 'Trade';
 
   @override
-  String get notifFilterAll => 'Alle';
+  String get notifSectionRecent => 'Recent';
 
   @override
-  String get notifFilterDisputes => 'Disputen';
-
-  @override
-  String notifFilterDisputesCount(int count) {
-    return 'Disputen · $count';
+  String notificationDeletedSnack(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count meldingen verwijderd',
+      one: 'Melding verwijderd',
+    );
+    return '$_temp0';
   }
 
   @override
-  String get notifFilterSystem => 'Systeem';
-
-  @override
-  String notifFilterSystemCount(int count) {
-    return 'Systeem · $count';
-  }
+  String get notificationDeletedUndo => 'Ongedaan maken';
 
   @override
   String get payingStatus => 'Betalen…';

@@ -1956,23 +1956,21 @@ class AppLocalizationsFr extends AppLocalizations {
   String get tradeWord => 'Transaction';
 
   @override
-  String get notifFilterAll => 'Toutes';
+  String get notifSectionRecent => 'Récentes';
 
   @override
-  String get notifFilterDisputes => 'Litiges';
-
-  @override
-  String notifFilterDisputesCount(int count) {
-    return 'Litiges · $count';
+  String notificationDeletedSnack(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count notifications supprimées',
+      one: 'Notification supprimée',
+    );
+    return '$_temp0';
   }
 
   @override
-  String get notifFilterSystem => 'Système';
-
-  @override
-  String notifFilterSystemCount(int count) {
-    return 'Système · $count';
-  }
+  String get notificationDeletedUndo => 'Annuler';
 
   @override
   String get payingStatus => 'Paiement...';

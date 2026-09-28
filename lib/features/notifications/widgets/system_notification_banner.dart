@@ -9,18 +9,16 @@ import 'package:mostro/features/notifications/widgets/notification_group_card.da
 /// Banner-style card for notifications that don't reference a trade
 /// (system items: backup reminders, announcements, etc.).
 ///
-/// Amber-bordered per the redesign mock. Its overflow menu only deletes:
-/// tapping the banner is what reads it (issue #610).
+/// Amber-bordered per the redesign mock. Tapping it reads it; the screen
+/// deletes it with a swipe (issue #610).
 class SystemNotificationBanner extends StatelessWidget {
   const SystemNotificationBanner({
     super.key,
     required this.notification,
-    required this.onDelete,
     this.onTap,
   });
 
   final NotificationModel notification;
-  final VoidCallback onDelete;
   final VoidCallback? onTap;
 
   @override
@@ -108,37 +106,10 @@ class SystemNotificationBanner extends StatelessWidget {
                   ],
                 ),
               ),
-              _BannerOverflowMenu(onDelete: onDelete),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-// ── Overflow menu ──────────────────────────────────────────────────────────────
-
-class _BannerOverflowMenu extends StatelessWidget {
-  const _BannerOverflowMenu({required this.onDelete});
-
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    // A null value would read as a cancel and never reach onSelected.
-    return PopupMenuButton<bool>(
-      iconSize: 16,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      onSelected: (_) => onDelete(),
-      itemBuilder:
-          (context) => [
-            PopupMenuItem<bool>(
-              value: true,
-              child: Text(AppLocalizations.of(context).deleteNotificationLabel),
-            ),
-          ],
     );
   }
 }

@@ -222,24 +222,5 @@ void main() {
       // Assert
       expect(_isRead(notifier, 'system-1'), isTrue);
     });
-
-    testWidgets('an event\'s menu offers Delete only, and it deletes', (
-      tester,
-    ) async {
-      // Arrange
-      final notifier = await _notifierWith([_status('a', 'active', 1)]);
-      await _pumpScreen(tester, notifier);
-      final l10n = _l10n(tester);
-
-      // Act
-      await tester.tap(find.byType(PopupMenuButton<bool>));
-      await tester.pumpAndSettle();
-
-      // Assert
-      expect(find.text(l10n.markAsRead), findsNothing);
-      await tester.tap(find.text(l10n.deleteNotificationLabel));
-      await tester.pumpAndSettle();
-      expect(notifier.state, isEmpty);
-    });
   });
 }

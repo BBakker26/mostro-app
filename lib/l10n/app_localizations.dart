@@ -3412,35 +3412,23 @@ abstract class AppLocalizations {
   /// **'Trade'**
   String get tradeWord;
 
-  /// Notifications filter chip: all
+  /// Notifications screen: header of the notices below the pinned needs-your-action section (issue #610)
   ///
   /// In en, this message translates to:
-  /// **'All'**
-  String get notifFilterAll;
+  /// **'Recent'**
+  String get notifSectionRecent;
 
-  /// Notifications filter chip: disputes
+  /// Snack bar after swiping a notification card away; count is how many notices the card held (issue #610)
   ///
   /// In en, this message translates to:
-  /// **'Disputes'**
-  String get notifFilterDisputes;
+  /// **'{count, plural, =1{Notification deleted} other{{count} notifications deleted}}'**
+  String notificationDeletedSnack(int count);
 
-  /// Notifications filter chip: disputes with count
+  /// Snack bar action that brings back the notification card just swiped away
   ///
   /// In en, this message translates to:
-  /// **'Disputes · {count}'**
-  String notifFilterDisputesCount(int count);
-
-  /// Notifications filter chip: system
-  ///
-  /// In en, this message translates to:
-  /// **'System'**
-  String get notifFilterSystem;
-
-  /// Notifications filter chip: system with count
-  ///
-  /// In en, this message translates to:
-  /// **'System · {count}'**
-  String notifFilterSystemCount(int count);
+  /// **'Undo'**
+  String get notificationDeletedUndo;
 
   /// NWC pay button label while paying
   ///

@@ -1935,23 +1935,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tradeWord => 'Trade';
 
   @override
-  String get notifFilterAll => 'All';
+  String get notifSectionRecent => 'Recent';
 
   @override
-  String get notifFilterDisputes => 'Disputes';
-
-  @override
-  String notifFilterDisputesCount(int count) {
-    return 'Disputes · $count';
+  String notificationDeletedSnack(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count notifications deleted',
+      one: 'Notification deleted',
+    );
+    return '$_temp0';
   }
 
   @override
-  String get notifFilterSystem => 'System';
-
-  @override
-  String notifFilterSystemCount(int count) {
-    return 'System · $count';
-  }
+  String get notificationDeletedUndo => 'Undo';
 
   @override
   String get payingStatus => 'Paying...';

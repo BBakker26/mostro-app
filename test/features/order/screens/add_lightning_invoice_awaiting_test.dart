@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,7 +24,11 @@ Finder _semantics(String identifier) => find.byWidgetPredicate(
 
 final _en = AppLocalizationsEn();
 
-Future<void> _pumpAndSubmit(WidgetTester tester, Object error) async {
+Future<void> _pumpAndSubmit(
+  WidgetTester tester,
+  Object error, {
+  Future<void> Function()? submit,
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -42,7 +48,9 @@ Future<void> _pumpAndSubmit(WidgetTester tester, Object error) async {
         supportedLocales: AppLocalizations.supportedLocales,
         home: AddLightningInvoiceScreen(
           orderId: 'order-1',
-          submitInvoice: (orderId, invoice, sats) async => throw error,
+          submitInvoice:
+              (orderId, invoice, sats) async =>
+                  submit != null ? await submit() : throw error,
         ),
       ),
     ),
@@ -124,6 +132,38 @@ void main() {
 
       // Assert
       expect(_semantics('invoice.awaiting'), findsNothing);
+    } finally {
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('an answer about an input since edited is not shown', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final pending = Completer<void>();
+    try {
+      // Arrange: the submission is still waiting for the node.
+      await _pumpAndSubmit(
+        tester,
+        Exception('unused'),
+        submit: () => pending.future,
+      );
+
+      // Act: the buyer edits the field, then the old submission times out.
+      await tester.enterText(find.byType(TextField), 'lnbc1other');
+      await tester.pump();
+      pending.completeError(
+        Exception('AnyhowException(InvoiceAwaitingDaemon)'),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // Assert: the note was about the text that was sent, not this one.
+      expect(_semantics('invoice.awaiting'), findsNothing);
+      expect(_semantics('invoice.error'), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
     } finally {
       semantics.dispose();
       await tester.pumpWidget(const SizedBox.shrink());

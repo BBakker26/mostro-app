@@ -512,6 +512,18 @@ class _AddLightningInvoiceScreenState
         r'^.*?AnyhowException\((.+)\)$',
       ).firstMatch(raw);
       final msg = anyhowMatch != null ? anyhowMatch.group(1)! : raw;
+      // The daemon no longer waits for an invoice while this screen does:
+      // a message was missed (typically the acknowledgement of an earlier
+      // submission that outran its reply window). Ask for it again; the
+      // status it carries is what takes the buyer off this screen.
+      final statusRejection = isStatusRejection(msg);
+      if (statusRejection) unawaited(_recoverState());
+      // The answer is about the text that was sent. Edited since — the
+      // field stays open while the node is waited on, up to 30 s for an
+      // address — it would label the new input with the old verdict (PR #617
+      // review). The status recovery above still runs: it is not about the
+      // input.
+      if (_input != input) return;
       // Sent, not answered yet: the node may still accept it — an address
       // costs it an LNURL round trip — and the late reply moves the screen
       // on. Say so, without an error or a snack bar blaming the connection.
@@ -522,12 +534,6 @@ class _AddLightningInvoiceScreenState
         });
         return;
       }
-      // The daemon no longer waits for an invoice while this screen does:
-      // a message was missed (typically the acknowledgement of an earlier
-      // submission that outran its reply window). Ask for it again; the
-      // status it carries is what takes the buyer off this screen.
-      final statusRejection = isStatusRejection(msg);
-      if (statusRejection) unawaited(_recoverState());
       final l10n = AppLocalizations.of(context);
       final display =
           statusRejection

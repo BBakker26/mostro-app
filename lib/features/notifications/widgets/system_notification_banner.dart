@@ -9,19 +9,17 @@ import 'package:mostro/features/notifications/widgets/notification_group_card.da
 /// Banner-style card for notifications that don't reference a trade
 /// (system items: backup reminders, announcements, etc.).
 ///
-/// Amber-bordered per the redesign mock; keeps the standard mark-as-read /
-/// delete overflow actions.
+/// Amber-bordered per the redesign mock. Its overflow menu only deletes:
+/// tapping the banner is what reads it (issue #610).
 class SystemNotificationBanner extends StatelessWidget {
   const SystemNotificationBanner({
     super.key,
     required this.notification,
-    required this.onMarkRead,
     required this.onDelete,
     this.onTap,
   });
 
   final NotificationModel notification;
-  final VoidCallback onMarkRead;
   final VoidCallback onDelete;
   final VoidCallback? onTap;
 
@@ -110,11 +108,7 @@ class SystemNotificationBanner extends StatelessWidget {
                   ],
                 ),
               ),
-              _BannerOverflowMenu(
-                isRead: notification.isRead,
-                onMarkRead: onMarkRead,
-                onDelete: onDelete,
-              ),
+              _BannerOverflowMenu(onDelete: onDelete),
             ],
           ),
         ),
@@ -125,42 +119,23 @@ class SystemNotificationBanner extends StatelessWidget {
 
 // ── Overflow menu ──────────────────────────────────────────────────────────────
 
-enum _BannerMenuAction { markRead, delete }
-
 class _BannerOverflowMenu extends StatelessWidget {
-  const _BannerOverflowMenu({
-    required this.isRead,
-    required this.onMarkRead,
-    required this.onDelete,
-  });
+  const _BannerOverflowMenu({required this.onDelete});
 
-  final bool isRead;
-  final VoidCallback onMarkRead;
   final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<_BannerMenuAction>(
+    // A null value would read as a cancel and never reach onSelected.
+    return PopupMenuButton<bool>(
       iconSize: 16,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(),
-      onSelected: (action) {
-        switch (action) {
-          case _BannerMenuAction.markRead:
-            onMarkRead();
-          case _BannerMenuAction.delete:
-            onDelete();
-        }
-      },
+      onSelected: (_) => onDelete(),
       itemBuilder:
           (context) => [
-            if (!isRead)
-              PopupMenuItem(
-                value: _BannerMenuAction.markRead,
-                child: Text(AppLocalizations.of(context).markAsRead),
-              ),
-            PopupMenuItem(
-              value: _BannerMenuAction.delete,
+            PopupMenuItem<bool>(
+              value: true,
               child: Text(AppLocalizations.of(context).deleteNotificationLabel),
             ),
           ],

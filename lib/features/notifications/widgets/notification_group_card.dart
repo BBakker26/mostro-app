@@ -14,7 +14,6 @@ class NotificationGroupCard extends StatefulWidget {
   const NotificationGroupCard({
     super.key,
     required this.notifications,
-    required this.onMarkRead,
     required this.onDelete,
     required this.onTapNotification,
     required this.onGoToTrade,
@@ -23,7 +22,6 @@ class NotificationGroupCard extends StatefulWidget {
 
   /// Events for this trade, sorted newest first. Must not be empty.
   final List<NotificationModel> notifications;
-  final ValueChanged<NotificationModel> onMarkRead;
   final ValueChanged<NotificationModel> onDelete;
   final ValueChanged<NotificationModel> onTapNotification;
   final VoidCallback onGoToTrade;
@@ -115,7 +113,6 @@ class _NotificationGroupCardState extends State<NotificationGroupCard> {
           _EventRow(
             notification: _latest,
             highlight: true,
-            onMarkRead: () => widget.onMarkRead(_latest),
             onDelete: () => widget.onDelete(_latest),
             onTap: () => widget.onTapNotification(_latest),
           ),
@@ -129,7 +126,6 @@ class _NotificationGroupCardState extends State<NotificationGroupCard> {
                 child: _EventRow(
                   notification: n,
                   highlight: false,
-                  onMarkRead: () => widget.onMarkRead(n),
                   onDelete: () => widget.onDelete(n),
                   onTap: () => widget.onTapNotification(n),
                 ),
@@ -163,10 +159,12 @@ class _NotificationGroupCardState extends State<NotificationGroupCard> {
                                 Flexible(
                                   child: Text(
                                     _expanded
-                                        ? AppLocalizations.of(context)
-                                            .hideEarlierEvents
-                                        : AppLocalizations.of(context)
-                                            .viewEarlierEvents(_earlier.length),
+                                        ? AppLocalizations.of(
+                                          context,
+                                        ).hideEarlierEvents
+                                        : AppLocalizations.of(
+                                          context,
+                                        ).viewEarlierEvents(_earlier.length),
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodySmall!
@@ -244,7 +242,6 @@ class _EventRow extends StatelessWidget {
   const _EventRow({
     required this.notification,
     required this.highlight,
-    required this.onMarkRead,
     required this.onDelete,
     required this.onTap,
   });
@@ -253,7 +250,6 @@ class _EventRow extends StatelessWidget {
 
   /// Latest event gets a tinted pill; earlier events render muted.
   final bool highlight;
-  final VoidCallback onMarkRead;
   final VoidCallback onDelete;
   final VoidCallback onTap;
 
@@ -283,7 +279,9 @@ class _EventRow extends StatelessWidget {
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
-                        notification.resolvedTitle(AppLocalizations.of(context)),
+                        notification.resolvedTitle(
+                          AppLocalizations.of(context),
+                        ),
                         style: Theme.of(context).textTheme.bodySmall!.copyWith(
                           color: pillColor,
                           fontSize: 12,
@@ -307,7 +305,9 @@ class _EventRow extends StatelessWidget {
                           ),
                         Flexible(
                           child: Text(
-                            notification.resolvedTitle(AppLocalizations.of(context)),
+                            notification.resolvedTitle(
+                              AppLocalizations.of(context),
+                            ),
                             style: Theme.of(context).textTheme.bodySmall!
                                 .copyWith(color: textSec, fontSize: 12),
                             overflow: TextOverflow.ellipsis,
@@ -324,11 +324,7 @@ class _EventRow extends StatelessWidget {
             ).textTheme.bodySmall!.copyWith(color: textSec, fontSize: 11),
           ),
           const Spacer(),
-          _EventOverflowMenu(
-            isRead: notification.isRead,
-            onMarkRead: onMarkRead,
-            onDelete: onDelete,
-          ),
+          _EventOverflowMenu(onDelete: onDelete),
         ],
       ),
     );
@@ -337,42 +333,24 @@ class _EventRow extends StatelessWidget {
 
 // ── Overflow menu (per event) ─────────────────────────────────────────────────
 
-enum _EventMenuAction { markRead, delete }
-
+/// Only Delete: opening a notice is what reads it (issue #610).
 class _EventOverflowMenu extends StatelessWidget {
-  const _EventOverflowMenu({
-    required this.isRead,
-    required this.onMarkRead,
-    required this.onDelete,
-  });
+  const _EventOverflowMenu({required this.onDelete});
 
-  final bool isRead;
-  final VoidCallback onMarkRead;
   final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<_EventMenuAction>(
+    // A null value would read as a cancel and never reach onSelected.
+    return PopupMenuButton<bool>(
       iconSize: 16,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(),
-      onSelected: (action) {
-        switch (action) {
-          case _EventMenuAction.markRead:
-            onMarkRead();
-          case _EventMenuAction.delete:
-            onDelete();
-        }
-      },
+      onSelected: (_) => onDelete(),
       itemBuilder:
           (context) => [
-            if (!isRead)
-              PopupMenuItem(
-                value: _EventMenuAction.markRead,
-                child: Text(AppLocalizations.of(context).markAsRead),
-              ),
-            PopupMenuItem(
-              value: _EventMenuAction.delete,
+            PopupMenuItem<bool>(
+              value: true,
               child: Text(AppLocalizations.of(context).deleteNotificationLabel),
             ),
           ],

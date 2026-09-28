@@ -156,7 +156,6 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 for (final n in systemItems) ...[
                   SystemNotificationBanner(
                     notification: n,
-                    onMarkRead: () => notifier.markAsRead(n.id),
                     onDelete: () => notifier.delete(n.id),
                     onTap: () => _handleTap(context, n),
                   ),
@@ -168,10 +167,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 NotificationGroupCard(
                   notifications: group,
                   isDisputeGroup: group.first.orderId == null,
-                  onMarkRead: (n) => notifier.markAsRead(n.id),
                   onDelete: (n) => notifier.delete(n.id),
                   onTapNotification: (n) => _handleTap(context, n),
-                  onGoToTrade: () => _goToTrade(context, group.first),
+                  onGoToTrade: () => _goToTrade(context, group),
                 ),
                 const SizedBox(height: AppSpacing.sm),
               ],
@@ -189,7 +187,18 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   }
 
   /// Footer action of a group card — open the trade (or dispute) detail.
-  void _goToTrade(BuildContext context, NotificationModel n) {
+  /// The user is going to see where the trade stands, so its notices are
+  /// read (issue #610); a dispute group, keyed without an order, by its ids.
+  void _goToTrade(BuildContext context, List<NotificationModel> group) {
+    final n = group.first;
+    final notifier = ref.read(notificationsProvider.notifier);
+    if (n.orderId != null) {
+      notifier.markOrderAsRead(n.orderId!);
+    } else {
+      for (final e in group) {
+        if (!e.isRead) notifier.markAsRead(e.id);
+      }
+    }
     if (n.orderId != null) {
       context.push(AppRoute.tradeDetailPath(n.orderId!));
     } else if (n.disputeId != null) {
@@ -198,6 +207,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   }
 
   void _handleTap(BuildContext context, NotificationModel n) {
+    // Opening a notice reads it (issue #610). Not awaited: the write must
+    // never hold up the navigation.
+    if (!n.isRead) ref.read(notificationsProvider.notifier).markAsRead(n.id);
     void noId() {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

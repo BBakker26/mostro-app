@@ -1948,23 +1948,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get tradeWord => 'Trade';
 
   @override
-  String get notifFilterAll => 'Alle';
-
-  @override
-  String get notifFilterDisputes => 'Disputen';
-
-  @override
-  String notifFilterDisputesCount(int count) {
-    return 'Disputen · $count';
-  }
-
-  @override
-  String get notifFilterSystem => 'Systeem';
-
-  @override
-  String notifFilterSystemCount(int count) {
-    return 'Systeem · $count';
-  }
+  String get notifSectionRecent => 'Recent';
 
   @override
   String get payingStatus => 'Betalen…';

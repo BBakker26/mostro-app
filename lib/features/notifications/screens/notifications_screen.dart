@@ -7,20 +7,22 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/features/account/providers/backup_reminder_provider.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/notifications/models/notification_view_rules.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/notifications/widgets/bond_slashed_dialog.dart';
 import 'package:mostro/features/notifications/widgets/notification_group_card.dart';
 import 'package:mostro/features/notifications/widgets/system_notification_banner.dart';
 import 'package:mostro/features/cashu/seller_funding_route.dart';
 import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
+import 'package:mostro/features/trades/providers/trade_rows_provider.dart';
 
 /// Notifications screen — Route `/notifications`.
 ///
-/// Trade-related notifications are grouped by order id into collapsible
-/// group cards (latest event shown, earlier events expandable). System
-/// notifications (backup reminder, announcements) render in a separate
-/// banner section at the top. Filter chips narrow the list to dispute
-/// groups or system items.
+/// One list (issue #610): trade-related notifications are grouped by order
+/// id into collapsible group cards (latest event in full, earlier events
+/// expandable), and notices that belong to no trade sit among them by time.
+/// Trades whose next step is the user's right now are pinned above the rest,
+/// under their own header.
 class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -29,11 +31,7 @@ class NotificationsScreen extends ConsumerStatefulWidget {
       _NotificationsScreenState();
 }
 
-enum _NotificationFilter { all, disputes, system }
-
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
-  _NotificationFilter _filter = _NotificationFilter.all;
-
   @override
   Widget build(BuildContext context) {
     final backupActive = ref.watch(backupReminderProvider);
@@ -92,96 +90,63 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       return const _EmptyState();
     }
 
-    // ── Partition: system items vs trade/dispute groups ──
-    final systemItems = <NotificationModel>[];
-    final groups = <String, List<NotificationModel>>{};
-    for (final n in notifications) {
-      final key = n.orderId ?? n.disputeId;
-      if (key == null) {
-        systemItems.add(n);
-      } else {
-        groups.putIfAbsent(key, () => []).add(n);
-      }
-    }
-    systemItems.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    for (final events in groups.values) {
-      events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    }
-    final sortedGroups =
-        groups.values.toList()
-          ..sort((a, b) => b.first.timestamp.compareTo(a.first.timestamp));
-
-    final disputeGroups =
-        sortedGroups
-            .where((g) => g.any((n) => n.isDisputeNotification))
-            .toList();
-    final systemCount = systemItems.length + (backupActive ? 1 : 0);
-
-    final showSystem =
-        _filter == _NotificationFilter.all ||
-        _filter == _NotificationFilter.system;
-    final visibleGroups = switch (_filter) {
-      _NotificationFilter.all => sortedGroups,
-      _NotificationFilter.disputes => disputeGroups,
-      _NotificationFilter.system => <List<NotificationModel>>[],
-    };
-
+    // The trades as My Trades sees them: the header of each group, and
+    // whether its next step is the user's. Until they load, every group
+    // shows its short id and nothing is pinned.
+    final rows = ref.watch(tradeRowsProvider).valueOrNull ?? const <TradeRow>[];
+    final rowsById = {for (final r in rows) r.orderId: r};
+    final sections = sectionNotices(
+      notifications,
+      needsAction: (id) => rowsById[id]?.state.needsAction ?? false,
+    );
+    final pinned = sections.needsAction.isNotEmpty;
     final notifier = ref.read(notificationsProvider.notifier);
 
-    return Column(
+    Widget entryCard(NoticeEntry entry) => switch (entry) {
+      NoticeGroupEntry(:final events) => NotificationGroupCard(
+        // Keyed by trade so an expanded card stays expanded when it moves.
+        key: ValueKey(events.first.orderId ?? events.first.disputeId),
+        notifications: events,
+        tradeRow: rowsById[events.first.orderId],
+        isDisputeGroup: events.first.orderId == null,
+        onDelete: (n) => notifier.delete(n.id),
+        onTapNotification: (n) => _handleTap(context, n),
+        onGoToTrade: () => _goToTrade(context, events),
+      ),
+      NoticeSystemEntry(:final notification) => SystemNotificationBanner(
+        key: ValueKey(notification.id),
+        notification: notification,
+        onDelete: () => notifier.delete(notification.id),
+        onTap: () => _handleTap(context, notification),
+      ),
+    };
+
+    final l10n = AppLocalizations.of(context);
+    return ListView(
+      // #267: add the bottom system-bar inset so the last item isn't
+      // hidden behind the gesture / 3-button navigation bar.
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.md + MediaQuery.of(context).viewPadding.bottom,
+      ),
       children: [
-        _FilterChipsRow(
-          selected: _filter,
-          disputeCount: disputeGroups.length,
-          systemCount: systemCount,
-          onSelected: (f) => setState(() => _filter = f),
-        ),
-        Expanded(
-          child: ListView(
-            // #267: add the bottom system-bar inset so the last item isn't
-            // hidden behind the gesture / 3-button navigation bar.
-            padding: EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md,
-              AppSpacing.lg,
-              AppSpacing.md + MediaQuery.of(context).viewPadding.bottom,
-            ),
-            children: [
-              // ── System section (banners) ──
-              if (showSystem) ...[
-                if (backupActive) ...[
-                  const _BackupReminderBanner(),
-                  const SizedBox(height: AppSpacing.sm),
-                ],
-                for (final n in systemItems) ...[
-                  SystemNotificationBanner(
-                    notification: n,
-                    onDelete: () => notifier.delete(n.id),
-                    onTap: () => _handleTap(context, n),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                ],
-              ],
-              // ── Trade groups ──
-              for (final group in visibleGroups) ...[
-                NotificationGroupCard(
-                  notifications: group,
-                  isDisputeGroup: group.first.orderId == null,
-                  onDelete: (n) => notifier.delete(n.id),
-                  onTapNotification: (n) => _handleTap(context, n),
-                  onGoToTrade: () => _goToTrade(context, group),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-              ],
-              if ((!showSystem && visibleGroups.isEmpty) ||
-                  (_filter == _NotificationFilter.system && systemCount == 0))
-                const Padding(
-                  padding: EdgeInsets.only(top: AppSpacing.xxl),
-                  child: _EmptyState(),
-                ),
-            ],
-          ),
-        ),
+        if (backupActive) ...[
+          const _BackupReminderBanner(),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        if (pinned) _SectionHeader(l10n.tradesGroupNeedsAction),
+        for (final entry in sections.needsAction) ...[
+          entryCard(entry),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        if (pinned && sections.recent.isNotEmpty)
+          _SectionHeader(l10n.notifSectionRecent),
+        for (final entry in sections.recent) ...[
+          entryCard(entry),
+          const SizedBox(height: AppSpacing.sm),
+        ],
       ],
     );
   }
@@ -265,106 +230,29 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 
 enum _MenuAction { markAllRead, clearAll }
 
-// ── Filter chips row ──────────────────────────────────────────────────────────
+// ── Section header ────────────────────────────────────────────────────────────
 
-class _FilterChipsRow extends StatelessWidget {
-  const _FilterChipsRow({
-    required this.selected,
-    required this.disputeCount,
-    required this.systemCount,
-    required this.onSelected,
-  });
-
-  final _NotificationFilter selected;
-  final int disputeCount;
-  final int systemCount;
-  final ValueChanged<_NotificationFilter> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final chips = <(_NotificationFilter, String)>[
-      (_NotificationFilter.all, l10n.notifFilterAll),
-      (
-        _NotificationFilter.disputes,
-        disputeCount > 0
-            ? l10n.notifFilterDisputesCount(disputeCount)
-            : l10n.notifFilterDisputes,
-      ),
-      (
-        _NotificationFilter.system,
-        systemCount > 0
-            ? l10n.notifFilterSystemCount(systemCount)
-            : l10n.notifFilterSystem,
-      ),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.lg,
-        AppSpacing.md,
-        AppSpacing.lg,
-        0,
-      ),
-      child: Row(
-        children: [
-          for (final (filter, label) in chips) ...[
-            _FilterChip(
-              label: label,
-              isSelected: selected == filter,
-              onTap: () => onSelected(filter),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  });
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.label);
 
   final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>();
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: 6,
-        ),
-        decoration: BoxDecoration(
-          color: isSelected ? green.withValues(alpha: 0.15) : cardBg,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color:
-                isSelected ? green.withValues(alpha: 0.4) : Colors.transparent,
-            width: 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall!.copyWith(
-            color: isSelected ? green : textSec,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
+    return Padding(
+      padding: const EdgeInsets.only(
+        top: AppSpacing.sm,
+        bottom: AppSpacing.sm,
+        left: AppSpacing.xs,
+      ),
+      child: Text(
+        label.toUpperCase(),
+        style: Theme.of(context).textTheme.bodySmall!.copyWith(
+          color: colors?.textSecondary ?? const Color(0xFFB0B3C6),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.8,
         ),
       ),
     );
@@ -433,38 +321,6 @@ class _BackupReminderBanner extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-// ── Type icon (kept per spec — referenced by future phases) ──────────────────
-
-// ignore: unused_element
-class _TypeIcon extends StatelessWidget {
-  const _TypeIcon({required this.type});
-
-  final NotificationType type;
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, color) = switch (type) {
-      NotificationType.orderUpdate => (
-        Icons.shopping_bag_outlined,
-        Colors.blue,
-      ),
-      NotificationType.tradeUpdate => (Icons.star_outline, Colors.amber),
-      NotificationType.payment => (Icons.bolt_outlined, Colors.yellow),
-      NotificationType.dispute => (Icons.gavel, Colors.red),
-      NotificationType.cancellation => (Icons.cancel_outlined, Colors.orange),
-      NotificationType.message => (Icons.chat_bubble_outline, Colors.teal),
-      NotificationType.system => (Icons.info_outline, Colors.grey),
-      NotificationType.ratingReceived => (Icons.star, Colors.amber),
-      NotificationType.paymentReceived => (Icons.attach_money, Colors.blue),
-      NotificationType.invoiceRequest => (Icons.description, Colors.green),
-      NotificationType.orderTaken => (Icons.add_circle_outline, Colors.green),
-      NotificationType.bondSlashed => (Icons.money_off, Colors.red),
-      NotificationType.bondClaim => (Icons.savings_outlined, Colors.orange),
-    };
-    return Icon(icon, color: color, size: 22);
   }
 }
 

@@ -2562,35 +2562,9 @@
   "@tradeWord": {
     "description": "Word 'Trade' used in a notification group title"
   },
-  "notifFilterAll": "All",
-  "@notifFilterAll": {
-    "description": "Notifications filter chip: all"
-  },
-  "notifFilterDisputes": "Disputes",
-  "@notifFilterDisputes": {
-    "description": "Notifications filter chip: disputes"
-  },
-  "notifFilterDisputesCount": "Disputes · {count}",
-  "@notifFilterDisputesCount": {
-    "description": "Notifications filter chip: disputes with count",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "notifFilterSystem": "System",
-  "@notifFilterSystem": {
-    "description": "Notifications filter chip: system"
-  },
-  "notifFilterSystemCount": "System · {count}",
-  "@notifFilterSystemCount": {
-    "description": "Notifications filter chip: system with count",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
+  "notifSectionRecent": "Recent",
+  "@notifSectionRecent": {
+    "description": "Notifications screen: header of the notices below the pinned needs-your-action section (issue #610)"
   },
   "payingStatus": "Paying...",
   "@payingStatus": {

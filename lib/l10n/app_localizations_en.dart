@@ -1935,23 +1935,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tradeWord => 'Trade';
 
   @override
-  String get notifFilterAll => 'All';
-
-  @override
-  String get notifFilterDisputes => 'Disputes';
-
-  @override
-  String notifFilterDisputesCount(int count) {
-    return 'Disputes · $count';
-  }
-
-  @override
-  String get notifFilterSystem => 'System';
-
-  @override
-  String notifFilterSystemCount(int count) {
-    return 'System · $count';
-  }
+  String get notifSectionRecent => 'Recent';
 
   @override
   String get payingStatus => 'Paying...';

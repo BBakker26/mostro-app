@@ -3412,35 +3412,11 @@ abstract class AppLocalizations {
   /// **'Trade'**
   String get tradeWord;
 
-  /// Notifications filter chip: all
+  /// Notifications screen: header of the notices below the pinned needs-your-action section (issue #610)
   ///
   /// In en, this message translates to:
-  /// **'All'**
-  String get notifFilterAll;
-
-  /// Notifications filter chip: disputes
-  ///
-  /// In en, this message translates to:
-  /// **'Disputes'**
-  String get notifFilterDisputes;
-
-  /// Notifications filter chip: disputes with count
-  ///
-  /// In en, this message translates to:
-  /// **'Disputes · {count}'**
-  String notifFilterDisputesCount(int count);
-
-  /// Notifications filter chip: system
-  ///
-  /// In en, this message translates to:
-  /// **'System'**
-  String get notifFilterSystem;
-
-  /// Notifications filter chip: system with count
-  ///
-  /// In en, this message translates to:
-  /// **'System · {count}'**
-  String notifFilterSystemCount(int count);
+  /// **'Recent'**
+  String get notifSectionRecent;
 
   /// NWC pay button label while paying
   ///

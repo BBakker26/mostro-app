@@ -166,6 +166,28 @@ void main() {
       expect(find.text('trade a'), findsOneWidget);
     });
 
+    testWidgets('a resolver chat card opens the trade and stays unread', (
+      tester,
+    ) async {
+      // Arrange: the dispute chat owns its read state, not the trade.
+      final solver = NotificationModel.chatMessages(
+        tradeId: 'a',
+        fromSolver: true,
+        count: 1,
+        at: DateTime.utc(2026, 1, 1, 1),
+      );
+      final notifier = await _notifierWith([solver]);
+      await _pumpScreen(tester, notifier);
+
+      // Act
+      await tester.tap(find.text(_l10n(tester).chatCardSolverTitle));
+      await tester.pumpAndSettle();
+
+      // Assert
+      expect(find.text('trade a'), findsOneWidget);
+      expect(_isRead(notifier, solver.id), isFalse);
+    });
+
     testWidgets('Go to trade marks every event of the group read', (
       tester,
     ) async {

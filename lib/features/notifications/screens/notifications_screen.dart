@@ -222,8 +222,12 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 
   void _handleTap(BuildContext context, NotificationModel n) {
     // Opening a notice reads it (issue #610). Not awaited: the write must
-    // never hold up the navigation.
-    if (!n.isRead) ref.read(notificationsProvider.notifier).markAsRead(n.id);
+    // never hold up the navigation. The resolver's chat card is the
+    // exception: it opens the trade, not the dispute chat that owns its read
+    // state, so the user has not seen those messages yet.
+    if (!n.isRead && !n.isSolverChatCard) {
+      ref.read(notificationsProvider.notifier).markAsRead(n.id);
+    }
     void noId() {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::api::types::{OrderStatus, TradeInfo};
+use crate::api::types::{IdentityInfo, OrderStatus, TradeInfo};
 
 /// Settings key the snapshot of the last restore is stored under. Wiped with
 /// the identity (#614).
@@ -43,17 +43,31 @@ pub struct RestoreSnapshot {
 }
 
 impl RestoreSnapshot {
-    /// True when this snapshot was taken by [identity_pubkey], the identity
-    /// now loaded. Only then do its floor and live set describe this
-    /// identity's trades: another identity's snapshot reads a fresh
-    /// identity's first takes as history, and a history pass would wipe
-    /// them mid-trade (#614). A snapshot that does not name its identity
-    /// cannot prove it, so it never belongs either.
-    pub fn belongs_to(&self, identity_pubkey: Option<&str>) -> bool {
-        matches!(
-            (self.identity.as_deref(), identity_pubkey),
-            (Some(own), Some(current)) if own.eq_ignore_ascii_case(current)
-        )
+    /// True when this snapshot describes the trades of [identity], the one
+    /// now loaded. [is_history] is only sound under that condition: "at or
+    /// below the floor and not listed" singles out history only while every
+    /// trade this identity starts gets an index above the floor. Read
+    /// otherwise, it takes live trades for history and a pass wipes them
+    /// mid-trade (#614). Two things must hold:
+    ///
+    /// - the snapshot was taken by this identity. Another identity's floor
+    ///   covers a fresh identity's first indices, and its live set does not
+    ///   list their orders. A snapshot that does not name its identity
+    ///   (stored before the field existed) cannot prove it;
+    /// - the identity's trade-key counter is still at or above the floor.
+    ///   The restore raises it there before storing the snapshot. A counter
+    ///   below it means the key sequence started over under the same
+    ///   identity (a re-import after a wipe that failed), and the next takes
+    ///   would reuse indices the floor covers.
+    pub fn applies_to(&self, identity: Option<&IdentityInfo>) -> bool {
+        let Some(identity) = identity else {
+            return false;
+        };
+        let same_identity = self
+            .identity
+            .as_deref()
+            .is_some_and(|own| own.eq_ignore_ascii_case(&identity.public_key));
+        same_identity && identity.trade_key_index >= self.floor
     }
 
     /// True when the trade on [order_id] with [trade_index] predates the
@@ -237,13 +251,25 @@ mod tests {
             peers: HashMap::new(),
             identity: identity.map(str::to_string),
         };
-        assert!(snapshot(Some("aa")).belongs_to(Some("aa")));
+        let loaded = |pubkey: &str, trade_key_index: u32| IdentityInfo {
+            public_key: pubkey.to_string(),
+            display_name: None,
+            privacy_mode: false,
+            trade_key_index,
+            created_at: 0,
+        };
+        assert!(snapshot(Some("aa")).applies_to(Some(&loaded("aa", 97))));
+        assert!(snapshot(Some("aa")).applies_to(Some(&loaded("AA", 120))));
         // Another identity's history: its floor and live set say nothing
         // about this one's trades (#614).
-        assert!(!snapshot(Some("aa")).belongs_to(Some("bb")));
-        assert!(!snapshot(Some("aa")).belongs_to(None));
+        assert!(!snapshot(Some("aa")).applies_to(Some(&loaded("bb", 120))));
+        assert!(!snapshot(Some("aa")).applies_to(None));
         // Stored before the field existed: whose it is cannot be proven.
-        assert!(!snapshot(None).belongs_to(Some("aa")));
+        assert!(!snapshot(None).applies_to(Some(&loaded("aa", 120))));
+        // Same identity, key sequence started over: its next takes would sit
+        // at or below the floor and read as history.
+        assert!(!snapshot(Some("aa")).applies_to(Some(&loaded("aa", 0))));
+        assert!(!snapshot(Some("aa")).applies_to(Some(&loaded("aa", 96))));
         let legacy: RestoreSnapshot =
             serde_json::from_str(r#"{"floor":97,"live":[]}"#).expect("old shape still reads");
         assert_eq!(legacy.identity, None);

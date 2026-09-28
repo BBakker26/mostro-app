@@ -7437,15 +7437,12 @@ async fn reconcile_restored_history() -> std::collections::HashSet<String> {
                         return Default::default();
             }
         };
-    // Another identity's snapshot describes its trades, not these: read here
-    // it would wipe this identity's live takes as history (#614). Drop it —
-    // the next restore writes this identity's own.
-    let current = crate::api::identity::get_identity()
-        .await
-        .ok()
-        .flatten()
-        .map(|identity| identity.public_key);
-    if !snapshot.belongs_to(current.as_deref()) {
+    // A snapshot that does not describe the loaded identity's key sequence —
+    // another identity's, or one whose counter started over — would read
+    // this identity's live takes as history and wipe them (#614). Drop it:
+    // the next restore writes a fresh one.
+    let current = crate::api::identity::get_identity().await.ok().flatten();
+    if !snapshot.applies_to(current.as_ref()) {
         if let Err(e) = db
             .delete_setting(crate::mostro::restore_history::SNAPSHOT_KEY)
             .await
@@ -7454,7 +7451,9 @@ async fn reconcile_restored_history() -> std::collections::HashSet<String> {
         }
         crate::api::logging::blog_info(
             "restore",
-            "restore snapshot of another identity dropped: history not settled".into(),
+            "restore snapshot does not match this identity's keys — dropped, \
+             history not settled"
+                .into(),
         );
         return Default::default();
     }

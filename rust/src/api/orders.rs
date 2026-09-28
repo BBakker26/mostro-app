@@ -7443,12 +7443,7 @@ async fn reconcile_restored_history() -> std::collections::HashSet<String> {
     // the next restore writes a fresh one.
     let current = crate::api::identity::get_identity().await.ok().flatten();
     if !snapshot.applies_to(current.as_ref()) {
-        if let Err(e) = db
-            .delete_setting(crate::mostro::restore_history::SNAPSHOT_KEY)
-            .await
-        {
-            log::warn!("[restore] stale restore snapshot not dropped: {e}");
-        }
+        crate::mostro::restore_history::drop_snapshot_if_unchanged(db, &json).await;
         crate::api::logging::blog_info(
             "restore",
             "restore snapshot does not match this identity's keys — dropped, \
@@ -9747,6 +9742,11 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
     let identity_keys = crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
 
     let event_json = actions::restore_session(&identity_keys, &sender_keys, &mostro_pubkey).await?;
+    // The reply answers this identity; one landing after a swap must not be
+    // applied to the next (PR #616 review).
+    let origin_identity = crate::api::identity::get_identity()
+        .await?
+        .map(|identity| identity.public_key);
 
     // Register the pending-restore record BEFORE publishing so the reply can't
     // race the map. Correlated by trade pubkey only (RestoreSession carries no
@@ -9796,6 +9796,23 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             reply: DaemonReply::Restored(info),
             ..
         })) => {
+            // Before anything the reply writes: rows, counter and snapshot
+            // all describe the identity that asked.
+            let current = crate::api::identity::get_identity()
+                .await
+                .ok()
+                .flatten()
+                .map(|identity| identity.public_key);
+            if !crate::mostro::restore_history::restore_answer_is_for(
+                origin_identity.as_deref(),
+                current.as_deref(),
+            ) {
+                crate::api::logging::blog_warn(
+                    "restore",
+                    "reply landed after an identity change — discarded".into(),
+                );
+                return Err(anyhow::anyhow!("IdentityChanged"));
+            }
             // The restore sheet's next stage needs only the answer: reported
             // before the LastTradeIndex round trip below, which can take its
             // own timeout.
@@ -11237,6 +11254,31 @@ mod tests {
         let start = source.find(name).expect("the function exists");
         let end = start + source[start..].find("\n}\n").expect("the function ends");
         &source[start..end]
+    }
+
+    /// A restore reply that lands after an identity swap belongs to the
+    /// identity that asked (PR #616 review). The check must come before the
+    /// first thing the reply writes — the progress, the rows, the counter,
+    /// the snapshot — and the identity it compares against is taken before
+    /// the request leaves.
+    #[test]
+    fn a_restore_reply_is_checked_against_the_asking_identity_first() {
+        let session = fn_body("pub async fn restore_session()");
+        let origin = session.find("let origin_identity").expect("captures who asked");
+        let published = session.find("publish_event_json(&event_json)").expect("publishes");
+        let check = session
+            .find("restore_answer_is_for(")
+            .expect("checks the reply's identity");
+        assert!(origin < published, "the asking identity is taken before sending");
+        for effect in [
+            "restore_progress::found(",
+            "persist_restored_trade_rows(",
+            "ensure_trade_key_index_at_least(",
+            "record_restore_snapshot(",
+        ] {
+            let at = session.find(effect).expect(effect);
+            assert!(check < at, "{effect} runs before the identity check");
+        }
     }
 
     /// The restore sheet (design 20a–20d) follows the restore through these

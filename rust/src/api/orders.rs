@@ -7437,6 +7437,27 @@ async fn reconcile_restored_history() -> std::collections::HashSet<String> {
                         return Default::default();
             }
         };
+    // Another identity's snapshot describes its trades, not these: read here
+    // it would wipe this identity's live takes as history (#614). Drop it —
+    // the next restore writes this identity's own.
+    let current = crate::api::identity::get_identity()
+        .await
+        .ok()
+        .flatten()
+        .map(|identity| identity.public_key);
+    if !snapshot.belongs_to(current.as_deref()) {
+        if let Err(e) = db
+            .delete_setting(crate::mostro::restore_history::SNAPSHOT_KEY)
+            .await
+        {
+            log::warn!("[restore] stale restore snapshot not dropped: {e}");
+        }
+        crate::api::logging::blog_info(
+            "restore",
+            "restore snapshot of another identity dropped: history not settled".into(),
+        );
+        return Default::default();
+    }
     apply_restored_peers(&snapshot).await;
     reconcile_history_with(&snapshot, |oid: String| async move {
         fetch_public_order_status(&oid).await
@@ -7630,6 +7651,11 @@ async fn record_restore_snapshot(floor: u32, info: &mostro_core::message::Restor
             .chain(info.restore_disputes.iter().map(|d| d.order_id.to_string()))
             .collect(),
         peers: crate::mostro::restore_history::restored_peers(info),
+        identity: crate::api::identity::get_identity()
+            .await
+            .ok()
+            .flatten()
+            .map(|identity| identity.public_key),
     };
     let stored = match (crate::db::app_db::db(), serde_json::to_string(&snapshot)) {
         (Some(db), Ok(json)) => db
@@ -12236,6 +12262,7 @@ mod tests {
             floor: 97,
             live: [live.clone()].into_iter().collect(),
             peers: Default::default(),
+            identity: None,
         };
         let asked = std::sync::Mutex::new(Vec::<String>::new());
 
@@ -12275,6 +12302,45 @@ mod tests {
             assert!(looked_up.contains(oid), "{oid} looked up");
         }
         assert!(!looked_up.contains(&live) && !looked_up.contains(&fresh));
+    }
+
+    /// #614: a restore snapshot left by another identity — or stored before
+    /// snapshots named theirs — must not settle this identity's trades. Its
+    /// floor covers the new identity's first indices and its live set does
+    /// not list their orders, so read as history they were wiped mid-trade.
+    /// The pass drops such a snapshot and leaves every row alone.
+    #[tokio::test]
+    async fn a_snapshot_of_another_identity_never_wipes_a_live_trade() {
+        use crate::api::types::OrderStatus as S;
+        use crate::db::settings_keys::RESTORE_SNAPSHOT;
+        let db = bond_test_db().await;
+        for stored in [
+            r#"{"floor":97,"live":[],"identity":"another-identity"}"#,
+            r#"{"floor":97,"live":[]}"#,
+        ] {
+            let oid = format!("new-identity-take-{}", uuid::Uuid::new_v4());
+            let mut row = seam_trade_row(&oid, S::WaitingBuyerInvoice);
+            row.trade_key_index = 1;
+            db.save_trade(&row).await.unwrap();
+            db.set_setting(RESTORE_SNAPSHOT, stored).await.unwrap();
+
+            let looked_up = reconcile_restored_history().await;
+
+            assert!(looked_up.is_empty(), "{stored}: nothing is history");
+            assert_eq!(
+                db.get_trade_by_order_id(&oid)
+                    .await
+                    .unwrap()
+                    .map(|t| t.order.status),
+                Some(S::WaitingBuyerInvoice),
+                "{stored}: the live trade keeps its row"
+            );
+            assert_eq!(
+                db.get_setting(RESTORE_SNAPSHOT).await.unwrap(),
+                None,
+                "{stored}: a snapshot that is not this identity's is dropped"
+            );
+        }
     }
 
     /// A rebuilt row is dated by its order, not by the moment of the replay

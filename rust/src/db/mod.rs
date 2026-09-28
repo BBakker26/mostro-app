@@ -33,6 +33,13 @@ pub mod settings_keys {
     /// kind-14 filter (docs/ANTI_ABUSE_BOND.md §6.4).
     pub const BOND_CLAIM_RETAINED_NODES: &str = "bond_claim_retained_nodes";
 
+    /// What the last restore reported as in progress, as JSON
+    /// ([`crate::mostro::restore_history::RestoreSnapshot`]). Identity-scoped:
+    /// its trade-index floor and live set describe the identity that ran the
+    /// restore, and read against the next one they wipe its live trades as
+    /// history (#614).
+    pub const RESTORE_SNAPSHOT: &str = "restore_snapshot";
+
     // ── Push notifications (docs/PUSH_NOTIFICATIONS.md §7.1, §8.1) ──────────
 
     /// The master toggle, `"true"` / `"false"`; absent reads as enabled.
@@ -181,7 +188,9 @@ pub mod settings_keys {
     /// canceled order can be legitimately re-taken (`persist_trade_row`).
     pub const TRADE_WIPED_PREFIX: &str = "trade_wiped:";
 
-    /// Every per-order key family above, plus the one identity-scoped map.
+    /// Every per-order key family above. The single identity-scoped keys —
+    /// [`BOND_CLAIM_RETAINED_NODES`] and [`RESTORE_SNAPSHOT`] — are dropped
+    /// by name next to them.
     /// All of it describes trades of the identity that wrote it, so
     /// [`super::Storage::clear_identity_data`] drops it with the rows. What
     /// is left in the store is device preference: the active node, custom

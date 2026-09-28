@@ -19,8 +19,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::api::types::{OrderStatus, TradeInfo};
 
-/// Settings key the snapshot of the last restore is stored under.
-pub const SNAPSHOT_KEY: &str = "restore_snapshot";
+/// Settings key the snapshot of the last restore is stored under. Wiped with
+/// the identity (#614).
+pub const SNAPSHOT_KEY: &str = crate::db::settings_keys::RESTORE_SNAPSHOT;
 
 /// What the last restore reported as still in progress.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -35,9 +36,26 @@ pub struct RestoreSnapshot {
     /// existed, and for orders nobody has taken.
     #[serde(default)]
     pub peers: HashMap<String, String>,
+    /// The identity public key (hex) that ran the restore. Absent in
+    /// snapshots stored before the field existed (#614).
+    #[serde(default)]
+    pub identity: Option<String>,
 }
 
 impl RestoreSnapshot {
+    /// True when this snapshot was taken by [identity_pubkey], the identity
+    /// now loaded. Only then do its floor and live set describe this
+    /// identity's trades: another identity's snapshot reads a fresh
+    /// identity's first takes as history, and a history pass would wipe
+    /// them mid-trade (#614). A snapshot that does not name its identity
+    /// cannot prove it, so it never belongs either.
+    pub fn belongs_to(&self, identity_pubkey: Option<&str>) -> bool {
+        matches!(
+            (self.identity.as_deref(), identity_pubkey),
+            (Some(own), Some(current)) if own.eq_ignore_ascii_case(current)
+        )
+    }
+
     /// True when the trade on [order_id] with [trade_index] predates the
     /// restore and the daemon no longer counts it as in progress.
     pub fn is_history(&self, order_id: &str, trade_index: u32) -> bool {
@@ -147,6 +165,7 @@ mod tests {
             floor: 97,
             live: ["disputed-order".to_string()].into_iter().collect(),
             peers: HashMap::new(),
+            identity: Some("owner".to_string()),
         }
     }
 
@@ -208,6 +227,26 @@ mod tests {
     #[test]
     fn no_public_answer_leaves_the_row_for_the_next_pass() {
         assert_eq!(history_action(None), HistoryAction::Retry);
+    }
+
+    #[test]
+    fn a_snapshot_serves_only_the_identity_that_took_it() {
+        let snapshot = |identity: Option<&str>| RestoreSnapshot {
+            floor: 97,
+            live: HashSet::new(),
+            peers: HashMap::new(),
+            identity: identity.map(str::to_string),
+        };
+        assert!(snapshot(Some("aa")).belongs_to(Some("aa")));
+        // Another identity's history: its floor and live set say nothing
+        // about this one's trades (#614).
+        assert!(!snapshot(Some("aa")).belongs_to(Some("bb")));
+        assert!(!snapshot(Some("aa")).belongs_to(None));
+        // Stored before the field existed: whose it is cannot be proven.
+        assert!(!snapshot(None).belongs_to(Some("aa")));
+        let legacy: RestoreSnapshot =
+            serde_json::from_str(r#"{"floor":97,"live":[]}"#).expect("old shape still reads");
+        assert_eq!(legacy.identity, None);
     }
 
     #[test]

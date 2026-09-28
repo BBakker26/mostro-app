@@ -117,7 +117,13 @@ it (issue #533).
   chat messages, payout claims, the outbound queue, the cached order book
   (its `is_mine` marks) and the per-order settings (chat and status cursors,
   dispute markers, invoice-step starts, wipe tombstones, retained claim
-  nodes). `Storage::clear_identity_data`, one transaction on native.
+  nodes, the last restore's snapshot). `Storage::clear_identity_data`, one
+  transaction on native.
+- The restore snapshot also names the identity that took it, and a history
+  pass ignores (and drops) any snapshot that is not the loaded identity's,
+  including one stored before snapshots named theirs. Another identity's
+  trade-index floor and live set would read this identity's first takes as
+  history and wipe them mid-trade (#614).
 - Empties the in-memory stores: disputes, ratings, sessions, chats (unread
   count published as zero), trade-key caches; then re-issues the public
   subscriptions so the book refills with no order marked as own.

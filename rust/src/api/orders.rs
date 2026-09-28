@@ -3009,7 +3009,7 @@ pub(crate) async fn subscribe_daemon_messages(
 /// runs the centralized `validate_response` check (catches `CantDo` responses
 /// and malformed `request_id` fields), then routes by action.
 async fn dispatch_mostro_message(
-    unwrapped: mostro_core::nip59::UnwrappedMessage,
+    unwrapped: mostro_core::transport::UnwrappedMessage,
     event_id: &str,
     trade_pubkey_hex: &str,
     trade_index: u32,
@@ -3033,7 +3033,7 @@ async fn dispatch_mostro_message(
     // relays order their stored events by. It is the only thing that separates
     // a live daemon reply from one being replayed out of a startup backlog,
     // and until now it was dropped here.
-    let mostro_core::nip59::UnwrappedMessage {
+    let mostro_core::transport::UnwrappedMessage {
         message: msg,
         sender,
         identity: _,
@@ -3086,7 +3086,7 @@ async fn dispatch_mostro_message(
     // pending-create oneshot. Without propagating it, rejected orders
     // time out and fall back to the optimistic local-ID path, leaving phantom
     // pending orders in the book.
-    match mostro_core::nip59::validate_response(&msg, None) {
+    match mostro_core::response::validate_response(&msg, None) {
         Ok(()) => {}
         Err(mostro_core::prelude::MostroError::MostroCantDo(_)) => {
             // Fall through to dispatch so the Action::CantDo arm can resolve
@@ -12082,7 +12082,7 @@ mod tests {
         trade_index: u32,
         action: mostro_core::message::Action,
         payload: Option<mostro_core::message::Payload>,
-    ) -> mostro_core::nip59::UnwrappedMessage {
+    ) -> mostro_core::transport::UnwrappedMessage {
         use mostro_core::message::{Action, Message};
 
         let message = match action {
@@ -12097,7 +12097,7 @@ mod tests {
         };
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        mostro_core::nip59::UnwrappedMessage {
+        mostro_core::transport::UnwrappedMessage {
             message,
             signature: None,
             sender,
@@ -13418,7 +13418,7 @@ mod tests {
 
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
             signature: None,
             sender,
@@ -13532,7 +13532,7 @@ mod tests {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         dispatch_mostro_message(
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
                 signature: None,
                 sender,
@@ -13565,7 +13565,7 @@ mod tests {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         dispatch_mostro_message(
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
                 signature: None,
                 sender,
@@ -14333,7 +14333,7 @@ mod tests {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         dispatch_mostro_message(
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: Message::new_order(
                     Some(order_uuid),
                     None,
@@ -14588,7 +14588,7 @@ mod tests {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         dispatch_mostro_message(
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: Message::new_order(Some(order_uuid), None, None, action, None),
                 signature: None,
                 sender,
@@ -14826,7 +14826,7 @@ mod tests {
             (Action::WaitingBuyerInvoice, 1_000),
         ] {
             dispatch_mostro_message(
-                mostro_core::nip59::UnwrappedMessage {
+                mostro_core::transport::UnwrappedMessage {
                     message: Message::new_order(Some(order_uuid), None, None, action, None),
                     signature: None,
                     sender,
@@ -14950,7 +14950,7 @@ mod tests {
             (Action::WaitingBuyerInvoice, oldest),
         ] {
             dispatch_mostro_message(
-                mostro_core::nip59::UnwrappedMessage {
+                mostro_core::transport::UnwrappedMessage {
                     message: Message::new_order(Some(order_uuid), None, None, action, None),
                     signature: None,
                     sender,
@@ -15078,7 +15078,7 @@ mod tests {
         );
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
                 None,
@@ -15131,7 +15131,7 @@ mod tests {
         let taken_at = crate::rt::unix_now() - 30;
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let reply = mostro_core::nip59::UnwrappedMessage {
+        let reply = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
                 Some(request_id),
@@ -15251,7 +15251,7 @@ mod tests {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         let daemon = |action: Action, payload: Option<Payload>, ts: i64| {
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: Message::new_order(Some(order_uuid), None, None, action, payload),
                 signature: None,
                 sender,
@@ -15431,7 +15431,7 @@ mod tests {
         );
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(child_uuid),
                 None,
@@ -15479,7 +15479,7 @@ mod tests {
             None,
             None,
         );
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(other_uuid),
                 None,
@@ -15537,7 +15537,7 @@ mod tests {
         );
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
                 None,
@@ -16308,7 +16308,7 @@ mod tests {
         );
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
                 None,
@@ -16440,7 +16440,7 @@ mod tests {
 
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
             signature: None,
             sender,
@@ -16477,11 +16477,11 @@ mod tests {
 
     /// Builds the `UnwrappedMessage` for a daemon `Canceled` of `order_uuid`,
     /// signed-by-sender semantics included, for driving the real dispatcher.
-    fn canceled_message(order_uuid: uuid::Uuid) -> mostro_core::nip59::UnwrappedMessage {
+    fn canceled_message(order_uuid: uuid::Uuid) -> mostro_core::transport::UnwrappedMessage {
         use mostro_core::message::{Action, Message};
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        mostro_core::nip59::UnwrappedMessage {
+        mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
             signature: None,
             sender,
@@ -16498,10 +16498,10 @@ mod tests {
         action: mostro_core::message::Action,
         payload: Option<mostro_core::message::Payload>,
         created_at: u64,
-    ) -> mostro_core::nip59::UnwrappedMessage {
+    ) -> mostro_core::transport::UnwrappedMessage {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        mostro_core::nip59::UnwrappedMessage {
+        mostro_core::transport::UnwrappedMessage {
             message: mostro_core::message::Message::new_order(
                 Some(order_uuid),
                 None,
@@ -17741,10 +17741,10 @@ mod tests {
         action: mostro_core::message::Action,
         payload: Option<mostro_core::message::Payload>,
         created_at: u64,
-    ) -> mostro_core::nip59::UnwrappedMessage {
+    ) -> mostro_core::transport::UnwrappedMessage {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        mostro_core::nip59::UnwrappedMessage {
+        mostro_core::transport::UnwrappedMessage {
             message: mostro_core::message::Message::new_order(
                 Some(order_uuid),
                 Some(request_id),
@@ -18870,12 +18870,12 @@ mod tests {
         sender_hex: &str,
         share: i64,
         slashed_at: i64,
-    ) -> mostro_core::nip59::UnwrappedMessage {
+    ) -> mostro_core::transport::UnwrappedMessage {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(sender_hex).expect("valid pubkey");
         let mut order = pending_small_order(order_uuid);
         order.amount = share;
         order.status = None;
-        mostro_core::nip59::UnwrappedMessage {
+        mostro_core::transport::UnwrappedMessage {
             message: mostro_core::message::Message::new_order(
                 Some(order_uuid),
                 None,
@@ -18896,9 +18896,9 @@ mod tests {
         order_uuid: uuid::Uuid,
         sender_hex: &str,
         action: Action,
-    ) -> mostro_core::nip59::UnwrappedMessage {
+    ) -> mostro_core::transport::UnwrappedMessage {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(sender_hex).expect("valid pubkey");
-        mostro_core::nip59::UnwrappedMessage {
+        mostro_core::transport::UnwrappedMessage {
             message: mostro_core::message::Message::new_order(Some(order_uuid), None, None, action, None),
             signature: None,
             sender,
@@ -19545,7 +19545,7 @@ mod tests {
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         dispatch_mostro_message(
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: mostro_core::message::Message::new_order(
                     Some(order_uuid),
                     Some(777),
@@ -19833,7 +19833,7 @@ mod tests {
         );
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
                 None,
@@ -19901,7 +19901,7 @@ mod tests {
             );
             let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
                 .expect("valid mostro pubkey");
-            mostro_core::nip59::UnwrappedMessage {
+            mostro_core::transport::UnwrappedMessage {
                 message: Message::new_order(
                     Some(order_uuid),
                     None,
@@ -20459,7 +20459,7 @@ mod tests {
 
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), Some(91), None, Action::AddInvoice, None),
             signature: None,
             sender,
@@ -20497,7 +20497,7 @@ mod tests {
 
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
-        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+        let unwrapped = mostro_core::transport::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), Some(92), None, Action::AddInvoice, None),
             signature: None,
             sender,

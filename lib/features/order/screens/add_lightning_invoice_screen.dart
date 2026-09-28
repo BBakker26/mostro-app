@@ -117,6 +117,11 @@ class _AddLightningInvoiceScreenState
   /// submission, so the user can see why the invoice was refused and fix it.
   String? _lastError;
 
+  /// The last submission reached the relays and the node has not answered
+  /// yet (#615). Not an error: a late acceptance moves the order on and
+  /// [_listenForProgress] takes the screen to the trade.
+  bool _awaitingNode = false;
+
   Timer? _checkTimer;
 
   /// The input and trade amount [_verdict] was computed for; anything else
@@ -269,7 +274,10 @@ class _AddLightningInvoiceScreenState
     _supersede();
     // The daemon's verdict was about the previous input; the new one gets
     // its own local verdict.
-    setState(() => _lastError = null);
+    setState(() {
+      _lastError = null;
+      _awaitingNode = false;
+    });
     final input = _input;
     if (input.isEmpty) return;
     _checkTimer = Timer(_debounce, () => _evaluate(input, _resolvedSats(ref)));
@@ -475,6 +483,7 @@ class _AddLightningInvoiceScreenState
     setState(() {
       _submitting = true;
       _lastError = null;
+      _awaitingNode = false;
     });
 
     try {
@@ -495,6 +504,13 @@ class _AddLightningInvoiceScreenState
         r'^.*?AnyhowException\((.+)\)$',
       ).firstMatch(raw);
       final msg = anyhowMatch != null ? anyhowMatch.group(1)! : raw;
+      // Sent, not answered yet: the node may still accept it — an address
+      // costs it an LNURL round trip — and the late reply moves the screen
+      // on. Say so, without an error or a snack bar blaming the connection.
+      if (msg.contains('InvoiceAwaitingDaemon')) {
+        setState(() => _awaitingNode = true);
+        return;
+      }
       // The daemon no longer waits for an invoice while this screen does:
       // a message was missed (typically the acknowledgement of an earlier
       // submission that outran its reply window). Ask for it again; the
@@ -598,7 +614,13 @@ class _AddLightningInvoiceScreenState
   /// there is none.
   Widget? _errorReadout() {
     final error = _lastError;
-    if (error == null) return null;
+    if (error == null) {
+      if (!_awaitingNode) return null;
+      final text = AppLocalizations.of(context).invoiceAwaitingNode;
+      return InvoiceAwaitingRow(
+        text: text,
+      ).withAutomationId(AutomationIds.invoiceAwaiting, label: text);
+    }
     return InvoiceValidationRow(
       text: error,
       isValid: false,

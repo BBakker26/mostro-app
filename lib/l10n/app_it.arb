@@ -553,6 +553,8 @@
   "disputeWord": "Disputa",
   "tradeWord": "Operazione",
   "notifSectionRecent": "Recenti",
+  "notificationDeletedSnack": "{count, plural, =1{Notifica eliminata} other{{count} notifiche eliminate}}",
+  "notificationDeletedUndo": "Annulla",
   "payingStatus": "Pagamento in corso...",
   "payWithWalletButton": "Paga con il wallet",
   "generatingInvoiceNwc": "Generazione fattura tramite NWC...",

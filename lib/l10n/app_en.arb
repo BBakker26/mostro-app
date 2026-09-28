@@ -2566,6 +2566,19 @@
   "@notifSectionRecent": {
     "description": "Notifications screen: header of the notices below the pinned needs-your-action section (issue #610)"
   },
+  "notificationDeletedSnack": "{count, plural, =1{Notification deleted} other{{count} notifications deleted}}",
+  "@notificationDeletedSnack": {
+    "description": "Snack bar after swiping a notification card away; count is how many notices the card held (issue #610)",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "notificationDeletedUndo": "Undo",
+  "@notificationDeletedUndo": {
+    "description": "Snack bar action that brings back the notification card just swiped away"
+  },
   "payingStatus": "Paying...",
   "@payingStatus": {
     "description": "NWC pay button label while paying"

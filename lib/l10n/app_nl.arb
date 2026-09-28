@@ -553,6 +553,8 @@
   "disputeWord": "Dispuut",
   "tradeWord": "Trade",
   "notifSectionRecent": "Recent",
+  "notificationDeletedSnack": "{count, plural, =1{Melding verwijderd} other{{count} meldingen verwijderd}}",
+  "notificationDeletedUndo": "Ongedaan maken",
   "payingStatus": "Betalen…",
   "payWithWalletButton": "Betalen met wallet",
   "generatingInvoiceNwc": "Invoice aanmaken via NWC…",

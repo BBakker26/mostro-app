@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -32,6 +33,10 @@ class NotificationsScreen extends ConsumerStatefulWidget {
 }
 
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
+  /// Notices swiped away whose snack bar is still open: hidden at once, so
+  /// the dismissed card leaves the tree, and deleted only if not undone.
+  final Set<String> _hidden = {};
+
   @override
   Widget build(BuildContext context) {
     final backupActive = ref.watch(backupReminderProvider);
@@ -84,7 +89,11 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     required bool backupActive,
     required List<NotificationModel> notifications,
   }) {
-    final hasContent = backupActive || notifications.isNotEmpty;
+    final visible = [
+      for (final n in notifications)
+        if (!_hidden.contains(n.id)) n,
+    ];
+    final hasContent = backupActive || visible.isNotEmpty;
 
     if (!hasContent) {
       return const _EmptyState();
@@ -96,28 +105,33 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     final rows = ref.watch(tradeRowsProvider).valueOrNull ?? const <TradeRow>[];
     final rowsById = {for (final r in rows) r.orderId: r};
     final sections = sectionNotices(
-      notifications,
+      visible,
       needsAction: (id) => rowsById[id]?.state.needsAction ?? false,
     );
     final pinned = sections.needsAction.isNotEmpty;
-    final notifier = ref.read(notificationsProvider.notifier);
 
     Widget entryCard(NoticeEntry entry) => switch (entry) {
-      NoticeGroupEntry(:final events) => NotificationGroupCard(
-        // Keyed by trade so an expanded card stays expanded when it moves.
-        key: ValueKey(events.first.orderId ?? events.first.disputeId),
-        notifications: events,
-        tradeRow: rowsById[events.first.orderId],
-        isDisputeGroup: events.first.orderId == null,
-        onDelete: (n) => notifier.delete(n.id),
-        onTapNotification: (n) => _handleTap(context, n),
-        onGoToTrade: () => _goToTrade(context, events),
+      // Keyed by trade so an expanded card stays expanded when it moves.
+      NoticeGroupEntry(:final events) => _Swipeable(
+        key: ValueKey(
+          'group-${events.first.orderId ?? events.first.disputeId}',
+        ),
+        onDismissed: () => _dismiss(events),
+        child: NotificationGroupCard(
+          notifications: events,
+          tradeRow: rowsById[events.first.orderId],
+          isDisputeGroup: events.first.orderId == null,
+          onTapNotification: (n) => _handleTap(context, n),
+          onGoToTrade: () => _goToTrade(context, events),
+        ),
       ),
-      NoticeSystemEntry(:final notification) => SystemNotificationBanner(
-        key: ValueKey(notification.id),
-        notification: notification,
-        onDelete: () => notifier.delete(notification.id),
-        onTap: () => _handleTap(context, notification),
+      NoticeSystemEntry(:final notification) => _Swipeable(
+        key: ValueKey('notice-${notification.id}'),
+        onDismissed: () => _dismiss([notification]),
+        child: SystemNotificationBanner(
+          notification: notification,
+          onTap: () => _handleTap(context, notification),
+        ),
       ),
     };
 
@@ -149,6 +163,41 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         ],
       ],
     );
+  }
+
+  /// A card swiped away (issue #610): hidden now, with an Undo; deleted once
+  /// the snack bar closes any other way — timeout, another swipe, leaving
+  /// the screen. The notifier outlives the screen, so the delete still runs.
+  void _dismiss(List<NotificationModel> events) {
+    final ids = {for (final n in events) n.id};
+    setState(() => _hidden.addAll(ids));
+    final notifier = ref.read(notificationsProvider.notifier);
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    // A second swipe settles the first card's snack bar: it is deleted.
+    messenger.hideCurrentSnackBar();
+    messenger
+        .showSnackBar(
+          SnackBar(
+            content: Text(l10n.notificationDeletedSnack(ids.length)),
+            // With an action a snack bar would stay until dismissed, and
+            // the notices would stay hidden without being deleted.
+            persist: false,
+            action: SnackBarAction(
+              label: l10n.notificationDeletedUndo,
+              onPressed: () {},
+            ),
+          ),
+        )
+        .closed
+        .then((reason) async {
+          if (reason != SnackBarClosedReason.action) {
+            await Future.wait([for (final id in ids) notifier.delete(id)]);
+          }
+          // Ids can come back (a chat card is re-created by the next
+          // message), so none stays hidden once settled.
+          if (mounted) setState(() => _hidden.removeAll(ids));
+        });
   }
 
   /// Footer action of a group card — open the trade (or dispute) detail.
@@ -229,6 +278,51 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 }
 
 enum _MenuAction { markAllRead, clearAll }
+
+// ── Swipe to delete ───────────────────────────────────────────────────────────
+
+/// A card the user can swipe away, either way, to delete it. Screen readers
+/// get the same through a custom action, since a swipe is not one they make.
+class _Swipeable extends StatelessWidget {
+  const _Swipeable({
+    required super.key,
+    required this.onDismissed,
+    required this.child,
+  });
+
+  final VoidCallback onDismissed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>();
+    final red = colors?.destructiveRed ?? const Color(0xFFD84D4D);
+    Widget background(Alignment alignment) => Container(
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: red.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Icon(Icons.delete_outline_rounded, color: red),
+    );
+    return Semantics(
+      customSemanticsActions: {
+        CustomSemanticsAction(
+              label: AppLocalizations.of(context).deleteNotificationLabel,
+            ):
+            onDismissed,
+      },
+      child: Dismissible(
+        key: key!,
+        onDismissed: (_) => onDismissed(),
+        background: background(Alignment.centerLeft),
+        secondaryBackground: background(Alignment.centerRight),
+        child: child,
+      ),
+    );
+  }
+}
 
 // ── Section header ────────────────────────────────────────────────────────────
 

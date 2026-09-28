@@ -16,12 +16,12 @@ import 'package:mostro/l10n/app_localizations.dart';
 /// payment method, from [tradeRow] — and, when the next step is the user's,
 /// the step itself. The latest event shows in full: icon, whole title and
 /// message. Earlier events expand below it as a one-line timeline. A footer
-/// action navigates to the trade (or dispute) detail screen.
+/// action navigates to the trade (or dispute) detail screen. The card has no
+/// per-event menu: the screen deletes it with a swipe.
 class NotificationGroupCard extends StatefulWidget {
   const NotificationGroupCard({
     super.key,
     required this.notifications,
-    required this.onDelete,
     required this.onTapNotification,
     required this.onGoToTrade,
     this.tradeRow,
@@ -30,7 +30,6 @@ class NotificationGroupCard extends StatefulWidget {
 
   /// Events for this trade, sorted newest first. Must not be empty.
   final List<NotificationModel> notifications;
-  final ValueChanged<NotificationModel> onDelete;
   final ValueChanged<NotificationModel> onTapNotification;
   final VoidCallback onGoToTrade;
 
@@ -111,7 +110,6 @@ class _NotificationGroupCardState extends State<NotificationGroupCard> {
             notification: _latest,
             isBuyer: _isBuyer,
             onTap: () => widget.onTapNotification(_latest),
-            onDelete: () => widget.onDelete(_latest),
           ),
           if (_expanded && _earlier.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
@@ -121,7 +119,6 @@ class _NotificationGroupCardState extends State<NotificationGroupCard> {
                 isBuyer: _isBuyer,
                 isLast: identical(n, _earlier.last),
                 onTap: () => widget.onTapNotification(n),
-                onDelete: () => widget.onDelete(n),
               ),
           ],
           const SizedBox(height: AppSpacing.sm),
@@ -318,13 +315,11 @@ class _LatestEvent extends StatelessWidget {
     required this.notification,
     required this.isBuyer,
     required this.onTap,
-    required this.onDelete,
   });
 
   final NotificationModel notification;
   final bool? isBuyer;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -381,7 +376,6 @@ class _LatestEvent extends StatelessWidget {
                         ),
                       ),
                     ),
-                    _EventOverflowMenu(onDelete: onDelete),
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -409,14 +403,12 @@ class _TimelineEvent extends StatelessWidget {
     required this.isBuyer,
     required this.isLast,
     required this.onTap,
-    required this.onDelete,
   });
 
   final NotificationModel notification;
   final bool? isBuyer;
   final bool isLast;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -478,7 +470,6 @@ class _TimelineEvent extends StatelessWidget {
                 context,
               ).textTheme.bodySmall!.copyWith(color: textSec, fontSize: 11),
             ),
-            _EventOverflowMenu(onDelete: onDelete),
           ],
         ),
       ),
@@ -576,39 +567,6 @@ class _Footer extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-// ── Overflow menu (per event) ─────────────────────────────────────────────────
-
-/// Only Delete: opening a notice is what reads it (issue #610).
-class _EventOverflowMenu extends StatelessWidget {
-  const _EventOverflowMenu({required this.onDelete});
-
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    // A null value would read as a cancel and never reach onSelected.
-    // Compact, so it doesn't stretch the title row past the time.
-    return PopupMenuButton<bool>(
-      icon: const Icon(Icons.more_vert, size: 16),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      style: IconButton.styleFrom(
-        minimumSize: const Size(24, 20),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: EdgeInsets.zero,
-      ),
-      onSelected: (_) => onDelete(),
-      itemBuilder:
-          (context) => [
-            PopupMenuItem<bool>(
-              value: true,
-              child: Text(AppLocalizations.of(context).deleteNotificationLabel),
-            ),
-          ],
     );
   }
 }

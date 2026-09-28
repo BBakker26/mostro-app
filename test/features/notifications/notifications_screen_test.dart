@@ -51,7 +51,7 @@ TradeRow _row(
   peerHandle: null,
 );
 
-Future<void> _pump(
+Future<NotificationsNotifier> _pump(
   WidgetTester tester, {
   required List<NotificationModel> notices,
   List<TradeRow> rows = const [],
@@ -79,6 +79,7 @@ Future<void> _pump(
     ),
   );
   await tester.pumpAndSettle();
+  return notifier;
 }
 
 void main() {
@@ -201,5 +202,68 @@ void main() {
 
     expect(find.text(_en.tradesGroupNeedsAction.toUpperCase()), findsNothing);
     expect(find.text(_en.notifSectionRecent.toUpperCase()), findsNothing);
+  });
+
+  group('swipe to delete', () {
+    testWidgets('no per-event menu: only the app bar keeps one', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        notices: [_status('a', 'waitingPayment', 1), _status('a', 'active', 2)],
+      );
+
+      expect(find.byType(PopupMenuButton<bool>), findsNothing);
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
+    });
+
+    testWidgets('a swiped card hides at once and is deleted when the '
+        'snack bar closes', (tester) async {
+      // Arrange
+      final notifier = await _pump(
+        tester,
+        notices: [_status('a', 'waitingPayment', 1), _status('a', 'active', 2)],
+      );
+
+      // Act
+      await tester.drag(
+        find.byType(NotificationGroupCard),
+        const Offset(-600, 0),
+      );
+      await tester.pumpAndSettle();
+
+      // Assert: gone from the list, still stored while Undo is offered.
+      expect(find.byType(NotificationGroupCard), findsNothing);
+      expect(find.text(_en.notificationDeletedSnack(2)), findsOneWidget);
+      expect(notifier.state, hasLength(2));
+
+      // The snack bar times out: now the notices are deleted.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(notifier.state, isEmpty);
+    });
+
+    testWidgets('Undo brings the card back and deletes nothing', (
+      tester,
+    ) async {
+      // Arrange
+      final notifier = await _pump(
+        tester,
+        notices: [_status('a', 'active', 1)],
+      );
+      await tester.drag(
+        find.byType(NotificationGroupCard),
+        const Offset(600, 0),
+      );
+      await tester.pumpAndSettle();
+
+      // Act
+      await tester.tap(find.text(_en.notificationDeletedUndo));
+      await tester.pumpAndSettle();
+
+      // Assert
+      expect(find.byType(NotificationGroupCard), findsOneWidget);
+      expect(notifier.state, hasLength(1));
+    });
   });
 }

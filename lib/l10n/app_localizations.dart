@@ -3418,6 +3418,18 @@ abstract class AppLocalizations {
   /// **'Recent'**
   String get notifSectionRecent;
 
+  /// Snack bar after swiping a notification card away; count is how many notices the card held (issue #610)
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Notification deleted} other{{count} notifications deleted}}'**
+  String notificationDeletedSnack(int count);
+
+  /// Snack bar action that brings back the notification card just swiped away
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get notificationDeletedUndo;
+
   /// NWC pay button label while paying
   ///
   /// In en, this message translates to:

@@ -1959,6 +1959,20 @@ class AppLocalizationsFr extends AppLocalizations {
   String get notifSectionRecent => 'Récentes';
 
   @override
+  String notificationDeletedSnack(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count notifications supprimées',
+      one: 'Notification supprimée',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get notificationDeletedUndo => 'Annuler';
+
+  @override
   String get payingStatus => 'Paiement...';
 
   @override

@@ -62,6 +62,7 @@
   "nodeCapabilitiesUnknown": "Nog aan het nagaan wat de gekozen Mostro-node ondersteunt. Probeer het zo weer",
   "mostroMaintenanceMode": "De Mostro-node waarmee je verbonden bent is in onderhoud. Probeer het later opnieuw, of verbind met een andere Mostro-node in de instellingen",
   "storageUnavailable": "De app kan geen orders plaatsen of accepteren zolang de lokale database niet beschikbaar is. Herstart de app en probeer het opnieuw",
+  "rangeOrderWithSats": "Een order met een bereik kan geen vast aantal sats hebben: hij wordt bij het aannemen tegen de marktprijs geprijsd.",
   "orderIdCopied": "Order-ID gekopieerd",
   "comingSoonMessage": "Komt binnenkort",
   "tradeStatusActive": "Actief",

@@ -231,6 +231,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'L\'app non può creare né prendere ordini finché il suo database locale non è disponibile. Riavvia l\'app e riprova';
 
   @override
+  String get rangeOrderWithSats =>
+      'Un ordine a intervallo non può avere un importo fisso in sats: viene prezzato al mercato quando viene preso.';
+
+  @override
   String get orderIdCopied => 'ID ordine copiato';
 
   @override

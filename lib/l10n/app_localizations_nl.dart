@@ -231,6 +231,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'De app kan geen orders plaatsen of accepteren zolang de lokale database niet beschikbaar is. Herstart de app en probeer het opnieuw';
 
   @override
+  String get rangeOrderWithSats =>
+      'Een order met een bereik kan geen vast aantal sats hebben: hij wordt bij het aannemen tegen de marktprijs geprijsd.';
+
+  @override
   String get orderIdCopied => 'Order-ID gekopieerd';
 
   @override

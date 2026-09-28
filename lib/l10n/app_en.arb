@@ -280,6 +280,8 @@
   "@storageUnavailable": {
     "description": "Error shown when a trade key cannot be derived because the local database is unavailable, so orders cannot be created or taken"
   },
+  "rangeOrderWithSats": "A range order can't have a fixed sats amount: it is priced at market when taken.",
+  "@rangeOrderWithSats": {"description": "Create-order error (RangeOrderWithSats marker): a range order was sent with a fixed sats amount, which the daemon refuses"},
   "orderIdCopied": "Order ID copied",
   "@orderIdCopied": {
     "description": "Snackbar shown after copying an order ID to clipboard"

@@ -39,6 +39,13 @@ void main() {
     );
   });
 
+  test('maps the range-with-sats marker of create_order', () {
+    expect(
+      localizedDaemonError(l10n, 'RangeOrderWithSats', fallback: 'x'),
+      l10n.rangeOrderWithSats,
+    );
+  });
+
   test('maps the maker bond cancel marker', () {
     expect(
       localizedDaemonError(l10n, 'BondAlreadyLocked', fallback: 'x'),

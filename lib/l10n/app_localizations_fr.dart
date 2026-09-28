@@ -232,6 +232,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'L\'application ne peut pas créer ni prendre d\'ordres tant que sa base de données locale est indisponible. Redémarrez l\'application et réessayez';
 
   @override
+  String get rangeOrderWithSats =>
+      'Un ordre à fourchette ne peut pas avoir de montant fixe en sats : il est coté au prix du marché lors de sa prise.';
+
+  @override
   String get orderIdCopied => 'ID d\'ordre copié';
 
   @override

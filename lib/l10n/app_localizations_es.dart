@@ -232,6 +232,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'La app no puede crear ni tomar órdenes mientras su base de datos local no esté disponible. Reinicia la app e inténtalo de nuevo';
 
   @override
+  String get rangeOrderWithSats =>
+      'Una orden de rango no puede tener un monto fijo en sats: se cotiza a precio de mercado al tomarla.';
+
+  @override
   String get orderIdCopied => 'ID de orden copiado';
 
   @override

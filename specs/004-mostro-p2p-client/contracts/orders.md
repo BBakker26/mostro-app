@@ -95,6 +95,9 @@ NewOrderParams {
 **Validation**:
 - Either `fiat_amount` OR both `fiat_amount_min` and `fiat_amount_max` MUST be provided (not both)
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`
+- If range: `amount_sats` MUST be absent (not even `0`) — a range is priced at
+  market when taken, and mostro-core refuses one with sats. Fails with
+  `RangeOrderWithSats`.
 - `fiat_code` MUST be valid ISO 4217
 - `payment_method` MUST not be empty
 - The amount is checked against the node's advertised `min_order_amount` /
@@ -145,7 +148,7 @@ Not covered: a persist that *starts* after the teardown, and writes that
 read an entry and write it back outside the lock — no operation carries an
 identity generation from where it began.
 
-**Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`.
+**Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`, `RangeOrderWithSats` (a range with `amount_sats`).
 
 **Anti-abuse bond (maker).** A node that requires a maker bond answers the
 create with `pay-bond-invoice` instead of `new-order`. The order then has its

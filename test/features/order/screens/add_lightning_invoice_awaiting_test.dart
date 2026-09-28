@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/screens/add_lightning_invoice_screen.dart';
+import 'package:mostro/features/order/widgets/invoice_input_field.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -116,6 +117,32 @@ void main() {
     }
   });
 
+  testWidgets('waiting never paints the field as an error', (tester) async {
+    final semantics = tester.ensureSemantics();
+    bool fieldInError() =>
+        tester
+            .widget<InvoiceInputField>(find.byType(InvoiceInputField))
+            .hasError;
+    try {
+      // Act
+      await _pumpAndSubmit(
+        tester,
+        Exception('AnyhowException(InvoiceAwaitingDaemon)'),
+      );
+
+      // Assert: the note is neutral, and so is the field — short wait and
+      // long wait alike (PR #617 review).
+      expect(_semantics('invoice.awaiting'), findsOneWidget);
+      expect(fieldInError(), isFalse);
+      await tester.pump(const Duration(seconds: 61));
+      expect(find.text(_en.invoiceAwaitingNodeLong), findsOneWidget);
+      expect(fieldInError(), isFalse);
+    } finally {
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets('editing the field clears the waiting note', (tester) async {
     final semantics = tester.ensureSemantics();
     try {
@@ -182,6 +209,13 @@ void main() {
 
       expect(_semantics('invoice.error'), findsOneWidget);
       expect(_semantics('invoice.awaiting'), findsNothing);
+      expect(
+        tester
+            .widget<InvoiceInputField>(find.byType(InvoiceInputField))
+            .hasError,
+        isTrue,
+        reason: 'a rejection still marks the field',
+      );
     } finally {
       semantics.dispose();
       await tester.pumpWidget(const SizedBox.shrink());

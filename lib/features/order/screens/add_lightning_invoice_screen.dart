@@ -914,7 +914,9 @@ class _AddLightningInvoiceScreenState
           validSats: check is InvoiceCheckValid ? check.sats : null,
           isValid: check is InvoiceCheckValid || check is InvoiceCheckAddress,
           isAddress: check is InvoiceCheckAddress,
-          hasError: error != null || check is InvoiceCheckError,
+          // A real verdict, not whatever fills the readout slot: the
+          // waiting note shares it and is not an error (PR #617 review).
+          hasError: _lastError != null || check is InvoiceCheckError,
         ),
         if (error != null) ...[
           const SizedBox(height: 8),

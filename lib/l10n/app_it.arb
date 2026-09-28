@@ -62,6 +62,7 @@
   "nodeCapabilitiesUnknown": "Stiamo ancora verificando cosa supporta il nodo Mostro selezionato. Riprova tra un istante",
   "mostroMaintenanceMode": "Il nodo Mostro a cui sei connesso è in manutenzione. Riprova più tardi o connettiti a un altro nodo Mostro nelle Impostazioni",
   "storageUnavailable": "L'app non può creare né prendere ordini finché il suo database locale non è disponibile. Riavvia l'app e riprova",
+  "rangeOrderWithSats": "Un ordine a intervallo non può avere un importo fisso in sats: viene prezzato al mercato quando viene preso.",
   "orderIdCopied": "ID ordine copiato",
   "comingSoonMessage": "Prossimamente",
   "tradeStatusActive": "Attivo",

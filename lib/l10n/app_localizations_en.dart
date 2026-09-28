@@ -229,6 +229,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'The app cannot create or take orders while its local database is unavailable. Restart the app and try again';
 
   @override
+  String get rangeOrderWithSats =>
+      'A range order can\'t have a fixed sats amount: it is priced at market when taken.';
+
+  @override
   String get orderIdCopied => 'Order ID copied';
 
   @override

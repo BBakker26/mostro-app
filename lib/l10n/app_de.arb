@@ -62,6 +62,7 @@
   "nodeCapabilitiesUnknown": "Es wird noch geprüft, was der ausgewählte Mostro-Node unterstützt. Versuche es gleich noch einmal",
   "mostroMaintenanceMode": "Der Mostro-Node, mit dem du verbunden bist, wird gerade gewartet. Versuche es später noch einmal oder verbinde dich in den Einstellungen mit einem anderen Mostro-Node",
   "storageUnavailable": "Die App kann keine Orders erstellen oder annehmen, solange ihre lokale Datenbank nicht verfügbar ist. Starte die App neu und versuche es erneut",
+  "rangeOrderWithSats": "Eine Order mit Betragsspanne kann keinen festen Sats-Betrag haben: Sie wird bei der Annahme zum Marktpreis bewertet.",
   "orderIdCopied": "Bestell-ID kopiert",
   "comingSoonMessage": "Demnächst verfügbar",
   "tradeStatusActive": "Aktiv",

@@ -1142,11 +1142,10 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
             ));
         }
         // A range is priced at market when taken; mostro-core refuses one
-        // with sats (`check_range_order_limits`), so don't send it.
-        if params.amount_sats.is_some_and(|sats| sats > 0) {
-            return Err(anyhow::anyhow!(
-                "amount_sats must not be set on a range order"
-            ));
+        // with sats (`check_range_order_limits`). Not even `Some(0)`: a range
+        // carries no sats at all, as `parse_order_event` reads it back.
+        if params.amount_sats.is_some() {
+            return Err(anyhow::anyhow!("RangeOrderWithSats"));
         }
     }
     if params.fiat_code.trim().is_empty() {
@@ -21191,10 +21190,10 @@ mod bond_window_tests {
     }
 
     /// The form never sends sats with a range; the core refuses it too, as
-    /// the daemon would.
+    /// the daemon would — zero included, since a range carries none.
     #[tokio::test]
     async fn a_range_order_with_fixed_sats_is_refused() {
-        let params = crate::api::types::NewOrderParams {
+        let params = |sats: u64| crate::api::types::NewOrderParams {
             kind: crate::api::types::OrderKind::Sell,
             fiat_amount: None,
             fiat_amount_min: Some(30.0),
@@ -21202,11 +21201,12 @@ mod bond_window_tests {
             fiat_code: "PEN".to_string(),
             payment_method: "Yape".to_string(),
             premium: 1.0,
-            amount_sats: Some(17_285),
+            amount_sats: Some(sats),
         };
 
-        let err = create_order_once(params).await.unwrap_err();
-
-        assert_eq!(err.to_string(), "amount_sats must not be set on a range order");
+        for sats in [17_285, 0] {
+            let err = create_order_once(params(sats)).await.unwrap_err();
+            assert_eq!(err.to_string(), "RangeOrderWithSats", "sats={sats}");
+        }
     }
 }

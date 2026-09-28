@@ -92,6 +92,10 @@ String localizedDaemonError(
   if (raw.contains('NoRelayAccepted')) {
     return l10n.noRelayAcceptedMessage;
   }
+  // A range order carries no fixed sats: it is priced at market when taken.
+  if (raw.contains('RangeOrderWithSats')) {
+    return l10n.rangeOrderWithSats;
+  }
   // No durable storage: no trade key can be derived (issue #249).
   if (raw.contains('StorageUnavailable')) {
     return l10n.storageUnavailable;

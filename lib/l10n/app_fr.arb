@@ -62,6 +62,7 @@
   "nodeCapabilitiesUnknown": "Vérification en cours des capacités du nœud Mostro sélectionné. Réessayez dans un instant",
   "mostroMaintenanceMode": "Le nœud Mostro auquel vous êtes connecté est en maintenance. Réessayez plus tard ou connectez-vous à un autre nœud Mostro dans les Paramètres",
   "storageUnavailable": "L'application ne peut pas créer ni prendre d'ordres tant que sa base de données locale est indisponible. Redémarrez l'application et réessayez",
+  "rangeOrderWithSats": "Un ordre à fourchette ne peut pas avoir de montant fixe en sats : il est coté au prix du marché lors de sa prise.",
   "orderIdCopied": "ID d'ordre copié",
   "comingSoonMessage": "Bientôt disponible",
   "tradeStatusActive": "Actif",

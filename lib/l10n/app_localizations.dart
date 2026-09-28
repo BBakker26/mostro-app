@@ -472,6 +472,12 @@ abstract class AppLocalizations {
   /// **'The app cannot create or take orders while its local database is unavailable. Restart the app and try again'**
   String get storageUnavailable;
 
+  /// Create-order error (RangeOrderWithSats marker): a range order was sent with a fixed sats amount, which the daemon refuses
+  ///
+  /// In en, this message translates to:
+  /// **'A range order can\'t have a fixed sats amount: it is priced at market when taken.'**
+  String get rangeOrderWithSats;
+
   /// Snackbar shown after copying an order ID to clipboard
   ///
   /// In en, this message translates to:

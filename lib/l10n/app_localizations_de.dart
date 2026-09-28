@@ -231,6 +231,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Die App kann keine Orders erstellen oder annehmen, solange ihre lokale Datenbank nicht verfügbar ist. Starte die App neu und versuche es erneut';
 
   @override
+  String get rangeOrderWithSats =>
+      'Eine Order mit Betragsspanne kann keinen festen Sats-Betrag haben: Sie wird bei der Annahme zum Marktpreis bewertet.';
+
+  @override
   String get orderIdCopied => 'Bestell-ID kopiert';
 
   @override

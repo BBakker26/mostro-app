@@ -1552,6 +1552,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Enviada. El nodo aún no responde; te llevaremos a la operación en cuanto lo haga.';
 
   @override
+  String get invoiceAwaitingNodeLong =>
+      'El nodo sigue sin responder. Si la operación no avanza, envíala de nuevo.';
+
+  @override
   String get invoiceSubmitInFlight =>
       'Ya se está enviando una factura para esta orden. Espera la respuesta.';
 

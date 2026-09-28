@@ -83,6 +83,31 @@ void main() {
     }
   });
 
+  testWidgets('a long silence invites sending again', (tester) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      // Arrange: a late rejection is only logged, so the screen cannot wait
+      // on the node forever.
+      await _pumpAndSubmit(
+        tester,
+        Exception('AnyhowException(InvoiceAwaitingDaemon)'),
+      );
+      expect(find.text(_en.invoiceAwaitingNode), findsOneWidget);
+
+      // Act
+      await tester.pump(const Duration(seconds: 61));
+
+      // Assert: still the neutral readout, now saying to send it again.
+      expect(_semantics('invoice.awaiting'), findsOneWidget);
+      expect(find.text(_en.invoiceAwaitingNodeLong), findsOneWidget);
+      expect(find.text(_en.invoiceAwaitingNode), findsNothing);
+      expect(_semantics('invoice.error'), findsNothing);
+    } finally {
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets('editing the field clears the waiting note', (tester) async {
     final semantics = tester.ensureSemantics();
     try {

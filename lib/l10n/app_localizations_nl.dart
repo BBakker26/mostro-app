@@ -1548,6 +1548,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'Verzonden. De node heeft nog niet geantwoord; je gaat naar de trade zodra hij dat doet.';
 
   @override
+  String get invoiceAwaitingNodeLong =>
+      'Nog steeds geen antwoord van de node. Als de trade niet verdergaat, stuur hem opnieuw.';
+
+  @override
   String get invoiceSubmitInFlight =>
       'Er wordt al een invoice voor deze order verstuurd. Wacht op het antwoord.';
 

@@ -2812,6 +2812,12 @@ abstract class AppLocalizations {
   /// **'Sent. The node hasn\'t answered yet — you\'ll be taken to the trade as soon as it does.'**
   String get invoiceAwaitingNode;
 
+  /// Add-invoice screen: invoiceAwaitingNode once a further minute passes with no answer. A late rejection is only logged, so the buyer is invited to send the invoice again (#615)
+  ///
+  /// In en, this message translates to:
+  /// **'Still no answer from the node. If the trade doesn\'t move on, send it again.'**
+  String get invoiceAwaitingNodeLong;
+
   /// Add-invoice screen: a second submission was refused because an earlier one for the same trade is still waiting for the daemon's reply (Rust marker InvoiceSubmitInFlight)
   ///
   /// In en, this message translates to:

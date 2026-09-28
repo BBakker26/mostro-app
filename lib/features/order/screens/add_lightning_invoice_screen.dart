@@ -122,6 +122,15 @@ class _AddLightningInvoiceScreenState
   /// [_listenForProgress] takes the screen to the trade.
   bool _awaitingNode = false;
 
+  /// [_awaitingNode] for over [_awaitingPatience]: a late rejection is only
+  /// logged, never shown, so past this the note invites sending again.
+  /// Safe either way: a late rejection consumed the pending record, and a
+  /// late acceptance makes the daemon refuse the resend with a status the
+  /// screen already recovers from.
+  bool _awaitingLong = false;
+  Timer? _awaitingTimer;
+  static const _awaitingPatience = Duration(seconds: 60);
+
   Timer? _checkTimer;
 
   /// The input and trade amount [_verdict] was computed for; anything else
@@ -194,6 +203,7 @@ class _AddLightningInvoiceScreenState
   void dispose() {
     _checkTimer?.cancel();
     _expiryTimer?.cancel();
+    _awaitingTimer?.cancel();
     _lifecycle.dispose();
     _invoiceController.dispose();
     _focus.dispose();
@@ -274,10 +284,8 @@ class _AddLightningInvoiceScreenState
     _supersede();
     // The daemon's verdict was about the previous input; the new one gets
     // its own local verdict.
-    setState(() {
-      _lastError = null;
-      _awaitingNode = false;
-    });
+    _stopAwaiting();
+    setState(() => _lastError = null);
     final input = _input;
     if (input.isEmpty) return;
     _checkTimer = Timer(_debounce, () => _evaluate(input, _resolvedSats(ref)));
@@ -480,10 +488,10 @@ class _AddLightningInvoiceScreenState
       return;
     }
     final sats = resolvedSats ?? BigInt.one;
+    _stopAwaiting();
     setState(() {
       _submitting = true;
       _lastError = null;
-      _awaitingNode = false;
     });
 
     try {
@@ -509,6 +517,9 @@ class _AddLightningInvoiceScreenState
       // on. Say so, without an error or a snack bar blaming the connection.
       if (msg.contains('InvoiceAwaitingDaemon')) {
         setState(() => _awaitingNode = true);
+        _awaitingTimer = Timer(_awaitingPatience, () {
+          if (mounted && _awaitingNode) setState(() => _awaitingLong = true);
+        });
         return;
       }
       // The daemon no longer waits for an invoice while this screen does:
@@ -529,6 +540,13 @@ class _AddLightningInvoiceScreenState
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  void _stopAwaiting() {
+    _awaitingTimer?.cancel();
+    _awaitingTimer = null;
+    _awaitingNode = false;
+    _awaitingLong = false;
   }
 
   Future<void> _recoverState() async {
@@ -616,7 +634,11 @@ class _AddLightningInvoiceScreenState
     final error = _lastError;
     if (error == null) {
       if (!_awaitingNode) return null;
-      final text = AppLocalizations.of(context).invoiceAwaitingNode;
+      final l10n = AppLocalizations.of(context);
+      final text =
+          _awaitingLong
+              ? l10n.invoiceAwaitingNodeLong
+              : l10n.invoiceAwaitingNode;
       return InvoiceAwaitingRow(
         text: text,
       ).withAutomationId(AutomationIds.invoiceAwaiting, label: text);

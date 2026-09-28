@@ -1536,6 +1536,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Sent. The node hasn\'t answered yet — you\'ll be taken to the trade as soon as it does.';
 
   @override
+  String get invoiceAwaitingNodeLong =>
+      'Still no answer from the node. If the trade doesn\'t move on, send it again.';
+
+  @override
   String get invoiceSubmitInFlight =>
       'An invoice for this order is already being sent. Wait for the reply.';
 

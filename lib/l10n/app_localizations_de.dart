@@ -1558,6 +1558,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Gesendet. Der Knoten hat noch nicht geantwortet – du wirst zum Handel weitergeleitet, sobald er es tut.';
 
   @override
+  String get invoiceAwaitingNodeLong =>
+      'Der Knoten antwortet immer noch nicht. Wenn der Handel nicht weitergeht, sende sie erneut.';
+
+  @override
   String get invoiceSubmitInFlight =>
       'Für diese Order wird bereits eine Rechnung gesendet. Warte auf die Antwort.';
 

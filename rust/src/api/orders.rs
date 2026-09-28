@@ -1916,8 +1916,10 @@ pub async fn send_invoice(
     // Wait for the daemon's verdict: a rejected invoice (e.g. InvalidInvoice)
     // must surface instead of letting the UI advance on a publish that the
     // daemon errored on. Timeout keeps the record for a late reply, which the
-    // dispatcher processes as a normal status update.
-    let reply = crate::rt::time::timeout(std::time::Duration::from_secs(10), conf_rx).await;
+    // dispatcher processes as a normal status update. An address gets a
+    // longer window: the node resolves it over LNURL first (#615).
+    let window = crate::mostro::pending::add_invoice_reply_window(is_address);
+    let reply = crate::rt::time::timeout(window, conf_rx).await;
     if !matches!(reply, Ok(Ok(_))) {
         detach_request_waiter(&trade_pk_hex, request_id);
     }
@@ -1941,11 +1943,19 @@ pub async fn send_invoice(
             Ok(())
         }
         _ => {
+            // Published, not answered: not a failure. The late reply still
+            // lands as a status update and the screen follows it (#615).
             crate::api::logging::blog_warn(
                 "orders",
-                format!("add_invoice: no daemon response within 10s for order={order_id}"),
+                format!(
+                    "add_invoice: no daemon verdict within {}s for order={order_id} \
+                     — a late reply still applies",
+                    window.as_secs()
+                ),
             );
-            Err(anyhow::anyhow!(crate::mostro::pending::NO_DAEMON_RESPONSE))
+            Err(anyhow::anyhow!(
+                crate::mostro::pending::INVOICE_AWAITING_DAEMON
+            ))
         }
     }
 }

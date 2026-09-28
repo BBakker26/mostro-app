@@ -117,6 +117,20 @@ class _AddLightningInvoiceScreenState
   /// submission, so the user can see why the invoice was refused and fix it.
   String? _lastError;
 
+  /// The last submission reached the relays and the node has not answered
+  /// yet (#615). Not an error: a late acceptance moves the order on and
+  /// [_listenForProgress] takes the screen to the trade.
+  bool _awaitingNode = false;
+
+  /// [_awaitingNode] for over [_awaitingPatience]: a late rejection is only
+  /// logged, never shown, so past this the note invites sending again.
+  /// Safe either way: a late rejection consumed the pending record, and a
+  /// late acceptance makes the daemon refuse the resend with a status the
+  /// screen already recovers from.
+  bool _awaitingLong = false;
+  Timer? _awaitingTimer;
+  static const _awaitingPatience = Duration(seconds: 60);
+
   Timer? _checkTimer;
 
   /// The input and trade amount [_verdict] was computed for; anything else
@@ -189,6 +203,7 @@ class _AddLightningInvoiceScreenState
   void dispose() {
     _checkTimer?.cancel();
     _expiryTimer?.cancel();
+    _awaitingTimer?.cancel();
     _lifecycle.dispose();
     _invoiceController.dispose();
     _focus.dispose();
@@ -269,6 +284,7 @@ class _AddLightningInvoiceScreenState
     _supersede();
     // The daemon's verdict was about the previous input; the new one gets
     // its own local verdict.
+    _stopAwaiting();
     setState(() => _lastError = null);
     final input = _input;
     if (input.isEmpty) return;
@@ -472,6 +488,7 @@ class _AddLightningInvoiceScreenState
       return;
     }
     final sats = resolvedSats ?? BigInt.one;
+    _stopAwaiting();
     setState(() {
       _submitting = true;
       _lastError = null;
@@ -501,6 +518,22 @@ class _AddLightningInvoiceScreenState
       // status it carries is what takes the buyer off this screen.
       final statusRejection = isStatusRejection(msg);
       if (statusRejection) unawaited(_recoverState());
+      // The answer is about the text that was sent. Edited since — the
+      // field stays open while the node is waited on, up to 30 s for an
+      // address — it would label the new input with the old verdict (PR #617
+      // review). The status recovery above still runs: it is not about the
+      // input.
+      if (_input != input) return;
+      // Sent, not answered yet: the node may still accept it — an address
+      // costs it an LNURL round trip — and the late reply moves the screen
+      // on. Say so, without an error or a snack bar blaming the connection.
+      if (msg.contains('InvoiceAwaitingDaemon')) {
+        setState(() => _awaitingNode = true);
+        _awaitingTimer = Timer(_awaitingPatience, () {
+          if (mounted && _awaitingNode) setState(() => _awaitingLong = true);
+        });
+        return;
+      }
       final l10n = AppLocalizations.of(context);
       final display =
           statusRejection
@@ -513,6 +546,13 @@ class _AddLightningInvoiceScreenState
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  void _stopAwaiting() {
+    _awaitingTimer?.cancel();
+    _awaitingTimer = null;
+    _awaitingNode = false;
+    _awaitingLong = false;
   }
 
   Future<void> _recoverState() async {
@@ -598,7 +638,17 @@ class _AddLightningInvoiceScreenState
   /// there is none.
   Widget? _errorReadout() {
     final error = _lastError;
-    if (error == null) return null;
+    if (error == null) {
+      if (!_awaitingNode) return null;
+      final l10n = AppLocalizations.of(context);
+      final text =
+          _awaitingLong
+              ? l10n.invoiceAwaitingNodeLong
+              : l10n.invoiceAwaitingNode;
+      return InvoiceAwaitingRow(
+        text: text,
+      ).withAutomationId(AutomationIds.invoiceAwaiting, label: text);
+    }
     return InvoiceValidationRow(
       text: error,
       isValid: false,
@@ -864,7 +914,9 @@ class _AddLightningInvoiceScreenState
           validSats: check is InvoiceCheckValid ? check.sats : null,
           isValid: check is InvoiceCheckValid || check is InvoiceCheckAddress,
           isAddress: check is InvoiceCheckAddress,
-          hasError: error != null || check is InvoiceCheckError,
+          // A real verdict, not whatever fills the readout slot: the
+          // waiting note shares it and is not an error (PR #617 review).
+          hasError: _lastError != null || check is InvoiceCheckError,
         ),
         if (error != null) ...[
           const SizedBox(height: 8),

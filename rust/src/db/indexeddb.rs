@@ -529,6 +529,7 @@ impl Storage for IndexedDbStorage {
                         .iter()
                         .any(|prefix| key.starts_with(prefix))
                         || key == settings_keys::BOND_CLAIM_RETAINED_NODES
+                        || key == settings_keys::RESTORE_SNAPSHOT
                 })
                 .collect()
         };

@@ -7437,6 +7437,21 @@ async fn reconcile_restored_history() -> std::collections::HashSet<String> {
                         return Default::default();
             }
         };
+    // A snapshot that does not describe the loaded identity's key sequence —
+    // another identity's, or one whose counter started over — would read
+    // this identity's live takes as history and wipe them (#614). Drop it:
+    // the next restore writes a fresh one.
+    let current = crate::api::identity::get_identity().await.ok().flatten();
+    if !snapshot.applies_to(current.as_ref()) {
+        crate::mostro::restore_history::drop_snapshot_if_unchanged(db, &json).await;
+        crate::api::logging::blog_info(
+            "restore",
+            "restore snapshot does not match this identity's keys — dropped, \
+             history not settled"
+                .into(),
+        );
+        return Default::default();
+    }
     apply_restored_peers(&snapshot).await;
     reconcile_history_with(&snapshot, |oid: String| async move {
         fetch_public_order_status(&oid).await
@@ -7630,6 +7645,11 @@ async fn record_restore_snapshot(floor: u32, info: &mostro_core::message::Restor
             .chain(info.restore_disputes.iter().map(|d| d.order_id.to_string()))
             .collect(),
         peers: crate::mostro::restore_history::restored_peers(info),
+        identity: crate::api::identity::get_identity()
+            .await
+            .ok()
+            .flatten()
+            .map(|identity| identity.public_key),
     };
     let stored = match (crate::db::app_db::db(), serde_json::to_string(&snapshot)) {
         (Some(db), Ok(json)) => db
@@ -9722,6 +9742,11 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
     let identity_keys = crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
 
     let event_json = actions::restore_session(&identity_keys, &sender_keys, &mostro_pubkey).await?;
+    // The reply answers this identity; one landing after a swap must not be
+    // applied to the next (PR #616 review).
+    let origin_identity = crate::api::identity::get_identity()
+        .await?
+        .map(|identity| identity.public_key);
 
     // Register the pending-restore record BEFORE publishing so the reply can't
     // race the map. Correlated by trade pubkey only (RestoreSession carries no
@@ -9771,6 +9796,23 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             reply: DaemonReply::Restored(info),
             ..
         })) => {
+            // Before anything the reply writes: rows, counter and snapshot
+            // all describe the identity that asked.
+            let current = crate::api::identity::get_identity()
+                .await
+                .ok()
+                .flatten()
+                .map(|identity| identity.public_key);
+            if !crate::mostro::restore_history::restore_answer_is_for(
+                origin_identity.as_deref(),
+                current.as_deref(),
+            ) {
+                crate::api::logging::blog_warn(
+                    "restore",
+                    "reply landed after an identity change — discarded".into(),
+                );
+                return Err(anyhow::anyhow!("IdentityChanged"));
+            }
             // The restore sheet's next stage needs only the answer: reported
             // before the LastTradeIndex round trip below, which can take its
             // own timeout.
@@ -11214,6 +11256,31 @@ mod tests {
         &source[start..end]
     }
 
+    /// A restore reply that lands after an identity swap belongs to the
+    /// identity that asked (PR #616 review). The check must come before the
+    /// first thing the reply writes — the progress, the rows, the counter,
+    /// the snapshot — and the identity it compares against is taken before
+    /// the request leaves.
+    #[test]
+    fn a_restore_reply_is_checked_against_the_asking_identity_first() {
+        let session = fn_body("pub async fn restore_session()");
+        let origin = session.find("let origin_identity").expect("captures who asked");
+        let published = session.find("publish_event_json(&event_json)").expect("publishes");
+        let check = session
+            .find("restore_answer_is_for(")
+            .expect("checks the reply's identity");
+        assert!(origin < published, "the asking identity is taken before sending");
+        for effect in [
+            "restore_progress::found(",
+            "persist_restored_trade_rows(",
+            "ensure_trade_key_index_at_least(",
+            "record_restore_snapshot(",
+        ] {
+            let at = session.find(effect).expect(effect);
+            assert!(check < at, "{effect} runs before the identity check");
+        }
+    }
+
     /// The restore sheet (design 20a–20d) follows the restore through these
     /// steps; a step that stops being reported leaves the sheet stuck on it.
     #[test]
@@ -12236,6 +12303,7 @@ mod tests {
             floor: 97,
             live: [live.clone()].into_iter().collect(),
             peers: Default::default(),
+            identity: None,
         };
         let asked = std::sync::Mutex::new(Vec::<String>::new());
 
@@ -12275,6 +12343,45 @@ mod tests {
             assert!(looked_up.contains(oid), "{oid} looked up");
         }
         assert!(!looked_up.contains(&live) && !looked_up.contains(&fresh));
+    }
+
+    /// #614: a restore snapshot left by another identity — or stored before
+    /// snapshots named theirs — must not settle this identity's trades. Its
+    /// floor covers the new identity's first indices and its live set does
+    /// not list their orders, so read as history they were wiped mid-trade.
+    /// The pass drops such a snapshot and leaves every row alone.
+    #[tokio::test]
+    async fn a_snapshot_of_another_identity_never_wipes_a_live_trade() {
+        use crate::api::types::OrderStatus as S;
+        use crate::db::settings_keys::RESTORE_SNAPSHOT;
+        let db = bond_test_db().await;
+        for stored in [
+            r#"{"floor":97,"live":[],"identity":"another-identity"}"#,
+            r#"{"floor":97,"live":[]}"#,
+        ] {
+            let oid = format!("new-identity-take-{}", uuid::Uuid::new_v4());
+            let mut row = seam_trade_row(&oid, S::WaitingBuyerInvoice);
+            row.trade_key_index = 1;
+            db.save_trade(&row).await.unwrap();
+            db.set_setting(RESTORE_SNAPSHOT, stored).await.unwrap();
+
+            let looked_up = reconcile_restored_history().await;
+
+            assert!(looked_up.is_empty(), "{stored}: nothing is history");
+            assert_eq!(
+                db.get_trade_by_order_id(&oid)
+                    .await
+                    .unwrap()
+                    .map(|t| t.order.status),
+                Some(S::WaitingBuyerInvoice),
+                "{stored}: the live trade keeps its row"
+            );
+            assert_eq!(
+                db.get_setting(RESTORE_SNAPSHOT).await.unwrap(),
+                None,
+                "{stored}: a snapshot that is not this identity's is dropped"
+            );
+        }
     }
 
     /// A rebuilt row is dated by its order, not by the moment of the replay

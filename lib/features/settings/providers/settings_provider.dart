@@ -82,14 +82,25 @@ Future<void> _pushLightningAddress(String? address) =>
 /// address directly. Called at startup and on every change. Never throws:
 /// the setting stays saved on the Dart side, and the add-invoice screen
 /// still pre-fills it.
+///
+/// An address the core refuses clears the core copy instead: it would
+/// otherwise keep the previous address and have Mostro pay one the user
+/// replaced. With none there, a take asks for an invoice.
 Future<void> syncLightningAddressToCore(
   String? address, {
   LightningAddressSink? sink,
 }) async {
+  final push = sink ?? _pushLightningAddress;
   try {
-    await (sink ?? _pushLightningAddress)(address);
+    await push(address);
   } catch (e) {
     debugPrint('[settings] Lightning address not synced to the core: $e');
+    if (address == null) return;
+    try {
+      await push(null);
+    } catch (e) {
+      debugPrint('[settings] stale Lightning address not cleared: $e');
+    }
   }
 }
 

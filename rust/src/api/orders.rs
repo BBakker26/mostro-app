@@ -15528,6 +15528,82 @@ mod tests {
         assert_eq!(row.order.amount_sats, Some(18_600));
     }
 
+    /// A row that already holds the status and the sats — a trade taken
+    /// before the slice was kept — changes only by the slice, and an open
+    /// screen must still hear of it: the status sync that follows writes
+    /// nothing and rings nothing (#620 review).
+    #[tokio::test]
+    async fn a_slice_only_write_rings_the_doorbell() {
+        use mostro_core::message::Payload;
+        use mostro_core::order::{Kind, Status};
+
+        // Arrange
+        let path = std::env::temp_dir().join(format!(
+            "mostro_range_slice_touch_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut row = save_maker_range_row(
+            order_uuid,
+            crate::api::types::OrderKind::Sell,
+            OrderStatus::Active,
+        )
+        .await;
+        row.order.amount_sats = Some(18_600);
+        db.save_trade(&row)
+            .await
+            .expect("save the row with its sats");
+        let slice = taken_range_slice(order_uuid, Kind::Sell, Status::Active, 250, 18_600);
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+
+        // Act
+        sync_range_slice(db, &order_id, Some(&row), &Some(Payload::Order(slice))).await;
+
+        // Assert
+        assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    /// The same fiat with other sats is still news: the sats are written.
+    #[tokio::test]
+    async fn a_slice_with_new_sats_for_the_same_fiat_is_written() {
+        use mostro_core::message::Payload;
+        use mostro_core::order::{Kind, Status};
+
+        // Arrange
+        let path =
+            std::env::temp_dir().join(format!("mostro_range_slice_sats_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut row = save_maker_range_row(
+            order_uuid,
+            crate::api::types::OrderKind::Sell,
+            OrderStatus::Active,
+        )
+        .await;
+        row.order.fiat_amount = Some(250.0);
+        row.order.amount_sats = Some(18_000);
+        db.save_trade(&row)
+            .await
+            .expect("save the row with its slice");
+        let slice = taken_range_slice(order_uuid, Kind::Sell, Status::Active, 250, 18_600);
+
+        // Act
+        sync_range_slice(db, &order_id, Some(&row), &Some(Payload::Order(slice))).await;
+
+        // Assert
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(row.order.amount_sats, Some(18_600));
+    }
+
     /// When that taker walks away the order is back in the book as the whole
     /// range, and the slice it priced must not outlive the take.
     #[tokio::test]

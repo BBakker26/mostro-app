@@ -186,6 +186,24 @@ void main() {
       expect(synced, ['alice@example.com']);
     });
 
+    test('a refused replacement clears the core copy', () async {
+      // Arrange: the core would otherwise keep the previous address and
+      // have Mostro pay it on the next take.
+      final synced = <String?>[];
+
+      // Act
+      await syncLightningAddressToCore(
+        'a@b',
+        sink: (address) async {
+          if (address != null) throw Exception('InvalidLightningAddress');
+          synced.add(address);
+        },
+      );
+
+      // Assert
+      expect(synced, [null]);
+    });
+
     test('a failed startup sync does not throw', () async {
       // Act + Assert
       await expectLater(

@@ -479,6 +479,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     if (dispute == null) {
       try {
         final found = await ref.read(disputeLookupProvider)(widget.orderId);
+        // `ref` is unusable once the screen is gone.
+        if (!mounted) return;
         if (found != null) {
           dispute = disputeItemFromRust(found);
           ref.read(disputeNotifierProvider.notifier).upsert(dispute);

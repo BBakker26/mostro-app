@@ -3870,6 +3870,7 @@ async fn dispatch_mostro_message(
                 order_book().update_order_status(&order_id, new_status.clone()).await;
                 let changed = match crate::db::app_db::db() {
                     Some(db) => {
+                        sync_range_slice(db, &order_id, row_state.trade(), &kind.payload).await;
                         sync_trade_fields_if_changed(
                             db,
                             &order_id,
@@ -3951,6 +3952,7 @@ async fn dispatch_mostro_message(
             }
             let changed = match crate::db::app_db::db() {
                 Some(db) => {
+                    sync_range_slice(db, &order_id, row_state.trade(), &kind.payload).await;
                     sync_trade_fields_if_changed(
                         db,
                         &order_id,
@@ -4049,6 +4051,7 @@ async fn dispatch_mostro_message(
             order_book().update_order_status(&order_id, crate::api::types::OrderStatus::WaitingPayment).await;
             let changed = match crate::db::app_db::db() {
                 Some(db) => {
+                    sync_range_slice(db, &order_id, row_state.trade(), &kind.payload).await;
                     sync_trade_fields_if_changed(
                         db,
                         &order_id,
@@ -4156,6 +4159,7 @@ async fn dispatch_mostro_message(
                 order_book().update_order_status(&order_id, status.clone()).await;
                 let changed = match crate::db::app_db::db() {
                     Some(db) => {
+                        sync_range_slice(db, &order_id, row_state.trade(), &kind.payload).await;
                         sync_trade_fields_if_changed(
                             db,
                             &order_id,
@@ -6048,7 +6052,31 @@ async fn write_maker_step_end(db: &impl Storage, order_id: &str) -> bool {
         );
         return false;
     }
+    forget_range_slice(db, order_id).await;
     true
+}
+
+/// A range order back in the book is the whole range again: the slice the
+/// walked-away take priced ([`sync_range_slice`]) goes with it. Best effort —
+/// the status above is what the step end is about.
+async fn forget_range_slice(db: &impl Storage, order_id: &str) {
+    let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await else {
+        return;
+    };
+    let order = &trade.order;
+    let is_range = order.fiat_amount_min.is_some() && order.fiat_amount_max.is_some();
+    if !is_range || (order.fiat_amount.is_none() && order.amount_sats.is_none()) {
+        return;
+    }
+    if let Err(e) = db.set_trade_range_slice(order_id, None, None).await {
+        crate::api::logging::blog_warn(
+            "orders",
+            format!(
+                "range slice not cleared for order={}: {e}",
+                crate::api::logging::short_id(order_id),
+            ),
+        );
+    }
 }
 
 /// Ends a maker's waiting step on the sweep's behalf, refusing when the order
@@ -6615,6 +6643,56 @@ async fn sync_trade_fields_if_changed(
     // invoice screens wait for, and not every caller follows with an update.
     crate::api::trade_touch::touch_trade(order_id);
     true
+}
+
+/// The amount a take priced out of a range order, onto the maker's row.
+///
+/// The maker's row is written with the range alone, and the take only
+/// reaches it as the daemon's copy of the order in the `pay-invoice` or
+/// `add-invoice` that follows — `fiat_amount` being the taker's slice. Left
+/// out, every screen built from the row shows the whole range next to the
+/// sats of one amount inside it. A taker's row already holds its own slice
+/// (`take_order`). The bounds stay: [`write_maker_step_end`] clears the
+/// slice if the order goes back to the book.
+///
+/// Runs before [`sync_trade_fields_if_changed`], whose write, doorbell and
+/// update then follow this one; `current` is the same snapshot handed to
+/// it, so its change check is unaffected.
+async fn sync_range_slice(
+    db: &impl Storage,
+    order_id: &str,
+    current: Option<&crate::api::types::TradeInfo>,
+    payload: &Option<mostro_core::message::Payload>,
+) {
+    let Some(order) = current.map(|trade| &trade.order) else {
+        return;
+    };
+    let slice = match payload {
+        Some(mostro_core::message::Payload::Order(o)) => o,
+        Some(mostro_core::message::Payload::PaymentRequest(Some(o), _, _)) => o,
+        _ => return,
+    };
+    let is_range = order.fiat_amount_min.is_some() && order.fiat_amount_max.is_some();
+    if !is_range || slice.fiat_amount <= 0 {
+        return;
+    }
+    let fiat = slice.fiat_amount as f64;
+    if order.fiat_amount == Some(fiat) {
+        return;
+    }
+    let sats = u64::try_from(slice.amount)
+        .ok()
+        .filter(|&sats| sats > 0)
+        .or(order.amount_sats);
+    if let Err(e) = db.set_trade_range_slice(order_id, Some(fiat), sats).await {
+        crate::api::logging::blog_warn(
+            "orders",
+            format!(
+                "range slice not persisted for order={}: {e}",
+                crate::api::logging::short_id(order_id),
+            ),
+        );
+    }
 }
 
 /// Status already held for `order_id`, or `None` when the order is not one of
@@ -13462,6 +13540,14 @@ mod tests {
             _order_id: &str,
             _status: Option<crate::api::types::OrderStatus>,
             _hold_invoice: Option<String>,
+            _amount_sats: Option<u64>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn set_trade_range_slice(
+            &self,
+            _order_id: &str,
+            _fiat_amount: Option<f64>,
             _amount_sats: Option<u64>,
         ) -> Result<()> {
             unimplemented!()

@@ -49,7 +49,7 @@ import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
 import 'package:mostro/features/cashu/seller_funding_route.dart';
 import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
 import 'package:mostro/src/rust/api/types.dart'
-    show CooperativeCancelState, TradeInfo;
+    show CooperativeCancelState, TradeInfo, TradeRole;
 
 export 'package:mostro/features/trades/models/trade_status.dart';
 
@@ -666,12 +666,19 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         figures == null
             ? null
             : '${formatFiatAmount(amount: figures.fiat, min: figures.min, max: figures.max, locale: locale)} ${figures.code}';
+    // The row's own role first: `isBuyer` defaults to buyer while the role
+    // lookup runs, and would tell a seller "You buy".
+    final isSelling = switch (trade?.role) {
+      TradeRole.seller => true,
+      TradeRole.buyer => false,
+      null => role == null ? null : !isBuyer,
+    };
     final summary =
-        figures == null
+        figures == null || isSelling == null
             ? null
             : tradeAmountSummary(
               l10n,
-              isSelling: !isBuyer,
+              isSelling: isSelling,
               fiatAmount: figures.fiat,
               fiatAmountMin: figures.min,
               fiatAmountMax: figures.max,

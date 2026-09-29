@@ -61,6 +61,7 @@ Future<ProviderContainer> _pumpTradeDetail(
   Locale locale = const Locale('en'),
   List<TradeInfo>? trades,
   List<OrderItem> book = const [],
+  bool roleKnown = true,
   bool privacyMode = false,
   NotificationsNotifier? notifications,
 }) async {
@@ -75,7 +76,11 @@ Future<ProviderContainer> _pumpTradeDetail(
       if (releaseOrder != null)
         releaseOrderActionProvider.overrideWithValue(releaseOrder),
       if (trades != null) rawTradesProvider.overrideWith((ref) async => trades),
-      tradeRoleProvider.overrideWith((ref) => {orderId: isBuyer}),
+      tradeRoleProvider.overrideWith(
+        (ref) => roleKnown ? {orderId: isBuyer} : <String, bool>{},
+      ),
+      if (!roleKnown)
+        tradeRoleFromDbProvider(orderId).overrideWith((ref) async => null),
       tradeStatusProvider(
         orderId,
       ).overrideWith((ref) => statusUpdates ?? Stream.value(status)),
@@ -1883,6 +1888,28 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('10,000'), findsNothing);
+    });
+
+    testWidgets('the side comes from the row while the role is unknown', (
+      tester,
+    ) async {
+      // Arrange + Act: the role lookup has no answer; the row says seller.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-range',
+        isBuyer: true,
+        roleKnown: false,
+        status: OrderStatus.waitingPayment,
+        trades: [takenRange(OrderStatus.waitingPayment)],
+        book: [rangeInBook],
+      );
+
+      // Assert
+      expect(
+        find.text('${_en.tradesDirectionSell} · 219,500 ARS · 163,069 sats'),
+        findsOneWidget,
+      );
+      expect(find.textContaining(_en.tradesDirectionBuy), findsNothing);
     });
 
     testWidgets('the headline names the slice, not the range', (tester) async {

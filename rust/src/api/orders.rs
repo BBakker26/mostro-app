@@ -4172,6 +4172,13 @@ async fn dispatch_mostro_message(
                     }
                     None => true,
                 };
+                if kind.action == Action::DisputeInitiatedByPeer {
+                    crate::api::disputes::note_peer_opened_dispute(
+                        &order_id,
+                        dispute_id_from_payload(kind.payload.as_ref()),
+                    )
+                    .await;
+                }
                 if is_hard_terminal(&status) {
                     // Finished without a wipe: the note has no reader left.
                     order_book().forget_wire_order(&order_id);

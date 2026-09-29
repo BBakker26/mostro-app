@@ -471,8 +471,25 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     );
   }
 
-  void _viewDispute() {
-    final dispute = ref.read(disputeByTradeIdProvider(widget.orderId));
+  /// The list only fills on resume or when this side opens the dispute, so a
+  /// dispute the counterparty opened is looked up in the bridge, and kept in
+  /// the list once found.
+  Future<void> _viewDispute() async {
+    var dispute = ref.read(disputeByTradeIdProvider(widget.orderId));
+    if (dispute == null) {
+      try {
+        final found = await ref.read(disputeLookupProvider)(widget.orderId);
+        // `ref` is unusable once the screen is gone.
+        if (!mounted) return;
+        if (found != null) {
+          dispute = disputeItemFromRust(found);
+          ref.read(disputeNotifierProvider.notifier).upsert(dispute);
+        }
+      } catch (e) {
+        debugPrint('[TradeDetailScreen] dispute lookup failed: $e');
+      }
+      if (!mounted) return;
+    }
     if (dispute == null) {
       final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1218,7 +1235,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         label: l10n.viewDisputeButton,
         icon: Icons.gavel,
         automationId: AutomationIds.tradeViewDispute,
-        onPressed: () async => _viewDispute(),
+        onPressed: _viewDispute,
       ),
       TradePrimaryAction.sendRating => TradePrimarySpec(
         label: l10n.tradeSendRatingAction,

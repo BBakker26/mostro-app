@@ -4172,6 +4172,13 @@ async fn dispatch_mostro_message(
                     }
                     None => true,
                 };
+                if kind.action == Action::DisputeInitiatedByPeer {
+                    crate::api::disputes::note_peer_opened_dispute(
+                        &order_id,
+                        dispute_id_from_payload(kind.payload.as_ref()),
+                    )
+                    .await;
+                }
                 if is_hard_terminal(&status) {
                     // Finished without a wipe: the note has no reader left.
                     order_book().forget_wire_order(&order_id);
@@ -17271,6 +17278,97 @@ mod tests {
             drain_updates(&mut rx, &order_id),
             vec![crate::api::types::OrderStatus::Dispute],
         );
+    }
+
+    /// A dispute the counterparty opens has to exist on this side before a
+    /// solver takes it: "View dispute" on the trade screen looks it up, and
+    /// until `admin-took-dispute` nothing created it, so the button answered
+    /// "no dispute for this order".
+    #[tokio::test]
+    async fn a_dispute_the_peer_opens_is_recorded() {
+        use mostro_core::message::{Action, Payload};
+
+        // Arrange
+        let path =
+            std::env::temp_dir().join(format!("mostro_peer_dispute_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let dispute_uuid = uuid::Uuid::new_v4();
+        persist_trade_row(
+            db,
+            &seam_trade_row(&order_id, crate::api::types::OrderStatus::Active),
+        )
+        .await
+        .expect("save the row");
+
+        // Act
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::DisputeInitiatedByPeer,
+                Some(Payload::Dispute(dispute_uuid, None)),
+                crate::rt::unix_now() as u64,
+            ),
+            "test-peer-dispute",
+            "ff00ff31",
+            1,
+        )
+        .await;
+
+        // Assert
+        let dispute = crate::api::disputes::get_dispute(order_id.clone())
+            .await
+            .expect("lookup")
+            .expect("the peer's dispute is recorded");
+        assert_eq!(dispute.id, dispute_uuid.to_string());
+        assert_eq!(dispute.status, crate::api::types::DisputeStatus::Open);
+        assert!(!dispute.initiated_by_me);
+    }
+
+    /// A dispute is known by the id the daemon gives it: a peer notice without
+    /// one records nothing rather than a locally minted id that a later
+    /// `admin-took-dispute` would keep for good (#627 review).
+    #[tokio::test]
+    async fn a_peer_dispute_without_its_id_is_not_recorded() {
+        use mostro_core::message::Action;
+
+        // Arrange
+        let path = std::env::temp_dir().join(format!(
+            "mostro_peer_dispute_noid_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        persist_trade_row(
+            db,
+            &seam_trade_row(&order_id, crate::api::types::OrderStatus::Active),
+        )
+        .await
+        .expect("save the row");
+
+        // Act
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::DisputeInitiatedByPeer,
+                None,
+                crate::rt::unix_now() as u64,
+            ),
+            "test-peer-dispute-noid",
+            "ff00ff32",
+            1,
+        )
+        .await;
+
+        // Assert
+        assert!(crate::api::disputes::get_dispute(order_id)
+            .await
+            .expect("lookup")
+            .is_none());
     }
 
     /// Review round 2, probe P5: the tombstone records the generation it

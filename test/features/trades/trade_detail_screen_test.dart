@@ -10,6 +10,8 @@ import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
+import 'package:mostro/features/disputes/providers/disputes_providers.dart'
+    show disputeLookupProvider;
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
@@ -139,9 +141,12 @@ Future<void> _pumpRoutedTradeDetail(
   Future<void> Function(String)? cancelOrder,
   Stream<OrderStatus>? statusUpdates,
   Stream<List<OrderItem>>? bookUpdates,
+  Future<Dispute?> Function(String tradeId)? disputeLookup,
 }) async {
   final container = createContainer(
     overrides: [
+      if (disputeLookup != null)
+        disputeLookupProvider.overrideWithValue(disputeLookup),
       if (cancelOrder != null)
         cancelOrderActionProvider.overrideWithValue(cancelOrder),
       tradeRoleProvider.overrideWith((ref) => {orderId: true}),
@@ -168,6 +173,13 @@ Future<void> _pumpRoutedTradeDetail(
         builder:
             (_, state) =>
                 TradeDetailScreen(orderId: state.pathParameters['orderId']!),
+      ),
+      GoRoute(
+        path: AppRoute.disputeDetails,
+        builder:
+            (_, state) => Scaffold(
+              body: Text('dispute ${state.pathParameters['disputeId']}'),
+            ),
       ),
     ],
   );
@@ -1929,6 +1941,78 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('1000000'), findsNothing);
+    });
+  });
+
+  group('View dispute on a dispute the counterparty opened', () {
+    // The list is only hydrated on resume or when this side opens the
+    // dispute, so the peer's is missing from it; the bridge holds it.
+    testWidgets('asks the bridge and opens the dispute', (tester) async {
+      // Arrange
+      final asked = <String>[];
+      await _pumpRoutedTradeDetail(
+        tester,
+        orderId: 'order-peer-dispute',
+        status: OrderStatus.dispute,
+        loadTrades:
+            () async => [
+              fakeTrade(
+                id: 'peer-dispute',
+                status: OrderStatus.dispute,
+                role: TradeRole.buyer,
+              ),
+            ],
+        disputeLookup: (tradeId) async {
+          asked.add(tradeId);
+          return Dispute(
+            id: 'dispute-9',
+            tradeId: tradeId,
+            status: DisputeStatus.open,
+            initiatedByMe: false,
+            openedAt: intToPlatformInt64(1000),
+            isRead: false,
+          );
+        },
+      );
+
+      // Act
+      await tester.tap(_filledButtonWithText(_en.viewDisputeButton));
+      await _finishPageTransition(tester);
+
+      // Assert
+      expect(asked, ['order-peer-dispute']);
+      expect(find.text(_en.disputeNotFoundForOrder), findsNothing);
+      expect(find.text('dispute dispute-9'), findsOneWidget);
+      // Let the button's and the snackbar's timers run out.
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('says so when the bridge has none either', (tester) async {
+      // Arrange
+      await _pumpRoutedTradeDetail(
+        tester,
+        orderId: 'order-no-dispute',
+        status: OrderStatus.dispute,
+        loadTrades:
+            () async => [
+              fakeTrade(
+                id: 'no-dispute',
+                status: OrderStatus.dispute,
+                role: TradeRole.buyer,
+              ),
+            ],
+        disputeLookup: (_) async => null,
+      );
+
+      // Act
+      await tester.tap(_filledButtonWithText(_en.viewDisputeButton));
+      await tester.pump();
+      await tester.pump();
+
+      // Assert
+      expect(find.text(_en.disputeNotFoundForOrder), findsOneWidget);
+      // Let the button's and the snackbar's timers run out.
+      await tester.pump(const Duration(seconds: 5));
     });
   });
 }

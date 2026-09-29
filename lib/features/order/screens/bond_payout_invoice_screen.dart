@@ -14,6 +14,7 @@ import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/bond_rules.dart';
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
@@ -319,6 +320,12 @@ class _BondPayoutInvoiceScreenState
             Center(
               child: NwcInvoiceWidget(
                 amountSats: sats,
+                expirySecs: nwcInvoiceExpirySecs(
+                  ref
+                      .watch(mostroNodeProvider)
+                      .valueOrNull
+                      ?.invoiceExpirationWindow,
+                ),
                 generateInvoice: widget.generateInvoice,
                 onInvoiceConfirmed:
                     (invoice) => _submit(invoice, fromWallet: true),

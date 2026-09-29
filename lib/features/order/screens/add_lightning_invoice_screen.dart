@@ -790,25 +790,31 @@ class _AddLightningInvoiceScreenState
               ],
               Expanded(
                 child: Center(
-                  child: NwcInvoiceWidget(
-                    amountSats: sats.toInt(),
-                    expirySecs: nwcInvoiceExpirySecs(
-                      _nodeContext().minRemainingSecs,
-                    ),
-                    generateInvoice: widget.generateInvoice,
-                    onInvoiceConfirmed: (invoice) async {
-                      _invoiceController.text = invoice;
-                      // Nothing else moves this screen on when the invoice
-                      // is held back, and the widget has already stopped
-                      // drawing: without the form, the screen stays blank.
-                      final sent = await _submit(ref);
-                      if (!sent && mounted && !_navigated) {
-                        setState(() => _manualMode = true);
-                      }
-                    },
-                    onFallbackToManual:
-                        () => setState(() => _manualMode = true),
-                  ),
+                  // The wallet is asked once, when the widget mounts: before
+                  // the node's window is known the invoice would get the
+                  // margin alone, and a node with a longer window refuses it.
+                  child:
+                      ref.watch(mostroNodeProvider).isLoading
+                          ? const CircularProgressIndicator()
+                          : NwcInvoiceWidget(
+                            amountSats: sats.toInt(),
+                            expirySecs: nwcInvoiceExpirySecs(
+                              _nodeContext().minRemainingSecs,
+                            ),
+                            generateInvoice: widget.generateInvoice,
+                            onInvoiceConfirmed: (invoice) async {
+                              _invoiceController.text = invoice;
+                              // Nothing else moves this screen on when the invoice
+                              // is held back, and the widget has already stopped
+                              // drawing: without the form, the screen stays blank.
+                              final sent = await _submit(ref);
+                              if (!sent && mounted && !_navigated) {
+                                setState(() => _manualMode = true);
+                              }
+                            },
+                            onFallbackToManual:
+                                () => setState(() => _manualMode = true),
+                          ),
                 ),
               ),
               // A generated invoice the daemon refuses needs the same

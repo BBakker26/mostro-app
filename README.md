@@ -77,6 +77,7 @@ Status of the client's features across the Rust core and the Flutter UI.
 - [~] Lightning address — pre-fills the add-invoice screen, but is not synced to the Rust store, so Mostro never pays it directly on take
 - [~] Push notifications — Android / iOS client complete; web push built but disabled until the push server supports it
 - [~] Reputation / privacy mode — works within a session, but the setting does not persist across restarts
+- [~] Cashu escrow — embedded wallet and seller escrow lock (phases C0–C5); pending: release / redeem, cooperative cancel, disputes / expiry, web, and the release-blocking resilience work — wallet backup / restore, proof-state reconciliation, in-flight escrows on restore, seller refund path (C6–C10, see `docs/cashu/README.md`)
 - [ ] Configurable session retention
 - [ ] Deep link `mostro:` URI
 - [ ] Tor / anonymous relays

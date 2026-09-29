@@ -6068,14 +6068,15 @@ async fn forget_range_slice(db: &impl Storage, order_id: &str) {
     if !is_range || (order.fiat_amount.is_none() && order.amount_sats.is_none()) {
         return;
     }
-    if let Err(e) = db.set_trade_range_slice(order_id, None, None).await {
-        crate::api::logging::blog_warn(
+    match db.set_trade_range_slice(order_id, None, None).await {
+        Ok(()) => crate::api::trade_touch::touch_trade(order_id),
+        Err(e) => crate::api::logging::blog_warn(
             "orders",
             format!(
                 "range slice not cleared for order={}: {e}",
                 crate::api::logging::short_id(order_id),
             ),
-        );
+        ),
     }
 }
 
@@ -6655,9 +6656,10 @@ async fn sync_trade_fields_if_changed(
 /// (`take_order`). The bounds stay: [`write_maker_step_end`] clears the
 /// slice if the order goes back to the book.
 ///
-/// Runs before [`sync_trade_fields_if_changed`], whose write, doorbell and
-/// update then follow this one; `current` is the same snapshot handed to
-/// it, so its change check is unaffected.
+/// Runs before [`sync_trade_fields_if_changed`], whose write and update
+/// then follow this one; `current` is the same snapshot handed to it, so
+/// its change check is unaffected. The doorbell is rung here too, since
+/// that sync may find nothing else to write.
 async fn sync_range_slice(
     db: &impl Storage,
     order_id: &str,
@@ -6677,21 +6679,24 @@ async fn sync_range_slice(
         return;
     }
     let fiat = slice.fiat_amount as f64;
-    if order.fiat_amount == Some(fiat) {
-        return;
-    }
     let sats = u64::try_from(slice.amount)
         .ok()
         .filter(|&sats| sats > 0)
         .or(order.amount_sats);
-    if let Err(e) = db.set_trade_range_slice(order_id, Some(fiat), sats).await {
-        crate::api::logging::blog_warn(
+    if order.fiat_amount == Some(fiat) && order.amount_sats == sats {
+        return;
+    }
+    match db.set_trade_range_slice(order_id, Some(fiat), sats).await {
+        // Rung here: when the row already holds the status and the sats,
+        // the status sync that follows writes nothing and rings nothing.
+        Ok(()) => crate::api::trade_touch::touch_trade(order_id),
+        Err(e) => crate::api::logging::blog_warn(
             "orders",
             format!(
                 "range slice not persisted for order={}: {e}",
                 crate::api::logging::short_id(order_id),
             ),
-        );
+        ),
     }
 }
 

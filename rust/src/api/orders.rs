@@ -15227,6 +15227,279 @@ mod tests {
         assert!(emitted, "the UI must learn the order is pending again");
     }
 
+    /// A maker's row for a range order `10 – 1000 ARS`, at `status`.
+    async fn save_maker_range_row(
+        order_uuid: uuid::Uuid,
+        kind: crate::api::types::OrderKind,
+        status: OrderStatus,
+    ) -> crate::api::types::TradeInfo {
+        let db = crate::db::app_db::db().expect("store initialised");
+        let mut order_info = dummy_order_info(&order_uuid.to_string());
+        order_info.kind = kind;
+        order_info.status = status;
+        order_info.is_mine = true;
+        order_info.fiat_code = "ARS".to_string();
+        order_info.fiat_amount = None;
+        order_info.fiat_amount_min = Some(10.0);
+        order_info.fiat_amount_max = Some(1000.0);
+        order_book().upsert_order(order_info.clone()).await;
+        let mut row = cancel_test_row(order_info);
+        row.id = order_uuid.to_string();
+        row.role = match row.order.kind {
+            crate::api::types::OrderKind::Sell => TradeRole::Seller,
+            crate::api::types::OrderKind::Buy => TradeRole::Buyer,
+        };
+        row.trade_key_index = 7;
+        db.save_trade(&row).await.expect("save the maker's row");
+        row
+    }
+
+    /// The daemon's copy of a range order a taker just priced: `fiat` out of
+    /// the `10 – 1000` range, worth `sats`.
+    fn taken_range_slice(
+        order_uuid: uuid::Uuid,
+        kind: mostro_core::order::Kind,
+        status: mostro_core::order::Status,
+        fiat: i64,
+        sats: i64,
+    ) -> mostro_core::order::SmallOrder {
+        mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(kind),
+            Some(status),
+            sats,
+            "ARS".to_string(),
+            Some(10),
+            Some(1000),
+            fiat,
+            "cash".to_string(),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn from_mostro(
+        order_uuid: uuid::Uuid,
+        action: mostro_core::message::Action,
+        payload: mostro_core::message::Payload,
+    ) -> mostro_core::transport::UnwrappedMessage {
+        let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        mostro_core::transport::UnwrappedMessage {
+            message: mostro_core::message::Message::new_order(
+                Some(order_uuid),
+                None,
+                None,
+                action,
+                Some(payload),
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::prelude::Timestamp::now(),
+        }
+    }
+
+    /// A seller's range order is taken for 250 ARS: the pay-invoice the
+    /// maker receives carries that slice, and the row must keep it, or every
+    /// screen built from the row (the notification header among them) shows
+    /// the range next to the sats of one amount inside it.
+    #[tokio::test]
+    async fn a_maker_seller_keeps_the_amount_a_take_priced_out_of_its_range() {
+        use mostro_core::message::{Action, Payload};
+        use mostro_core::order::{Kind, Status};
+
+        // Arrange
+        let path =
+            std::env::temp_dir().join(format!("mostro_range_slice_pay_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        save_maker_range_row(
+            order_uuid,
+            crate::api::types::OrderKind::Sell,
+            OrderStatus::Pending,
+        )
+        .await;
+        let slice = taken_range_slice(order_uuid, Kind::Sell, Status::WaitingPayment, 250, 18_600);
+        let message = from_mostro(
+            order_uuid,
+            Action::PayInvoice,
+            Payload::PaymentRequest(Some(slice), "lnbc1holdinvoice".into(), Some(18_600)),
+        );
+
+        // Act
+        dispatch_mostro_message(message, "test-range-slice-pay", "ff00ff07", 7).await;
+
+        // Assert
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(row.order.fiat_amount, Some(250.0));
+        assert_eq!(row.order.amount_sats, Some(18_600));
+        assert_eq!(
+            row.order.fiat_amount_min,
+            Some(10.0),
+            "the range stays on record"
+        );
+        assert_eq!(row.order.fiat_amount_max, Some(1000.0));
+    }
+
+    /// Same for a buyer's range order: the maker learns the slice from the
+    /// add-invoice that asks for its invoice.
+    #[tokio::test]
+    async fn a_maker_buyer_keeps_the_amount_a_take_priced_out_of_its_range() {
+        use mostro_core::message::{Action, Payload};
+        use mostro_core::order::{Kind, Status};
+
+        // Arrange
+        let path =
+            std::env::temp_dir().join(format!("mostro_range_slice_add_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        save_maker_range_row(
+            order_uuid,
+            crate::api::types::OrderKind::Buy,
+            OrderStatus::Pending,
+        )
+        .await;
+        let slice = taken_range_slice(
+            order_uuid,
+            Kind::Buy,
+            Status::WaitingBuyerInvoice,
+            400,
+            29_700,
+        );
+
+        // Act
+        dispatch_mostro_message(
+            from_mostro(order_uuid, Action::AddInvoice, Payload::Order(slice)),
+            "test-range-slice-add",
+            "ff00ff07",
+            7,
+        )
+        .await;
+
+        // Assert
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(row.order.fiat_amount, Some(400.0));
+        assert_eq!(row.order.amount_sats, Some(29_700));
+    }
+
+    /// A maker that missed the pay-invoice (offline, restored) still learns
+    /// the slice from any later message carrying the order.
+    #[tokio::test]
+    async fn a_later_trade_message_brings_the_slice_the_pay_invoice_missed() {
+        use mostro_core::message::{Action, Payload};
+        use mostro_core::order::{Kind, Status};
+
+        // Arrange
+        let path = std::env::temp_dir().join(format!(
+            "mostro_range_slice_later_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        save_maker_range_row(
+            order_uuid,
+            crate::api::types::OrderKind::Sell,
+            OrderStatus::Pending,
+        )
+        .await;
+        let slice = taken_range_slice(order_uuid, Kind::Sell, Status::Active, 250, 18_600);
+
+        // Act
+        dispatch_mostro_message(
+            from_mostro(order_uuid, Action::BuyerTookOrder, Payload::Order(slice)),
+            "test-range-slice-later",
+            "ff00ff07",
+            7,
+        )
+        .await;
+
+        // Assert
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(row.order.fiat_amount, Some(250.0));
+        assert_eq!(row.order.amount_sats, Some(18_600));
+    }
+
+    /// When that taker walks away the order is back in the book as the whole
+    /// range, and the slice it priced must not outlive the take.
+    #[tokio::test]
+    async fn a_republished_range_order_forgets_the_slice_of_the_take() {
+        use mostro_core::message::{Action, Payload};
+        use mostro_core::order::{Kind, Status};
+
+        // Arrange
+        let path = std::env::temp_dir().join(format!(
+            "mostro_range_slice_republish_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        save_maker_range_row(
+            order_uuid,
+            crate::api::types::OrderKind::Sell,
+            OrderStatus::Pending,
+        )
+        .await;
+        let slice = taken_range_slice(order_uuid, Kind::Sell, Status::WaitingPayment, 250, 18_600);
+        dispatch_mostro_message(
+            from_mostro(
+                order_uuid,
+                Action::PayInvoice,
+                Payload::PaymentRequest(Some(slice), "lnbc1holdinvoice".into(), Some(18_600)),
+            ),
+            "test-range-slice-taken",
+            "ff00ff07",
+            7,
+        )
+        .await;
+        let republished = taken_range_slice(order_uuid, Kind::Sell, Status::Pending, 0, 0);
+
+        // Act
+        dispatch_mostro_message(
+            from_mostro(order_uuid, Action::NewOrder, Payload::Order(republished)),
+            "test-range-slice-republished",
+            "ff00ff07",
+            7,
+        )
+        .await;
+
+        // Assert
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(row.order.status, OrderStatus::Pending);
+        assert_eq!(row.order.fiat_amount, None);
+        assert_eq!(row.order.amount_sats, None);
+        assert_eq!(row.order.fiat_amount_min, Some(10.0));
+        assert_eq!(row.order.fiat_amount_max, Some(1000.0));
+    }
+
     /// A take's first reply is consumed before the per-action arms, so the
     /// arm that records a step start never runs for it. The dispatcher
     /// records it at the interception instead, which is what gives a taker

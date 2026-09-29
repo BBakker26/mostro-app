@@ -17327,6 +17327,50 @@ mod tests {
         assert!(!dispute.initiated_by_me);
     }
 
+    /// A dispute is known by the id the daemon gives it: a peer notice without
+    /// one records nothing rather than a locally minted id that a later
+    /// `admin-took-dispute` would keep for good (#627 review).
+    #[tokio::test]
+    async fn a_peer_dispute_without_its_id_is_not_recorded() {
+        use mostro_core::message::Action;
+
+        // Arrange
+        let path = std::env::temp_dir().join(format!(
+            "mostro_peer_dispute_noid_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        persist_trade_row(
+            db,
+            &seam_trade_row(&order_id, crate::api::types::OrderStatus::Active),
+        )
+        .await
+        .expect("save the row");
+
+        // Act
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::DisputeInitiatedByPeer,
+                None,
+                crate::rt::unix_now() as u64,
+            ),
+            "test-peer-dispute-noid",
+            "ff00ff32",
+            1,
+        )
+        .await;
+
+        // Assert
+        assert!(crate::api::disputes::get_dispute(order_id)
+            .await
+            .expect("lookup")
+            .is_none());
+    }
+
     /// Review round 2, probe P5: the tombstone records the generation it
     /// wiped, so a message of a LATER take of the same order — decrypted
     /// with a higher trade index — is not noise: it classifies

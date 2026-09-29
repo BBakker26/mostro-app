@@ -60,6 +60,8 @@ Future<ProviderContainer> _pumpTradeDetail(
   Future<RatingInfo?> Function()? ratingFetch,
   Locale locale = const Locale('en'),
   List<TradeInfo>? trades,
+  List<OrderItem> book = const [],
+  bool roleKnown = true,
   bool privacyMode = false,
   NotificationsNotifier? notifications,
 }) async {
@@ -74,11 +76,15 @@ Future<ProviderContainer> _pumpTradeDetail(
       if (releaseOrder != null)
         releaseOrderActionProvider.overrideWithValue(releaseOrder),
       if (trades != null) rawTradesProvider.overrideWith((ref) async => trades),
-      tradeRoleProvider.overrideWith((ref) => {orderId: isBuyer}),
+      tradeRoleProvider.overrideWith(
+        (ref) => roleKnown ? {orderId: isBuyer} : <String, bool>{},
+      ),
+      if (!roleKnown)
+        tradeRoleFromDbProvider(orderId).overrideWith((ref) async => null),
       tradeStatusProvider(
         orderId,
       ).overrideWith((ref) => statusUpdates ?? Stream.value(status)),
-      orderBookProvider.overrideWith((ref) => Stream.value(const [])),
+      orderBookProvider.overrideWith((ref) => Stream.value(book)),
       // A waiting step draws its countdown from the step deadline, which
       // without a bridge resolves to "unknown" — and then the screen draws
       // none (#270). The 8a cases below assert the countdown's label, so the
@@ -1836,6 +1842,93 @@ void main() {
 
       expect(nudges, isEmpty);
       expect(find.text(_en.tradeHeadlineCancelled), findsOneWidget);
+    });
+  });
+
+  group('a range order taken for one amount inside it', () {
+    // The book keeps the range; the trade row holds the slice the take
+    // priced (MostroP2P/app#620).
+    TradeInfo takenRange(OrderStatus status) => fakeTrade(
+      id: 'range',
+      status: status,
+      role: TradeRole.seller,
+      fiatCode: 'ARS',
+      paymentMethod: 'Mercado Pago',
+      isMine: true,
+      fiatAmount: 219500,
+      fiatAmountMin: 10000,
+      fiatAmountMax: 1000000,
+      amountSats: BigInt.from(163069),
+    );
+    final rangeInBook = fakeOrder(
+      id: 'order-range',
+      fiatAmountMin: 10000,
+      fiatAmountMax: 1000000,
+      fiatCode: 'ARS',
+      paymentMethod: 'Mercado Pago',
+      isMine: true,
+    );
+
+    testWidgets('the step card says what was sold, in fiat and sats', (
+      tester,
+    ) async {
+      // Arrange + Act
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-range',
+        isBuyer: false,
+        status: OrderStatus.waitingPayment,
+        trades: [takenRange(OrderStatus.waitingPayment)],
+        book: [rangeInBook],
+      );
+
+      // Assert
+      expect(
+        find.text('${_en.tradesDirectionSell} · 219,500 ARS · 163,069 sats'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('10,000'), findsNothing);
+    });
+
+    testWidgets('the side comes from the row while the role is unknown', (
+      tester,
+    ) async {
+      // Arrange + Act: the role lookup has no answer; the row says seller.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-range',
+        isBuyer: true,
+        roleKnown: false,
+        status: OrderStatus.waitingPayment,
+        trades: [takenRange(OrderStatus.waitingPayment)],
+        book: [rangeInBook],
+      );
+
+      // Assert
+      expect(
+        find.text('${_en.tradesDirectionSell} · 219,500 ARS · 163,069 sats'),
+        findsOneWidget,
+      );
+      expect(find.textContaining(_en.tradesDirectionBuy), findsNothing);
+    });
+
+    testWidgets('the headline names the slice, not the range', (tester) async {
+      // Arrange + Act
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-range',
+        isBuyer: false,
+        status: OrderStatus.active,
+        trades: [takenRange(OrderStatus.active)],
+        book: [rangeInBook],
+      );
+
+      // Assert
+      expect(
+        find.text(_en.tradeHeadlineActiveSeller('219,500 ARS')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('1000000'), findsNothing);
     });
   });
 }

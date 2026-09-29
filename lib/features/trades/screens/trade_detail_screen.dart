@@ -24,6 +24,7 @@ import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/models/trade_status.dart';
 import 'package:mostro/features/trades/models/trade_view.dart';
+import 'package:mostro/features/trades/models/trades_list_rules.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/widgets/dispute_confirmation_dialog.dart';
 import 'package:mostro/features/trades/widgets/release_confirmation_sheet.dart';
@@ -48,7 +49,7 @@ import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
 import 'package:mostro/features/cashu/seller_funding_route.dart';
 import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
 import 'package:mostro/src/rust/api/types.dart'
-    show CooperativeCancelState, TradeInfo;
+    show CooperativeCancelState, TradeInfo, TradeRole;
 
 export 'package:mostro/features/trades/models/trade_status.dart';
 
@@ -659,6 +660,32 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     final tradeAsync = ref.watch(tradeInfoProvider(widget.orderId));
     final trade = tradeAsync.valueOrNull;
     final peerRating = trade?.peerRating;
+    final figures = _figures(trade, order);
+    final locale = Localizations.localeOf(context).toString();
+    final amount =
+        figures == null
+            ? null
+            : '${formatFiatAmount(amount: figures.fiat, min: figures.min, max: figures.max, locale: locale)} ${figures.code}';
+    // The row's own role first: `isBuyer` defaults to buyer while the role
+    // lookup runs, and would tell a seller "You buy".
+    final isSelling = switch (trade?.role) {
+      TradeRole.seller => true,
+      TradeRole.buyer => false,
+      null => role == null ? null : !isBuyer,
+    };
+    final summary =
+        figures == null || isSelling == null
+            ? null
+            : tradeAmountSummary(
+              l10n,
+              isSelling: isSelling,
+              fiatAmount: figures.fiat,
+              fiatAmountMin: figures.min,
+              fiatAmountMax: figures.max,
+              fiatCode: figures.code,
+              sats: figures.sats,
+              locale: locale,
+            );
     final room =
         ref
             .watch(chatRoomsNotifierProvider)
@@ -725,6 +752,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
                         status,
                         canRate,
                         order,
+                        amount,
                         room?.displayHandle(l10n),
                       )
                       : _stepBlock(
@@ -733,6 +761,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
                         status,
                         isBuyer,
                         order,
+                        amount: amount,
+                        summary: summary,
                         loadFailed: loadFailed,
                       ),
             ),
@@ -814,17 +844,45 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
   // ── Step block ───────────────────────────────────────────────────────────
 
+  /// The figures of this trade: the row's when there is one — it holds the
+  /// amount a take priced out of a range, where the book keeps the whole
+  /// range (MostroP2P/app#620) — else the book's.
+  ({double? fiat, double? min, double? max, String code, int? sats})? _figures(
+    TradeInfo? trade,
+    OrderItem? order,
+  ) {
+    if (trade != null) {
+      final o = trade.order;
+      return (
+        fiat: o.fiatAmount,
+        min: o.fiatAmountMin,
+        max: o.fiatAmountMax,
+        code: o.fiatCode,
+        sats: o.amountSats?.toInt(),
+      );
+    }
+    if (order == null) return null;
+    return (
+      fiat: order.fiatAmount,
+      min: order.fiatAmountMin,
+      max: order.fiatAmountMax,
+      code: order.fiatCode,
+      sats: order.amountSats?.toInt(),
+    );
+  }
+
   Widget _stepBlock(
     AppLocalizations l10n,
     TradeView view,
     TradeStatus status,
     bool isBuyer,
     OrderItem? order, {
+    required String? amount,
+    required String? summary,
     required bool loadFailed,
   }) {
-    final amount =
-        order != null ? '${order.displayAmount} ${order.fiatCode}' : null;
     return TradeStepBlock(
+      summary: summary,
       stepLabel:
           view.step >= 0 && view.step < kTradeStepCount
               ? l10n.stepIndicator(view.step + 1, kTradeStepCount)
@@ -1011,13 +1069,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     TradeStatus status,
     bool canRate,
     OrderItem? order,
+    String? amount,
     String? alias,
   ) {
     final rating = ref.watch(tradeRatingProvider(widget.orderId)).valueOrNull;
     final mine = rating != null && rating.isMine ? rating.score : null;
     final picking = status == TradeStatus.pendingRating && canRate;
     return TradeCompletedCard(
-      amount: order != null ? '${order.displayAmount} ${order.fiatCode}' : null,
+      amount: amount,
       paymentMethod: order?.paymentMethod,
       ratedAlias: alias ?? l10n.unknownPeerHandle,
       ratedScore: mine,

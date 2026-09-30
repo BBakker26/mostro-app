@@ -1392,6 +1392,25 @@ async fn store_chat_cursor(channel: ChatChannel, order_id: &str, ts: i64) {
     }
 }
 
+/// Persist the cursor only while `generation` still owns the chat, checked
+/// and written under the guard's lock. A task stopped by a solver takeover
+/// can still be handling an event; without this its write could land after
+/// the takeover reset the cursor and restore the previous conversation's
+/// `since`. A stop takes the same lock, so it happens either before the
+/// check (no write) or after the write (the reset follows it).
+async fn store_chat_cursor_if_current(
+    channel: ChatChannel,
+    order_id: &str,
+    generation: u64,
+    ts: i64,
+) {
+    let active = active_chats().lock().await;
+    if active.get(&channel.guard_key(order_id)) != Some(&generation) {
+        return;
+    }
+    store_chat_cursor(channel, order_id, ts).await;
+}
+
 /// Interpret a validated inner-event payload.
 ///
 /// An attachment travels as v1's JSON message (`image_encrypted` /
@@ -1513,10 +1532,13 @@ struct ChatRxState {
     live: bool,
     cursor: i64,
     flooded: bool,
+    /// The chat claim this state belongs to: cursor writes are gated on it
+    /// still owning the chat. `None` only in tests that run no task.
+    generation: Option<u64>,
 }
 
 impl ChatRxState {
-    fn new(channel: ChatChannel, cursor: i64) -> Self {
+    fn new(channel: ChatChannel, cursor: i64, generation: Option<u64>) -> Self {
         Self {
             channel,
             outer_seen: BoundedIdSet::new(OUTER_LRU_CAP),
@@ -1525,6 +1547,7 @@ impl ChatRxState {
             live: false,
             cursor,
             flooded: false,
+            generation,
         }
     }
 
@@ -1566,7 +1589,13 @@ impl ChatRxState {
         let accepted = event_ts.min(unix_now());
         if accepted > self.cursor {
             self.cursor = accepted;
-            store_chat_cursor(self.channel, order_id, accepted).await;
+            match self.generation {
+                Some(generation) => {
+                    store_chat_cursor_if_current(self.channel, order_id, generation, accepted)
+                        .await
+                }
+                None => store_chat_cursor(self.channel, order_id, accepted).await,
+            }
         }
     }
 }
@@ -1628,7 +1657,7 @@ async fn run_chat_subscription(
         sign_pubkey.to_hex(),
     );
 
-    let mut state = ChatRxState::new(channel, cursor);
+    let mut state = ChatRxState::new(channel, cursor, Some(generation));
 
     loop {
         // The trade ended and `stop_chat_subscriptions` took the chat back.
@@ -2220,7 +2249,7 @@ mod tests {
             .finalize(&sign)
             .unwrap();
 
-        let mut state = ChatRxState::new(ChatChannel::Peer, 0);
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
         handle_chat_event(
             ChatChannel::Peer,
             &order_id,
@@ -2515,7 +2544,7 @@ mod tests {
         // Pre-EOSE (catch-up): a backlog far above the burst size is all
         // accepted — dropping stored history would lose it permanently
         // because the cursor advances past it.
-        let mut state = ChatRxState::new(ChatChannel::Peer, 0);
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
         assert!(!state.live);
         for _ in 0..(RATE_CAPACITY as u32 * 5) {
             assert!(state.budget_ok("order-x"));
@@ -2580,6 +2609,41 @@ mod tests {
         assert!(!chat_is_current(ChatChannel::Peer, &order, peer).await);
         assert!(!chat_is_current(ChatChannel::Dispute, &order, dispute).await);
         assert!(stop_chat_subscriptions(&order).await.is_empty());
+    }
+
+    /// Codex review of #638: a dispute chat task stopped by a solver
+    /// takeover can still be handling an event. Its cursor write must not
+    /// land once it no longer owns the chat, or it would restore the previous
+    /// conversation's `since` after the takeover reset it.
+    #[tokio::test]
+    async fn a_stopped_chat_task_does_not_write_the_cursor() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_takeover_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the cursor gate cannot be exercised");
+        };
+        let order = format!("stopped-cursor-{}", uuid::Uuid::new_v4());
+        let key = ChatChannel::Dispute.cursor_key(&order);
+        let now = unix_now();
+
+        let generation = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+        let mut state = ChatRxState::new(ChatChannel::Dispute, 0, Some(generation));
+        state.advance_cursor(&order, now - 20).await;
+        assert_eq!(
+            db.get_setting(&key).await.unwrap(),
+            Some((now - 20).to_string()),
+            "the owning task writes its cursor"
+        );
+
+        stop_chat_subscription(ChatChannel::Dispute, &order).await;
+        reset_chat_cursor(ChatChannel::Dispute, &order).await;
+        state.advance_cursor(&order, now - 10).await;
+        assert_eq!(
+            db.get_setting(&key).await.unwrap(),
+            None,
+            "a stopped task must not restore the cursor"
+        );
     }
 
     /// PR #527 review: stop, then a replacement task claims the same chat,

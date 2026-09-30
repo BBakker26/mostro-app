@@ -673,6 +673,14 @@ fn is_stale_solver_assignment(trade_id: &str, at: Option<i64>) -> bool {
         .is_some_and(|&newest| at <= newest)
 }
 
+/// Serializes solver assignments. The global and per-trade notification
+/// tasks both dispatch daemon messages, so two `admin-took-dispute` for one
+/// order can be applied at once, and the event-id window only drops exact
+/// duplicates. The staleness check, the recorded time, the chat restart and
+/// the persisted solver must describe the same assignment, so each one is
+/// applied whole. Assignments are rare, so one lock for all orders is enough.
+static SOLVER_ASSIGNMENT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// [`handle_admin_took_dispute`] with the time the daemon made the assignment
 /// (`assigned_at`, the event's `created_at`), so a replayed older assignment
 /// cannot replace a newer solver.
@@ -681,6 +689,7 @@ pub(crate) async fn apply_admin_took_dispute(
     admin_pubkey: String,
     assigned_at: Option<i64>,
 ) -> Result<()> {
+    let _assignment = SOLVER_ASSIGNMENT_LOCK.lock().await;
     let admin_pubkey_for_key = admin_pubkey.clone();
 
     // The offline catch-up channel has no `since` (orders.rs), so this action
@@ -1761,6 +1770,56 @@ mod tests {
 
         crate::api::messages::stop_chat_subscriptions(&order).await;
         clear_dispute_keys(&order).await;
+    }
+
+    /// Codex review of #638: the global and per-trade notification tasks can
+    /// dispatch two assignments for one order at once, in either order. Each
+    /// is applied whole, so the newest solver wins and the persisted solver
+    /// and time describe the same assignment.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_assignments_keep_the_newest_solver() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_takeover_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the persisted assignment cannot be checked");
+        };
+        let serbero = "00000000000000000000000000000000000000000000000000000000000000ee";
+        let solver = "00000000000000000000000000000000000000000000000000000000000000ff";
+
+        for _ in 0..50 {
+            let order = format!("concurrent-{}", uuid::Uuid::new_v4());
+            let older = tokio::spawn(apply_admin_took_dispute(
+                order.clone(),
+                serbero.to_string(),
+                Some(100),
+            ));
+            let newer = tokio::spawn(apply_admin_took_dispute(
+                order.clone(),
+                solver.to_string(),
+                Some(200),
+            ));
+            older.await.unwrap().unwrap();
+            newer.await.unwrap().unwrap();
+
+            let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+            assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+            assert_eq!(
+                db.get_setting(&crate::db::settings_keys::dispute_admin(&order))
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some(solver)
+            );
+            assert_eq!(
+                db.get_setting(&crate::db::settings_keys::dispute_admin_at(&order))
+                    .await
+                    .unwrap()
+                    .as_deref(),
+                Some("200")
+            );
+            clear_dispute_keys(&order).await;
+        }
     }
 
     /// Codex review of #638: `created_at` has second resolution. A replayed

@@ -186,7 +186,9 @@ stopped before the new one is armed; the chat guard allows one task per order
 and channel, so without the stop the new solver's messages would never be read.
 The peer chat is not touched. The dispute chat's `since` cursor is cleared,
 since it dates the previous conversation and the new solver's clock may be
-behind it. A listener armed for the previous solver that has not claimed the
+behind it. A chat task only writes its cursor while it still owns the chat
+(checked under the guard's lock), so the stopped task, if it was handling an
+event, cannot restore the old cursor. A listener armed for the previous solver that has not claimed the
 chat yet (rehydration on reconnect) cannot claim it: the claim checks the
 dispute's current solver under the guard's lock.
 
@@ -196,7 +198,10 @@ channel replays every `admin-took-dispute`, usually newest first, and the
 previous solver must not come back. Equal seconds cannot be ordered, so the
 current assignment is kept. The time is persisted under
 `dispute_admin_at:<order_id>` and seeded again by rehydration, so the replay
-order does not matter after a restart either.
+order does not matter after a restart either. Assignments are applied one at
+a time (a global lock): the global and per-trade notification tasks can
+dispatch two for the same order at once, and the check, the recorded time,
+the chat restart and the persisted solver must describe the same assignment.
 
 Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
 a resolved record or a finished trade is `NoOpenDispute`.

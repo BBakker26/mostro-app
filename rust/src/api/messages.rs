@@ -1223,6 +1223,7 @@ pub(crate) async fn chat_is_current(
 
 /// Release `generation`'s claim, returning whether it still held it — only
 /// then does the task own the subscription it is about to close.
+#[cfg(test)]
 async fn release_chat(channel: ChatChannel, order_id: &str, generation: u64) -> bool {
     let mut active = active_chats().lock().await;
     let key = channel.guard_key(order_id);
@@ -1256,6 +1257,21 @@ pub(crate) async fn stop_chat_subscriptions(order_id: &str) -> Vec<ChatChannel> 
 /// was running.
 pub(crate) async fn stop_chat_subscription(channel: ChatChannel, order_id: &str) -> bool {
     let mut active = active_chats().lock().await;
+    stop_chat_locked(&mut active, channel, order_id).await
+}
+
+/// A task's own cleanup: release its claim and close the chat's REQ, only
+/// while `generation` still owns the chat, all under the guard's lock (through
+/// the registry, or a reconnect repair would resurrect the REQ of a chat
+/// nobody listens to). Releasing first and closing after would let a
+/// replacement task (a takeover's) claim the chat and install its filter in
+/// between, and the late close would then remove it. Returns whether it
+/// still owned the chat.
+async fn release_and_close_chat(channel: ChatChannel, order_id: &str, generation: u64) -> bool {
+    let mut active = active_chats().lock().await;
+    if active.get(&channel.guard_key(order_id)) != Some(&generation) {
+        return false;
+    }
     stop_chat_locked(&mut active, channel, order_id).await
 }
 
@@ -1525,17 +1541,9 @@ pub(crate) async fn subscribe_incoming_chat(
     // subscription so it never outlives the task — but only while this task
     // still owns the chat. After a stop the REQ is already closed, and a
     // replacement task may have re-opened it under the same id.
-    if !release_chat(channel, &order_id, generation).await {
+    if !release_and_close_chat(channel, &order_id, generation).await {
         log::debug!("[messages] chat task superseded order={order_id}");
         return;
-    }
-    if let Ok(pool) = crate::api::nostr::get_pool() {
-        let client = pool.client();
-        // Through the registry, or a reconnect repair would resurrect the
-        // REQ of a chat nobody listens to any more.
-        crate::nostr::live_subs::live_subs()
-            .close(&client, &chat_subscription_id(channel, &order_id))
-            .await;
     }
     log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
 }
@@ -2818,6 +2826,25 @@ mod tests {
             crate::nostr::live_subs::live_subs().close(&client, &sub_id).await;
             release_chat(ChatChannel::Dispute, &order, generation).await;
         }
+    }
+
+    /// Codex review of #638: a task's own cleanup releases and closes only
+    /// while it owns the chat. After a takeover handed the chat to a new task,
+    /// the old task's cleanup leaves the new claim (and so its REQ) alone. The
+    /// close runs under the same lock as the release; unit tests have no relay
+    /// pool, so only the claim is observed here.
+    #[tokio::test]
+    async fn a_chat_tasks_cleanup_leaves_its_replacement_alone() {
+        let order = format!("cleanup-{}", uuid::Uuid::new_v4());
+        let old = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+        stop_chat_subscription(ChatChannel::Dispute, &order).await;
+        let new = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+
+        assert!(!release_and_close_chat(ChatChannel::Dispute, &order, old).await);
+        assert!(chat_is_current(ChatChannel::Dispute, &order, new).await);
+
+        assert!(release_and_close_chat(ChatChannel::Dispute, &order, new).await);
+        assert!(!chat_is_current(ChatChannel::Dispute, &order, new).await);
     }
 
     /// PR #527 review: stop, then a replacement task claims the same chat,

@@ -208,6 +208,11 @@ the recorded times with its disputes. Assignments are applied one at
 a time (a global lock): the global and per-trade notification tasks can
 dispatch two for the same order at once, and the check, the recorded time,
 the chat restart and the persisted solver must describe the same assignment.
+Rehydration restores each persisted solver and its time under the same lock,
+since a replayed older assignment applied half-way would install the previous
+solver with the newer time. A chat task's own cleanup likewise releases its
+claim and closes its REQ under the chat guard's lock, so a takeover's new task
+cannot install its subscription in between and lose it to the late close.
 
 Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
 a resolved record or a finished trade is `NoOpenDispute`.

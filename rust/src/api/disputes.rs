@@ -1111,6 +1111,11 @@ async fn rehydrate_disputes_from_storage() {
             continue;
         }
 
+        // Restoring the solver and its assignment time is an assignment too:
+        // a replayed older `admin-took-dispute` applied between the time
+        // being recorded and the record being inserted would find no record,
+        // install the previous solver, and pair it with the newer time.
+        let _assignment = SOLVER_ASSIGNMENT_LOCK.lock().await;
         let admin_hex = match db
             .get_setting(&crate::db::settings_keys::dispute_admin(&order_id))
             .await
@@ -1855,6 +1860,54 @@ mod tests {
         assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
 
         clear_dispute_keys(&order).await;
+    }
+
+    /// Codex review of #638: on reconnect, rehydration restores the
+    /// persisted solver and its assignment time while the catch-up channel
+    /// may already be replaying the previous solver's older assignment. The
+    /// two are serialized, so the replay ends on the persisted, newer solver.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn rehydration_and_an_older_replay_keep_the_newer_solver() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_takeover_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: rehydration cannot be exercised");
+        };
+        let serbero = "0000000000000000000000000000000000000000000000000000000000000333";
+        let solver = "0000000000000000000000000000000000000000000000000000000000000444";
+
+        for _ in 0..20 {
+            let order = format!("rehydrate-replay-{}", uuid::Uuid::new_v4());
+            db.save_trade(&persisted_trade(&order, OrderStatus::Dispute))
+                .await
+                .unwrap();
+            db.set_setting(&crate::db::settings_keys::dispute_admin(&order), solver)
+                .await
+                .unwrap();
+            db.set_setting(&crate::db::settings_keys::dispute_admin_at(&order), "200")
+                .await
+                .unwrap();
+
+            let rehydrate = tokio::spawn(rehydrate_disputes_from_storage());
+            let replay = tokio::spawn(apply_admin_took_dispute(
+                order.clone(),
+                serbero.to_string(),
+                Some(100),
+            ));
+            rehydrate.await.unwrap();
+            replay.await.unwrap().unwrap();
+            // The rest of the replay.
+            apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+                .await
+                .unwrap();
+
+            let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+            assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+
+            clear_dispute_keys(&order).await;
+            db.delete_trade_by_order_id(&order).await.unwrap();
+        }
     }
 
     /// Codex review of #638: `created_at` has second resolution. A replayed

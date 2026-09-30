@@ -207,14 +207,23 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Initialize the Nostr relay pool. `null` means the compiled-in defaults
   // (config.rs); a non-empty seed list replaces them entirely.
   // This must happen before any Nostr/order API calls.
-  await nostr_api.initialize(relays: seedRelays.isEmpty ? null : seedRelays);
+  //
+  // Guarded like the steps above: this runs before `runApp`, and an escaping
+  // error here left the app on its splash screen for good. A launch that
+  // reuses a live process (Android destroyed the activity, not the process)
+  // finds the pool already running; Rust re-attaches to it rather than fail.
+  try {
+    await nostr_api.initialize(relays: seedRelays.isEmpty ? null : seedRelays);
 
-  // Log initial relay state for diagnostics.
-  final relays = await nostr_api.getRelays();
-  final connState = await nostr_api.getConnectionState();
-  debugPrint(
-    '[main] relay pool initialized — state=$connState relays=${relays.map((r) => '${r.url}:${r.status}').join(', ')}',
-  );
+    // Log initial relay state for diagnostics.
+    final relays = await nostr_api.getRelays();
+    final connState = await nostr_api.getConnectionState();
+    debugPrint(
+      '[main] relay pool initialized — state=$connState relays=${relays.map((r) => '${r.url}:${r.status}').join(', ')}',
+    );
+  } catch (e, st) {
+    debugPrint('[main] relay pool init failed: $e\n$st');
+  }
 
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();

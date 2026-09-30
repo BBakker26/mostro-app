@@ -203,7 +203,10 @@ channel replays every `admin-took-dispute`, usually newest first, and the
 previous solver must not come back. Equal seconds cannot be ordered, so the
 current assignment is kept. The time is persisted under
 `dispute_admin_at:<order_id>` and seeded again by rehydration, so the replay
-order does not matter after a restart either. Deleting the identity forgets
+order does not matter after a restart either. A time beyond the local
+clock's skew horizon (`MAX_CLOCK_SKEW_SECS`) is not recorded, as for status
+events: it would otherwise reject every genuine takeover until wall time
+caught up. Deleting the identity forgets
 the recorded times with its disputes. Assignments are applied one at
 a time (a global lock): the global and per-trade notification tasks can
 dispatch two for the same order at once, and the check, the recorded time,

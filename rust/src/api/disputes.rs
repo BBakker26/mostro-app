@@ -696,6 +696,25 @@ pub(crate) async fn apply_admin_took_dispute(
     assigned_at: Option<i64>,
 ) -> Result<()> {
     let _assignment = SOLVER_ASSIGNMENT_LOCK.lock().await;
+    // A time beyond the local clock's skew horizon (a node clock jump, a
+    // malformed timestamp) would become the newest assignment and reject
+    // every genuine takeover until wall time caught up. Such an assignment
+    // is applied, but its time is not recorded, as for status events.
+    let horizon = unix_now().saturating_add(crate::nostr::transport::MAX_CLOCK_SKEW_SECS as i64);
+    let assigned_at = match assigned_at {
+        Some(at) if at > horizon => {
+            crate::api::logging::blog_warn(
+                "disputes",
+                format!(
+                    "solver assignment time not recorded for order={}: event is {}s ahead of the local clock",
+                    crate::api::logging::short_id(&trade_id),
+                    at.saturating_sub(horizon),
+                ),
+            );
+            None
+        }
+        at => at,
+    };
     let admin_pubkey_for_key = admin_pubkey.clone();
 
     // The offline catch-up channel has no `since` (orders.rs), so this action
@@ -1908,6 +1927,33 @@ mod tests {
             clear_dispute_keys(&order).await;
             db.delete_trade_by_order_id(&order).await.unwrap();
         }
+    }
+
+    /// Codex review of #638: an assignment dated beyond the clock-skew
+    /// horizon is applied, but its time is not recorded, or it would reject
+    /// every genuine takeover until wall time caught up.
+    #[tokio::test]
+    async fn a_future_dated_assignment_does_not_block_later_takeovers() {
+        let order = format!("future-{}", uuid::Uuid::new_v4());
+        let serbero = "0000000000000000000000000000000000000000000000000000000000000555";
+        let skewed = "0000000000000000000000000000000000000000000000000000000000000666";
+        let solver = "0000000000000000000000000000000000000000000000000000000000000777";
+        let now = unix_now();
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(now - 100))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), skewed.to_string(), Some(now + 86_400))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(now))
+            .await
+            .unwrap();
+
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+
+        clear_dispute_keys(&order).await;
     }
 
     /// Codex review of #638: `created_at` has second resolution. A replayed

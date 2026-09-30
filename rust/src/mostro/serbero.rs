@@ -16,7 +16,7 @@
 //! Read at display time, not when a message arrives: a history replay can
 //! land before the capability fetch, and the label then corrects itself.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
 use nostr_sdk::prelude::PublicKey;
@@ -48,14 +48,20 @@ pub(crate) fn set_from_tags(node: &str, tags: &[Vec<String>]) {
 }
 
 /// Whether `pubkey` is a Serbero some known node announces. `live` wins over
-/// `cached` for a node it has an answer for.
+/// `cached` for a node it has an answer for; a live answer of a node not in
+/// `known` (removed from the registry) no longer counts. `cached` is pruned
+/// to the registry where it is written.
 fn is_assistant_in(
     pubkey: &str,
     live: &HashMap<String, Option<String>>,
     cached: &HashMap<String, Vec<Vec<String>>>,
+    known: &HashSet<String>,
 ) -> bool {
     let pubkey = pubkey.trim().to_lowercase();
-    let announced_live = live.values().flatten().any(|serbero| *serbero == pubkey);
+    let announced_live = live
+        .iter()
+        .filter(|(node, _)| known.contains(node.as_str()))
+        .any(|(_, serbero)| serbero.as_deref() == Some(pubkey.as_str()));
     announced_live
         || cached
             .iter()
@@ -72,7 +78,21 @@ pub(crate) async fn is_assistant(pubkey: &str) -> bool {
         .clone()
         .unwrap_or_default();
     let cached = crate::api::node_stats::cached_info_tags().await;
-    is_assistant_in(pubkey, &live, &cached)
+    is_assistant_in(pubkey, &live, &cached, &known_nodes().await)
+}
+
+/// The registry's nodes and the active one (lowercase hex). A node removed
+/// from the registry drops out, although its live answer stays in memory.
+async fn known_nodes() -> HashSet<String> {
+    let mut known: HashSet<String> = match crate::api::nodes::list_mostro_nodes().await {
+        Ok(nodes) => nodes.into_iter().map(|n| n.pubkey.to_lowercase()).collect(),
+        Err(e) => {
+            log::warn!("[serbero] node registry unreadable: {e}");
+            HashSet::new()
+        }
+    };
+    known.insert(crate::config::active_mostro_pubkey().to_lowercase());
+    known
 }
 
 fn is_pubkey(hex: &str) -> bool {
@@ -87,6 +107,10 @@ mod tests {
     const HUMAN: &str = "00000f13a1a2b3033d2908bb2fc7e29de803d5ac55a249cdebc11d50fca7fc00";
     const NODE: &str = "dbe0b1be7aafd3cfba92d7463edbd4e33b2969f61bd554d37ac56f032e13355a";
     const OTHER_NODE: &str = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
+
+    fn known(nodes: &[&str]) -> HashSet<String> {
+        nodes.iter().map(|n| n.to_string()).collect()
+    }
 
     fn tags(pairs: &[(&str, &str)]) -> Vec<Vec<String>> {
         pairs
@@ -126,10 +150,21 @@ mod tests {
         ]);
 
         // Act + Assert
-        assert!(is_assistant_in(SERBERO, &live, &cached));
-        assert!(is_assistant_in(&SERBERO.to_uppercase(), &live, &cached));
-        assert!(!is_assistant_in(HUMAN, &live, &cached));
-        assert!(!is_assistant_in(SERBERO, &live, &HashMap::new()));
+        assert!(is_assistant_in(SERBERO, &live, &cached, &known(&[NODE, OTHER_NODE])));
+        assert!(is_assistant_in(&SERBERO.to_uppercase(), &live, &cached, &known(&[NODE, OTHER_NODE])));
+        assert!(!is_assistant_in(HUMAN, &live, &cached, &known(&[NODE, OTHER_NODE])));
+        assert!(!is_assistant_in(SERBERO, &live, &HashMap::new(), &known(&[NODE, OTHER_NODE])));
+    }
+
+    #[test]
+    fn a_live_announcement_of_a_node_no_longer_known_is_ignored() {
+        // Arrange: the user visited a custom node, then removed it from the
+        // registry; its live answer outlives the removal in memory.
+        let live = HashMap::from([(OTHER_NODE.to_string(), Some(SERBERO.to_string()))]);
+
+        // Act + Assert
+        assert!(!is_assistant_in(SERBERO, &live, &HashMap::new(), &known(&[NODE])));
+        assert!(is_assistant_in(SERBERO, &live, &HashMap::new(), &known(&[OTHER_NODE])));
     }
 
     #[test]
@@ -141,7 +176,7 @@ mod tests {
         let announced = HashMap::from([(NODE.to_string(), Some(SERBERO.to_string()))]);
 
         // Act + Assert
-        assert!(!is_assistant_in(SERBERO, &retracted, &cached));
-        assert!(is_assistant_in(SERBERO, &announced, &HashMap::new()));
+        assert!(!is_assistant_in(SERBERO, &retracted, &cached, &known(&[NODE, OTHER_NODE])));
+        assert!(is_assistant_in(SERBERO, &announced, &HashMap::new(), &known(&[NODE, OTHER_NODE])));
     }
 }

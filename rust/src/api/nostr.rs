@@ -917,6 +917,8 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
             // Lightning, and leave Cashu closed.
             escrow_mode::clear();
             crate::mostro::bond_policy::clear();
+            // Nor a Serbero: retract an older announcement of this node.
+            crate::mostro::serbero::set_from_tags(&mostro_pubkey_hex, &[]);
         }
         Err(e) => {
             log::warn!("[nostr] failed to fetch Kind 38385 for node capabilities: {e}");

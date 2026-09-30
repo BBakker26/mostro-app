@@ -1395,8 +1395,10 @@ mod tests {
     #[tokio::test]
     async fn the_solver_role_follows_the_nodes_serbero_announcement() {
         use nostr_sdk::prelude::Keys;
-        // Arrange: a node of its own, so no other test's announcement counts.
-        let node = Keys::generate().public_key().to_hex();
+        // Arrange: the active node announces a Serbero of this test's own, so
+        // no other test's key can match. A node outside the registry would
+        // not count.
+        let node = crate::config::active_mostro_pubkey();
         let serbero = Keys::generate().public_key().to_hex();
         let person = Keys::generate().public_key().to_hex();
         let announcing = vec![vec!["serbero".to_string(), serbero.clone()]];

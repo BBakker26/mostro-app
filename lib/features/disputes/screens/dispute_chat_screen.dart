@@ -177,6 +177,9 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
       disputeUpdatesProvider(tradeId),
       (_, next) => next.whenData((update) {
         _liveUpdates++;
+        // A takeover or a verdict: read who each solver is again, so a label
+        // shown before the node's Serbero announcement arrived catches up.
+        ref.invalidate(solverRoleProvider);
         ref
             .read(disputeNotifierProvider.notifier)
             .applyBridgeUpdate(disputeItemFromRust(update));

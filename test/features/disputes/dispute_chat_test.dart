@@ -508,6 +508,37 @@ void main() {
       expect(find.text(l10n.disputeSolverTookOver), findsNothing);
     });
 
+    testWidgets('a dispute update reads the solver roles again', (
+      tester,
+    ) async {
+      // Arrange: the history lands before the node's announcement.
+      final assistants = <String>{};
+      final updates = StreamController<rust_types.Dispute>();
+      addTearDown(updates.close);
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(adminPubkey: _serbero),
+        disputeGateway: _FakeDisputeGateway(
+          (_) => Completer<Never>().future,
+          assistants: assistants,
+        ),
+        updates: updates.stream,
+        history: [_message(id: 's1', sender: _serbero, content: 'Hi')],
+      );
+      await tester.pump();
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+
+      // Act: the announcement arrives, then an update of the dispute.
+      assistants.add(_serbero);
+      updates.add(_bridgeDispute());
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
+
+      // Assert
+      expect(find.text(l10n.serberoLabel), findsOneWidget);
+    });
+
     testWidgets('a node without Serbero shows every solver as a resolver', (
       tester,
     ) async {

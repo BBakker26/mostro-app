@@ -175,6 +175,10 @@ bridged by flutter_rust_bridge.
   `fix(phaseX): review round N`). Not big-bang.
 - Conventional commits (`feat/fix/docs/refactor/chore(scope)`), branches `type/kebab-desc`,
   everything via **PR to `main`** (gh CLI) + CodeRabbit review.
+- **Before opening a PR, read and follow `CONTRIBUTING.md § Contribution quality bar`**
+  (summarised in `AGENTS.md § Before opening a pull request`): accepted issue, every section
+  of `.github/pull_request_template.md`, Manual testing a person actually ran, screenshots for
+  visible changes, and a `test:` first commit that fails on `main` for a fix.
 
 ## Releases (`docs/RELEASING.md`)
 - **A pushed tag `vX.Y.Z` is the release.** `.github/workflows/release.yml` builds two signed

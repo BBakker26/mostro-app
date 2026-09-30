@@ -428,6 +428,28 @@ mod tests {
         crate::config::set_active_mostro_pubkey(None);
     }
 
+    /// A node switch empties the process-wide order book and rewrites the
+    /// active node, and every test in the binary shares both. Run from here,
+    /// it emptied the book under
+    /// `the_sweep_clears_the_step_start_of_a_republished_maker_order`, which
+    /// then failed at random under the full parallel suite. Test what the
+    /// switch does to its input, never the switch itself.
+    #[test]
+    fn no_test_here_switches_the_active_node() {
+        let source = include_str!("settings.rs");
+        let tests = source
+            .split("\n#[cfg(test)]\nmod tests {")
+            .nth(1)
+            .expect("the test module");
+        // Split so that this line does not match itself.
+        let switch = concat!("set_active_mostro_node", "(");
+        assert!(
+            !tests.contains(switch),
+            "a test here drives a real node switch, which empties the order \
+             book every other test shares"
+        );
+    }
+
     #[tokio::test]
     async fn settings_stream_receives_change() {
         let _g = settings_lock().lock().unwrap();

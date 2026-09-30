@@ -696,25 +696,23 @@ pub(crate) async fn apply_admin_took_dispute(
     assigned_at: Option<i64>,
 ) -> Result<()> {
     let _assignment = SOLVER_ASSIGNMENT_LOCK.lock().await;
-    // A time beyond the local clock's skew horizon (a node clock jump, a
-    // malformed timestamp) would become the newest assignment and reject
-    // every genuine takeover until wall time caught up. Such an assignment
-    // is applied, but its time is not recorded, as for status events.
+    // An assignment dated beyond the local clock's skew horizon (a node
+    // clock jump, a malformed timestamp) cannot be ordered against the
+    // others: recorded, it would reject every genuine takeover until wall
+    // time caught up; applied without its time, an older replay could roll
+    // it back. It is rejected, like a future-dated chat event.
     let horizon = unix_now().saturating_add(crate::nostr::transport::MAX_CLOCK_SKEW_SECS as i64);
-    let assigned_at = match assigned_at {
-        Some(at) if at > horizon => {
-            crate::api::logging::blog_warn(
-                "disputes",
-                format!(
-                    "solver assignment time not recorded for order={}: event is {}s ahead of the local clock",
-                    crate::api::logging::short_id(&trade_id),
-                    at.saturating_sub(horizon),
-                ),
-            );
-            None
-        }
-        at => at,
-    };
+    if let Some(at) = assigned_at.filter(|&at| at > horizon) {
+        crate::api::logging::blog_warn(
+            "disputes",
+            format!(
+                "skip admin-took-dispute order={}: event is {}s ahead of the local clock",
+                crate::api::logging::short_id(&trade_id),
+                at.saturating_sub(horizon),
+            ),
+        );
+        return Ok(());
+    }
     let admin_pubkey_for_key = admin_pubkey.clone();
 
     // The offline catch-up channel has no `since` (orders.rs), so this action
@@ -843,7 +841,7 @@ pub(crate) async fn apply_admin_took_dispute(
     }
 
     persist_admin_pubkey(&trade_id, &admin_pubkey_for_key).await;
-    persist_solver_assigned_at(&trade_id).await;
+    persist_solver_assigned_at(&trade_id, &admin_pubkey_for_key).await;
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
 }
 
@@ -883,8 +881,12 @@ async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
 }
 
 /// Persist when the current solver was assigned (see [`solver_assigned_at`]),
-/// for rehydration. Best-effort, like the pubkey.
-async fn persist_solver_assigned_at(order_id: &str) {
+/// for rehydration, as `<time>:<solver pubkey>`. The pubkey is written apart
+/// (`dispute_admin:`) and either write can fail, so the time names the solver
+/// it belongs to, and rehydration ignores it for any other: a stale solver
+/// paired with a newer time would reject the replay that repairs it.
+/// Best-effort, like the pubkey.
+async fn persist_solver_assigned_at(order_id: &str, admin_pubkey_hex: &str) {
     let Some(at) = recorded_solver_assignment(order_id) else {
         return;
     };
@@ -894,7 +896,7 @@ async fn persist_solver_assigned_at(order_id: &str) {
     if let Err(e) = db
         .set_setting(
             &crate::db::settings_keys::dispute_admin_at(order_id),
-            &at.to_string(),
+            &format!("{at}:{admin_pubkey_hex}"),
         )
         .await
     {
@@ -1151,13 +1153,18 @@ async fn rehydrate_disputes_from_storage() {
         };
 
         // When that solver was assigned, so a replayed older assignment is
-        // told apart whatever order the catch-up channel delivers it in.
+        // told apart whatever order the catch-up channel delivers it in. Only
+        // a time recorded for this very solver counts (see
+        // `persist_solver_assigned_at`).
         let assigned_at = db
             .get_setting(&crate::db::settings_keys::dispute_admin_at(&order_id))
             .await
             .ok()
             .flatten()
-            .and_then(|at| at.parse::<i64>().ok());
+            .and_then(|value| {
+                let (at, solver) = value.split_once(':')?;
+                (solver == admin_hex).then(|| at.parse::<i64>().ok()).flatten()
+            });
         note_solver_assignment(&order_id, assigned_at);
 
         let initiated_by_me = match db
@@ -1837,7 +1844,7 @@ mod tests {
                     .await
                     .unwrap()
                     .as_deref(),
-                Some("200")
+                Some(format!("200:{solver}").as_str())
             );
             clear_dispute_keys(&order).await;
         }
@@ -1904,9 +1911,12 @@ mod tests {
             db.set_setting(&crate::db::settings_keys::dispute_admin(&order), solver)
                 .await
                 .unwrap();
-            db.set_setting(&crate::db::settings_keys::dispute_admin_at(&order), "200")
-                .await
-                .unwrap();
+            db.set_setting(
+                &crate::db::settings_keys::dispute_admin_at(&order),
+                &format!("200:{solver}"),
+            )
+            .await
+            .unwrap();
 
             let rehydrate = tokio::spawn(rehydrate_disputes_from_storage());
             let replay = tokio::spawn(apply_admin_took_dispute(
@@ -1930,8 +1940,9 @@ mod tests {
     }
 
     /// Codex review of #638: an assignment dated beyond the clock-skew
-    /// horizon is applied, but its time is not recorded, or it would reject
-    /// every genuine takeover until wall time caught up.
+    /// horizon is rejected. Recorded, it would reject every genuine takeover
+    /// until wall time caught up; applied without its time, an older replay
+    /// could roll it back.
     #[tokio::test]
     async fn a_future_dated_assignment_does_not_block_later_takeovers() {
         let order = format!("future-{}", uuid::Uuid::new_v4());
@@ -1946,6 +1957,12 @@ mod tests {
         apply_admin_took_dispute(order.clone(), skewed.to_string(), Some(now + 86_400))
             .await
             .unwrap();
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(
+            dispute.admin_pubkey.as_deref(),
+            Some(serbero),
+            "a future-dated assignment is not applied"
+        );
         apply_admin_took_dispute(order.clone(), solver.to_string(), Some(now))
             .await
             .unwrap();
@@ -1954,6 +1971,47 @@ mod tests {
         assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
 
         clear_dispute_keys(&order).await;
+    }
+
+    /// Codex review of #638: the solver and its assignment time are two
+    /// best-effort writes. If a takeover's pubkey write failed, storage pairs
+    /// the previous solver with the new solver's time; rehydration must
+    /// ignore that time, or it would reject the replay that repairs it.
+    #[tokio::test]
+    async fn rehydration_ignores_a_time_recorded_for_another_solver() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_takeover_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: rehydration cannot be exercised");
+        };
+        let serbero = "0000000000000000000000000000000000000000000000000000000000000888";
+        let solver = "0000000000000000000000000000000000000000000000000000000000000999";
+        let order = format!("partial-write-{}", uuid::Uuid::new_v4());
+        db.save_trade(&persisted_trade(&order, OrderStatus::Dispute))
+            .await
+            .unwrap();
+        // The takeover's time landed, its pubkey write did not.
+        db.set_setting(&crate::db::settings_keys::dispute_admin(&order), serbero)
+            .await
+            .unwrap();
+        db.set_setting(
+            &crate::db::settings_keys::dispute_admin_at(&order),
+            &format!("200:{solver}"),
+        )
+        .await
+        .unwrap();
+
+        rehydrate_disputes_from_storage().await;
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+
+        clear_dispute_keys(&order).await;
+        db.delete_trade_by_order_id(&order).await.unwrap();
     }
 
     /// Codex review of #638: `created_at` has second resolution. A replayed
@@ -2024,8 +2082,8 @@ mod tests {
             "a takeover clears the previous conversation's cursor"
         );
         assert_eq!(
-            db.get_setting(&at_key).await.unwrap().as_deref(),
-            Some("200")
+            db.get_setting(&at_key).await.unwrap(),
+            Some(format!("200:{solver}"))
         );
 
         clear_dispute_keys(&order).await;

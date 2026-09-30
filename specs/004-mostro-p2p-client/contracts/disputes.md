@@ -145,8 +145,9 @@ its own. These facts are persisted anyway:
   replay is bounded by relay retention and by the per-subscription result cap,
   so a long dispute can outlive it. The stored copy is what re-arms the chat
   when the replay no longer covers the assignment.
-- **when that solver was assigned**, under `dispute_admin_at:<order_id>`, so a
-  replayed older assignment is ignored after a restart (see Solver takeover).
+- **when that solver was assigned**, under `dispute_admin_at:<order_id>` as
+  `<time>:<pubkey>`, so a replayed older assignment is ignored after a restart
+  (see Solver takeover).
 
 **Rehydration**: on relay (re)connect, dispute records are rebuilt for persisted
 trades that have a stored solver, before dispute-chat listeners are re-armed and
@@ -203,10 +204,12 @@ channel replays every `admin-took-dispute`, usually newest first, and the
 previous solver must not come back. Equal seconds cannot be ordered, so the
 current assignment is kept. The time is persisted under
 `dispute_admin_at:<order_id>` and seeded again by rehydration, so the replay
-order does not matter after a restart either. A time beyond the local
-clock's skew horizon (`MAX_CLOCK_SKEW_SECS`) is not recorded, as for status
-events: it would otherwise reject every genuine takeover until wall time
-caught up. Deleting the identity forgets
+order does not matter after a restart either. The persisted value names the
+solver it belongs to (`<time>:<pubkey>`), and rehydration ignores it for any
+other solver, since the pubkey and the time are separate best-effort writes.
+An assignment dated beyond the local clock's skew horizon
+(`MAX_CLOCK_SKEW_SECS`) is rejected, like a future-dated chat event: it
+cannot be ordered against the others. Deleting the identity forgets
 the recorded times with its disputes. Assignments are applied one at
 a time (a global lock): the global and per-trade notification tasks can
 dispatch two for the same order at once, and the check, the recorded time,

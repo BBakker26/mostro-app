@@ -107,8 +107,9 @@ pub mod settings_keys {
         format!("{DISPUTE_ADMIN_PREFIX}{order_id}")
     }
 
-    /// Per-order time (unix seconds, decimal string) the current dispute
-    /// solver was assigned: the `created_at` of its `admin-took-dispute`.
+    /// Per-order time the current dispute solver was assigned (the
+    /// `created_at` of its `admin-took-dispute`), stored as
+    /// `<unix seconds>:<solver pubkey hex>`.
     pub const DISPUTE_ADMIN_AT_PREFIX: &str = "dispute_admin_at:";
 
     /// Build the settings key holding when the dispute solver of `order_id`

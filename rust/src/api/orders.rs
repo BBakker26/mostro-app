@@ -4285,9 +4285,12 @@ async fn dispatch_mostro_message(
             };
             match admin_pubkey_from_payload(kind.payload.as_ref()) {
                 Some(admin_pubkey) => {
-                    if let Err(e) =
-                        crate::api::disputes::handle_admin_took_dispute(order_id, admin_pubkey)
-                            .await
+                    if let Err(e) = crate::api::disputes::apply_admin_took_dispute(
+                        order_id,
+                        admin_pubkey,
+                        Some(event_ts),
+                    )
+                    .await
                     {
                         log::warn!("[orders] admin-took-dispute not applied: {e}");
                     }

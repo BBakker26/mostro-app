@@ -5,6 +5,7 @@ import 'package:mostro/src/rust/api/types.dart';
 /// mapping, so it takes an arbitrary value. The order id is `order-$id`
 /// unless [orderId] names one. [fiatAmountMin]/[fiatAmountMax] make it a
 /// range order; [fiatAmount] is then the slice a take priced, if any.
+/// [completedAt] is when Rust recorded the completion (Unix seconds).
 TradeInfo fakeTrade({
   String id = 'trade-1',
   String? orderId,
@@ -14,6 +15,7 @@ TradeInfo fakeTrade({
   String paymentMethod = 'Wire',
   bool isMine = false,
   int startedAt = 1000,
+  int? completedAt,
   BigInt? amountSats,
   double? fiatAmount = 100,
   double? fiatAmountMin,
@@ -53,6 +55,7 @@ TradeInfo fakeTrade({
     tradeKeyIndex: 0,
     cashuRejectedEscrowTokens: const [],
     startedAt: startedAt,
+    completedAt: completedAt,
     holdInvoice: holdInvoice,
     peerRating: peerRating,
     peerReviews: peerReviews,

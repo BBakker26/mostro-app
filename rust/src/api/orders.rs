@@ -2354,6 +2354,17 @@ async fn rebuild_trade_from_dm(
         "",
         status.clone(),
     )?;
+    // A row rebuilt already completed is dated by the message that carried
+    // it (#642) — never by an admin verdict, which gets no chat window.
+    let completed = status == OrderStatus::Success
+        && !matches!(
+            kind.action,
+            mostro_core::message::Action::AdminSettled | mostro_core::message::Action::AdminCanceled
+        );
+    let trade = crate::api::types::TradeInfo {
+        completed_at: completed.then(|| occurred_at.min(crate::rt::unix_now())),
+        ..trade
+    };
     store_trade_key_index(order_id, trade_index).await;
     if let Err(e) = persist_trade_row(db, &trade).await {
         crate::api::logging::blog_warn(
@@ -4155,6 +4166,13 @@ async fn dispatch_mostro_message(
                     note_bond_released(&row_state, &order_id).await;
                 } else {
                     note_bond_locked(&row_state, &order_id).await;
+                }
+                // Dated by this message, before the `success` shows anywhere
+                // (#642): the chat's grace window runs from it.
+                if completes_trade(row_state.trade().map(|t| &t.order.status), &status) {
+                    if let Some(db) = crate::db::app_db::db() {
+                        record_completion(db, &order_id, event_ts).await;
+                    }
                 }
                 order_book().update_order_status(&order_id, status.clone()).await;
                 let changed = match crate::db::app_db::db() {
@@ -7055,7 +7073,11 @@ async fn apply_peer_reveal(
 /// that decision is made. A `canceled` that ends a trade before it went
 /// active wipes it instead ([`wipe_on_public_cancel`]), and the wipe has
 /// already settled the entry.
-async fn apply_single_order_update(mut order: OrderInfo) {
+///
+/// `revision_at` is the event's own `created_at`: a `success` that completes
+/// the trade here is dated by it (#642) — the seller learns of the
+/// completion only from this event.
+async fn apply_single_order_update(mut order: OrderInfo, revision_at: Option<i64>) {
     order_book().note_wire_order(&order);
     if wipe_on_public_cancel(&order.id, &order.status).await {
         return;
@@ -7074,12 +7096,16 @@ async fn apply_single_order_update(mut order: OrderInfo) {
         applies,
         "38383/d-tag",
     );
+    let completes = applies && completes_trade(local.as_ref(), &order.status);
     // Gated whole on `applies`: a public bucket that may not replace the
     // private status must not sneak its amount into the row either (#394
     // review), and an event carrying what the row already holds writes
     // nothing.
     if applies {
         if let Some(db) = crate::db::app_db::db() {
+            if let (true, Some(at)) = (completes, revision_at) {
+                record_completion(db, &order.id, at).await;
+            }
             let row = db.get_trade_by_order_id(&order.id).await.ok().flatten();
             sync_trade_fields_if_changed(
                 db,
@@ -7102,6 +7128,10 @@ async fn apply_single_order_update(mut order: OrderInfo) {
     // No TradeUpdate here — a public bucket is not a lifecycle step — yet the
     // entry and maybe the row just changed under an open trade screen.
     crate::api::trade_touch::touch_trade(&order_id);
+    if completes {
+        // The trade ended here, as a daemon message's `success` ends it.
+        release_finished_trade_subscriptions(&order_id, None);
+    }
 }
 
 /// What the single-order task made of one notification.
@@ -7158,7 +7188,7 @@ async fn handle_single_order_event(
         order_id,
         order.status
     );
-    apply_single_order_update(order).await;
+    apply_single_order_update(order, Some(event.created_at.as_secs() as i64)).await;
     SingleOrderEvent::Applied
 }
 
@@ -7471,10 +7501,8 @@ async fn confirm_payout_completion(order_id: String) {
             Some(crate::api::types::OrderStatus::SettledHoldInvoice) => {}
             _ => return,
         }
-        if fetch_public_order_status(&order_id).await
-            == Some(crate::api::types::OrderStatus::Success)
-        {
-            apply_payout_completed(&order_id).await;
+        if let Some(completed_at) = fetch_public_success_time(&order_id).await {
+            apply_payout_completed(&order_id, Some(completed_at)).await;
             return;
         }
     }
@@ -7486,7 +7514,11 @@ async fn confirm_payout_completion(order_id: String) {
 /// Re-checked under the per-order lock right before writing: a daemon
 /// message (a dispute, an admin cancel) can move the trade while the book
 /// was being fetched, and that newer status must not be overwritten.
-async fn apply_payout_completed(order_id: &str) {
+///
+/// `completed_at` is when the book says the trade completed: this may be the
+/// first sight of a payout that completed while the app was closed, and the
+/// chat's grace window runs from then, not from now (#642).
+async fn apply_payout_completed(order_id: &str, completed_at: Option<i64>) {
     let _order = lock_order(order_id).await;
     if local_trade_status(order_id).await
         != Some(crate::api::types::OrderStatus::SettledHoldInvoice)
@@ -7495,6 +7527,11 @@ async fn apply_payout_completed(order_id: &str) {
         return;
     }
     let status = crate::api::types::OrderStatus::Success;
+    // Before the `success` shows anywhere. Unknown, it is not made up: the
+    // row then reads as a completion of unknown time, whose chat is closed.
+    if let (Some(at), Some(db)) = (completed_at, crate::db::app_db::db()) {
+        record_completion(db, order_id, at).await;
+    }
     order_book()
         .update_order_status(order_id, status.clone())
         .await;
@@ -7817,6 +7854,24 @@ fn spawn_stale_sweep() {
 /// returns a single addressable event, so it is cheap and no relay replay cap
 /// can hide it.
 async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::OrderStatus> {
+    fetch_public_order_revision(order_id)
+        .await
+        .map(|(_, order)| order.status)
+}
+
+/// The time the daemon published `order_id` as `success` (#642), from its
+/// newest public event. `None` when that event says anything else, or on the
+/// failures [`fetch_public_order_status`] reads as no answer.
+async fn fetch_public_success_time(order_id: &str) -> Option<i64> {
+    fetch_public_order_revision(order_id)
+        .await
+        .filter(|(_, order)| order.status == OrderStatus::Success)
+        .map(|(at, _)| at)
+}
+
+/// The daemon's newest public event for `order_id`, as an order with the time
+/// of that revision.
+async fn fetch_public_order_revision(order_id: &str) -> Option<(i64, OrderInfo)> {
     let pool = crate::api::nostr::get_pool().ok()?;
     let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).ok()?;
     let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, order_id);
@@ -7832,7 +7887,7 @@ async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::
             return None;
         }
     };
-    newest_book_status(events, &mostro_pubkey, order_id)
+    newest_book_revision(events, &mostro_pubkey, order_id)
 }
 
 /// The daemon's newest public event for `order_id`, as an order — what the
@@ -7866,6 +7921,16 @@ fn newest_book_order(
     mostro_pubkey: &nostr_sdk::prelude::PublicKey,
     order_id: &str,
 ) -> Option<OrderInfo> {
+    newest_book_revision(events, mostro_pubkey, order_id).map(|(_, order)| order)
+}
+
+/// [`newest_book_order`] with the time of that revision — the event's own
+/// `created_at`, which `OrderInfo::created_at` is not.
+fn newest_book_revision(
+    events: impl IntoIterator<Item = nostr_sdk::prelude::Event>,
+    mostro_pubkey: &nostr_sdk::prelude::PublicKey,
+    order_id: &str,
+) -> Option<(i64, OrderInfo)> {
     events
         .into_iter()
         .filter(|e| e.pubkey == *mostro_pubkey)
@@ -7875,16 +7940,7 @@ fn newest_book_order(
                 .map(|order| (e.created_at, order))
         })
         .max_by_key(|(created_at, _)| *created_at)
-        .map(|(_, order)| order)
-}
-
-/// [`newest_book_order`]'s status alone.
-fn newest_book_status(
-    events: impl IntoIterator<Item = nostr_sdk::prelude::Event>,
-    mostro_pubkey: &nostr_sdk::prelude::PublicKey,
-    order_id: &str,
-) -> Option<crate::api::types::OrderStatus> {
-    newest_book_order(events, mostro_pubkey, order_id).map(|order| order.status)
+        .map(|(created_at, order)| (created_at.as_secs() as i64, order))
 }
 
 /// Reconcile trades stuck in waiting states with the daemon's public book.
@@ -7967,7 +8023,7 @@ async fn run_stale_sweep_once() {
             book_status.as_ref(),
         ) {
             SweepAction::SyncSuccess => {
-                apply_payout_completed(&oid).await;
+                apply_payout_completed(&oid, fetch_public_success_time(&oid).await).await;
                 log::info!("[orders] sweep: payout completed for order={oid}");
                 resynced += 1;
             }
@@ -8670,8 +8726,18 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
                 info.status
             );
             let book = order_book();
-            let ingested = classify_ingested_order(info, book).await;
+            let revision_at = event.created_at.as_secs() as i64;
+            let ingested = classify_ingested_order(info, book, Some(revision_at)).await;
+            // The d-tag task may be gone (idled out) by the time a slow
+            // payout completes: this feed then carries the seller's
+            // `success` alone (#642).
+            let public_success = (ingested.ours
+                && ingested.wire.status == OrderStatus::Success)
+                .then(|| ingested.wire.id.clone());
             book.apply_ingested_order(ingested, publish).await;
+            if let Some(order_id) = public_success {
+                note_public_success(&order_id, revision_at).await;
+            }
         }
         None => {
             log::warn!(
@@ -8694,7 +8760,14 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
 /// Split from the apply so the two can be raced against an identity
 /// teardown: everything here awaits, and [`OrderBook::apply_ingested_order`]
 /// re-checks the returned epoch under its lock (#552 review round 3).
-async fn classify_ingested_order(mut info: OrderInfo, book: &OrderBook) -> IngestedOrder {
+///
+/// `revision_at` is the event's own `created_at`, which dates a maker's
+/// completion synced here (#642).
+async fn classify_ingested_order(
+    mut info: OrderInfo,
+    book: &OrderBook,
+    revision_at: Option<i64>,
+) -> IngestedOrder {
     let wire = info.clone();
     // Restore `is_mine` — "I am the maker" — on cold start from the
     // durable trade-key binding plus the trade row it points at,
@@ -8763,6 +8836,10 @@ async fn classify_ingested_order(mut info: OrderInfo, book: &OrderBook) -> Inges
             // carrying what the row already holds writes nothing.
             if applies {
                 if let Some(db) = crate::db::app_db::db() {
+                    let completes = completes_trade(local.as_ref(), &info.status);
+                    if let (true, Some(at)) = (completes, revision_at) {
+                        record_completion(db, &info.id, at).await;
+                    }
                     let row = db.get_trade_by_order_id(&info.id).await.ok().flatten();
                     sync_trade_fields_if_changed(
                         db,
@@ -8773,6 +8850,11 @@ async fn classify_ingested_order(mut info: OrderInfo, book: &OrderBook) -> Inges
                         info.amount_sats,
                     )
                     .await;
+                    if completes {
+                        // The trade ended here, as a daemon message's
+                        // `success` ends it.
+                        release_finished_trade_subscriptions(&info.id, None);
+                    }
                 }
             }
         }
@@ -9172,6 +9254,9 @@ pub(crate) async fn release_identity_subscriptions() {
 /// Decided on the row, re-read here: a terminal update replayed for an
 /// order that has since been re-taken must not tear down live coverage.
 /// `known_index` is the trade key index when the row is already gone.
+///
+/// The one exception is a completed trade's peer chat, kept for its grace
+/// window (#642): see [`release_finished_chats`].
 fn release_finished_trade_subscriptions(order_id: &str, known_index: Option<u32>) {
     #[cfg(not(target_arch = "wasm32"))]
     if tokio::runtime::Handle::try_current().is_err() {
@@ -9195,7 +9280,7 @@ fn release_finished_trade_subscriptions(order_id: &str, known_index: Option<u32>
         if release.owned_d_tag {
             resync_watched_orders(&client).await;
         }
-        let chats = crate::api::messages::stop_chat_subscriptions(&order_id).await;
+        let chats = release_finished_chats(&order_id, release.chat_grace.as_ref()).await;
         drop(release.order_lock);
         // Keyed by the finished trade's own key, which no retake reuses.
         if let Some(index) = release.trade_index {
@@ -9223,6 +9308,9 @@ struct FinishedTradeRelease {
     /// The d-tag task's claim was taken: its REQ is ours to close.
     owned_d_tag: bool,
     trade_index: Option<u32>,
+    /// The row and the end of its peer chat's grace window, while that
+    /// window is still running (#642).
+    chat_grace: Option<(crate::api::types::TradeInfo, i64)>,
 }
 
 /// Decide, under the order lock, whether `order_id`'s subscriptions may be
@@ -9247,11 +9335,153 @@ async fn claim_finished_trade_release(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(order_id)
         .is_some();
+    let trade_index = row.as_ref().map(|t| t.trade_key_index).or(known_index);
     Some(FinishedTradeRelease {
         order_lock,
         owned_d_tag,
-        trade_index: row.as_ref().map(|t| t.trade_key_index).or(known_index),
+        trade_index,
+        chat_grace: row.and_then(|t| chat_grace_of(t, crate::rt::unix_now())),
     })
+}
+
+/// `trade` with the end of its peer chat's grace window, while that window
+/// runs at `now` (#642).
+fn chat_grace_of(
+    trade: crate::api::types::TradeInfo,
+    now: i64,
+) -> Option<(crate::api::types::TradeInfo, i64)> {
+    if !crate::api::messages::chat_still_relevant_at(&trade, now) {
+        return None;
+    }
+    let until = crate::api::messages::chat_grace_ends_at(&trade)?;
+    Some((trade, until))
+}
+
+/// The chat half of the release, under the order lock. Both chats go at once,
+/// except a completed trade's peer chat inside its grace window (#642): that
+/// one is kept — started, if this process does not run it yet (a start whose
+/// resubscription read the row before its `success` landed) — and closed
+/// when the window ends. Returns the chats stopped.
+async fn release_finished_chats(
+    order_id: &str,
+    chat_grace: Option<&(crate::api::types::TradeInfo, i64)>,
+) -> Vec<crate::api::messages::ChatChannel> {
+    use crate::api::messages::ChatChannel;
+    let Some((trade, until)) = chat_grace else {
+        return crate::api::messages::stop_chat_subscriptions(order_id).await;
+    };
+    crate::api::messages::spawn_peer_chat(trade).await;
+    schedule_chat_grace_end(order_id, *until);
+    if crate::api::messages::stop_chat_subscription(ChatChannel::Dispute, order_id).await {
+        vec![ChatChannel::Dispute]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether `new` completes a trade that stood at `local` (#642): a `success`
+/// reached through the trade's own flow. Not over a dispute — its end is the
+/// solver's, even when the book reads `success` — nor over a row that is
+/// already finished, so a replayed `success` never dates a row completed
+/// before completion times were recorded.
+fn completes_trade(local: Option<&OrderStatus>, new: &OrderStatus) -> bool {
+    *new == OrderStatus::Success
+        && local.is_some_and(|l| *l != OrderStatus::Dispute && !is_hard_terminal(l))
+}
+
+/// Record that the trade on `order_id` completed at `at` (#642), from the
+/// event that carried its `success` and never later than now: a clock
+/// running ahead must not stretch the chat's grace window. Called before that
+/// `success` is written to the row or the book, so a `success` row without a
+/// time is always one whose completion time is unknown — its chat is closed.
+/// The first time recorded wins.
+async fn record_completion(db: &impl Storage, order_id: &str, at: i64) {
+    let at = at.min(crate::rt::unix_now());
+    if let Err(e) = db.mark_trade_completed(order_id, at).await {
+        crate::api::logging::blog_warn(
+            "orders",
+            format!(
+                "completion time not persisted for order={}: {e}",
+                crate::api::logging::short_id(order_id),
+            ),
+        );
+    }
+}
+
+/// A public `success` for a *taker's* trade still held at
+/// `SettledHoldInvoice` (#642): the seller learns of the payout only from
+/// the public book, and this feed does not sync a taker's row, so once the
+/// d-tag task has idled out nothing else would complete it until the sweep.
+/// Spawned: it takes the order lock, which the book loop must not wait on.
+async fn note_public_success(order_id: &str, revision_at: i64) {
+    if local_trade_status(order_id).await != Some(OrderStatus::SettledHoldInvoice) {
+        return;
+    }
+    let order_id = order_id.to_string();
+    crate::rt::spawn(async move {
+        apply_payout_completed(&order_id, Some(revision_at)).await;
+    });
+}
+
+/// Longest a grace-window timer sleeps between two looks at the wall clock:
+/// a sleep does not advance while the device is suspended, so one long
+/// sleep would keep the chat open for as long as the device slept.
+const CHAT_GRACE_CHECK_SECS: i64 = 60;
+
+/// Close a completed trade's peer chat when its grace window ends (#642).
+pub(crate) fn schedule_chat_grace_end(order_id: &str, until: i64) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    let order_id = order_id.to_string();
+    crate::rt::spawn(async move {
+        let mut until = until;
+        loop {
+            let left = until.saturating_sub(crate::rt::unix_now());
+            if left > 0 {
+                let slice = left.min(CHAT_GRACE_CHECK_SECS) as u64;
+                crate::rt::time::sleep(crate::rt::time::Duration::from_secs(slice)).await;
+                continue;
+            }
+            match close_grace_chat_if_over(&order_id).await {
+                Some(next) => until = next,
+                None => return,
+            }
+        }
+    });
+}
+
+/// Close `order_id`'s peer chat if its grace window is over (#642), decided
+/// on the row under the order lock. Returns the window's end while it still
+/// runs (the clock went back), for the caller to wait again; `None` once the
+/// chat was given back — or is a live trade's, which this leaves alone.
+pub(crate) async fn close_grace_chat_if_over(order_id: &str) -> Option<i64> {
+    let order_lock = lock_order(order_id).await;
+    let row = match crate::db::app_db::db() {
+        Some(db) => db.get_trade_by_order_id(order_id).await.ok().flatten(),
+        None => None,
+    };
+    let now = crate::rt::unix_now();
+    if let Some(trade) = row.filter(|t| crate::api::messages::chat_still_relevant_at(t, now)) {
+        return crate::api::messages::chat_grace_ends_at(&trade);
+    }
+    let closed = crate::api::messages::stop_chat_subscription(
+        crate::api::messages::ChatChannel::Peer,
+        order_id,
+    )
+    .await;
+    drop(order_lock);
+    // The room turns read-only on its own; the ring makes the list follow.
+    crate::api::trade_touch::touch_trade(order_id);
+    crate::api::logging::blog_debug(
+        "orders",
+        format!(
+            "chat grace window over order={} closed={closed}",
+            crate::api::logging::short_id(order_id),
+        ),
+    );
+    None
 }
 
 /// Stream of trade lifecycle changes pushed by the daemon-message ingest.
@@ -12560,6 +12790,292 @@ mod tests {
         release_single_order_task(&oid, new_generation);
     }
 
+    /// A `success` row of ours with a known peer, completed at `completed_at`.
+    async fn saved_completed_row(
+        db: &impl crate::db::Storage,
+        order_id: &str,
+        completed_at: Option<i64>,
+    ) -> crate::api::types::TradeInfo {
+        let mut row = seam_trade_row(order_id, OrderStatus::Success);
+        // Not a valid key: nothing here may derive a chat and subscribe.
+        row.counterparty_pubkey = "peer-trade-pubkey".into();
+        row.completed_at = completed_at;
+        db.save_trade(&row).await.unwrap();
+        row
+    }
+
+    /// #642: the release keeps a completed trade's peer chat only while the
+    /// window its recorded completion opened still runs — never for a row
+    /// whose completion time is unknown, nor for any other ending.
+    #[tokio::test]
+    async fn the_release_keeps_a_completed_trades_chat_only_inside_its_window() {
+        use crate::api::messages::PEER_CHAT_GRACE_SECS as GRACE;
+        let db = bond_test_db().await;
+        let now = crate::rt::unix_now();
+        let grace_of = |oid: String| async move {
+            claim_finished_trade_release(&oid, None)
+                .await
+                .expect("a finished row is released")
+                .chat_grace
+                .map(|(_, until)| until)
+        };
+
+        let fresh = format!("grace-{}", uuid::Uuid::new_v4());
+        saved_completed_row(db, &fresh, Some(now - 60)).await;
+        assert_eq!(grace_of(fresh).await, Some(now - 60 + GRACE));
+
+        let old = format!("grace-old-{}", uuid::Uuid::new_v4());
+        saved_completed_row(db, &old, Some(now - GRACE - 1)).await;
+        assert_eq!(grace_of(old).await, None, "the window is over");
+
+        let unknown = format!("grace-unknown-{}", uuid::Uuid::new_v4());
+        saved_completed_row(db, &unknown, None).await;
+        assert_eq!(grace_of(unknown).await, None, "completed at an unknown time");
+
+        let canceled = format!("grace-canceled-{}", uuid::Uuid::new_v4());
+        let mut row = saved_completed_row(db, &canceled, Some(now - 60)).await;
+        row.order.status = OrderStatus::Canceled;
+        db.save_trade(&row).await.unwrap();
+        assert_eq!(grace_of(canceled).await, None, "no window for a cancel");
+    }
+
+    /// #642: inside the window the release keeps the peer chat and stops the
+    /// dispute chat; outside it, both go, as before.
+    #[tokio::test]
+    async fn the_release_keeps_the_peer_chat_and_stops_the_dispute_chat() {
+        use crate::api::messages::{chat_running, claim_chat, stop_chat_subscription, ChatChannel};
+        let db = bond_test_db().await;
+        let now = crate::rt::unix_now();
+
+        let kept = format!("grace-kept-{}", uuid::Uuid::new_v4());
+        let row = saved_completed_row(db, &kept, Some(now - 60)).await;
+        claim_chat(ChatChannel::Peer, &kept).await.expect("peer chat claimed");
+        claim_chat(ChatChannel::Dispute, &kept).await.expect("dispute chat claimed");
+        let until = now - 60 + crate::api::messages::PEER_CHAT_GRACE_SECS;
+        let stopped = release_finished_chats(&kept, Some(&(row, until))).await;
+        assert_eq!(stopped, vec![ChatChannel::Dispute]);
+        assert!(chat_running(ChatChannel::Peer, &kept).await);
+        assert!(!chat_running(ChatChannel::Dispute, &kept).await);
+        stop_chat_subscription(ChatChannel::Peer, &kept).await;
+
+        let ended = format!("grace-ended-{}", uuid::Uuid::new_v4());
+        claim_chat(ChatChannel::Peer, &ended).await.expect("peer chat claimed");
+        claim_chat(ChatChannel::Dispute, &ended).await.expect("dispute chat claimed");
+        let stopped = release_finished_chats(&ended, None).await;
+        assert_eq!(stopped.len(), 2);
+        assert!(!chat_running(ChatChannel::Peer, &ended).await);
+    }
+
+    /// #642: the end of the window gives the peer chat back; a window that
+    /// still runs (the clock went back) keeps it and says until when; a live
+    /// trade's chat is never touched.
+    #[tokio::test]
+    async fn the_grace_end_closes_the_peer_chat_once_the_window_is_over() {
+        use crate::api::messages::{chat_running, claim_chat, stop_chat_subscription, ChatChannel};
+        use crate::api::messages::PEER_CHAT_GRACE_SECS as GRACE;
+        let db = bond_test_db().await;
+        let now = crate::rt::unix_now();
+
+        let over = format!("grace-over-{}", uuid::Uuid::new_v4());
+        saved_completed_row(db, &over, Some(now - GRACE - 10)).await;
+        claim_chat(ChatChannel::Peer, &over).await.expect("peer chat claimed");
+        assert_eq!(close_grace_chat_if_over(&over).await, None);
+        assert!(!chat_running(ChatChannel::Peer, &over).await);
+
+        let running = format!("grace-running-{}", uuid::Uuid::new_v4());
+        saved_completed_row(db, &running, Some(now - 60)).await;
+        claim_chat(ChatChannel::Peer, &running).await.expect("peer chat claimed");
+        assert_eq!(close_grace_chat_if_over(&running).await, Some(now - 60 + GRACE));
+        assert!(chat_running(ChatChannel::Peer, &running).await);
+        stop_chat_subscription(ChatChannel::Peer, &running).await;
+
+        let live = format!("grace-live-{}", uuid::Uuid::new_v4());
+        let mut row = seam_trade_row(&live, OrderStatus::FiatSent);
+        row.counterparty_pubkey = "peer-trade-pubkey".into();
+        db.save_trade(&row).await.unwrap();
+        claim_chat(ChatChannel::Peer, &live).await.expect("peer chat claimed");
+        assert_eq!(close_grace_chat_if_over(&live).await, None);
+        assert!(chat_running(ChatChannel::Peer, &live).await, "a live trade's chat stays");
+        stop_chat_subscription(ChatChannel::Peer, &live).await;
+    }
+
+    /// The Kind 38383 event behind [`book_event_by`], published at `at`.
+    fn book_event_at(
+        order_id: &str,
+        status: &str,
+        author: &nostr_sdk::prelude::Keys,
+        at: u64,
+    ) -> nostr_sdk::prelude::Event {
+        use nostr::event::FinalizeEvent;
+        use nostr_sdk::prelude::{EventBuilder, Kind, Tag, Timestamp};
+        EventBuilder::new(Kind::from(38383u16), "")
+            .tags([
+                Tag::parse(["d", order_id]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", status]).unwrap(),
+                Tag::parse(["f", "USD"]).unwrap(),
+                Tag::parse(["pm", "cashapp"]).unwrap(),
+                Tag::parse(["premium", "1"]).unwrap(),
+                Tag::parse(["amt", "0"]).unwrap(),
+                Tag::parse(["fa", "20"]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .custom_created_at(Timestamp::from_secs(at))
+            .finalize(author)
+            .unwrap()
+    }
+
+    /// A seller's row at `SettledHoldInvoice`, its trade key bound.
+    async fn saved_settled_seller_row(
+        db: &impl crate::db::Storage,
+        order_id: &str,
+        is_mine: bool,
+    ) {
+        let mut row = seam_trade_row(order_id, OrderStatus::SettledHoldInvoice);
+        row.counterparty_pubkey = "peer-trade-pubkey".into();
+        row.order.is_mine = is_mine;
+        db.save_trade(&row).await.unwrap();
+        store_trade_key_index(order_id, row.trade_key_index).await;
+    }
+
+    /// Polls the row until `done` holds, for work a spawned task finishes.
+    async fn row_eventually(
+        db: &impl crate::db::Storage,
+        order_id: &str,
+        done: impl Fn(&crate::api::types::TradeInfo) -> bool,
+    ) -> crate::api::types::TradeInfo {
+        for _ in 0..200 {
+            let row = db.get_trade_by_order_id(order_id).await.unwrap().unwrap();
+            if done(&row) {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        db.get_trade_by_order_id(order_id).await.unwrap().unwrap()
+    }
+
+    /// #642: the seller learns that the trade completed only from the public
+    /// book (`purchase-completed` goes to the buyer alone). The d-tag
+    /// `success` dates the completion by that event, not by the clock, and
+    /// records it before the `success` reaches the row.
+    #[tokio::test]
+    async fn a_public_success_dates_the_sellers_completion_by_its_event() {
+        let db = bond_test_db().await;
+        let order_id = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &order_id, false).await;
+        let node = nostr_sdk::prelude::Keys::generate();
+        let node_hex = node.public_key().to_hex();
+        let published = crate::rt::unix_now() - 600;
+        let success = book_event_at(&order_id, "success", &node, published as u64);
+
+        let outcome =
+            handle_single_order_event(&success, &order_id, &node.public_key(), || node_hex).await;
+
+        assert_eq!(outcome, SingleOrderEvent::Applied);
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::Success);
+        assert_eq!(row.completed_at, Some(published));
+    }
+
+    /// #642: only a trade the event itself completes is dated. A row already
+    /// finished (completed before times were recorded), a dispute and an
+    /// admin verdict get no completion time, so no chat window.
+    #[tokio::test]
+    async fn a_public_success_never_dates_a_finished_or_disputed_trade() {
+        let db = bond_test_db().await;
+        let now = crate::rt::unix_now();
+        let completion_of = |status: OrderStatus| async move {
+            let order_id = uuid::Uuid::new_v4().to_string();
+            let mut row = seam_trade_row(&order_id, status);
+            row.counterparty_pubkey = "peer-trade-pubkey".into();
+            db.save_trade(&row).await.unwrap();
+            apply_single_order_update(wire_order(&order_id, OrderStatus::Success), Some(now)).await;
+            let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+            (row.order.status, row.completed_at)
+        };
+
+        assert_eq!(completion_of(OrderStatus::Success).await, (OrderStatus::Success, None));
+        assert_eq!(completion_of(OrderStatus::Dispute).await, (OrderStatus::Success, None));
+        assert_eq!(
+            completion_of(OrderStatus::SettledByAdmin).await,
+            (OrderStatus::SettledByAdmin, None),
+            "the book's success must not erase an admin verdict"
+        );
+    }
+
+    /// #642: the book feed carries a seller's completion once the d-tag
+    /// task idled out — synced into a maker's row here, and sent through the
+    /// payout path for a taker's, whose row this feed does not sync. Both are
+    /// dated by the event.
+    #[tokio::test]
+    async fn the_book_feed_dates_a_sellers_completion_by_its_event() {
+        let db = bond_test_db().await;
+        let node = nostr_sdk::prelude::Keys::generate();
+        let published = crate::rt::unix_now() - 600;
+
+        let maker = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &maker, true).await;
+        let success = book_event_at(&maker, "success", &node, published as u64);
+        ingest_order_event_with(&success, Publish::WhenBatchEnds).await;
+        let row = db.get_trade_by_order_id(&maker).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::Success);
+        assert_eq!(row.completed_at, Some(published));
+
+        let taker = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &taker, false).await;
+        let success = book_event_at(&taker, "success", &node, published as u64);
+        ingest_order_event_with(&success, Publish::WhenBatchEnds).await;
+        let row = row_eventually(db, &taker, |t| t.order.status == OrderStatus::Success).await;
+        assert_eq!(row.order.status, OrderStatus::Success);
+        assert_eq!(row.completed_at, Some(published));
+    }
+
+    /// #642: the payout check and the sweep date a completion by the book's
+    /// revision; when that time could not be fetched, none is made up.
+    #[tokio::test]
+    async fn a_payout_completion_is_dated_only_by_a_known_time() {
+        let db = bond_test_db().await;
+        let published = crate::rt::unix_now() - 600;
+
+        let known = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &known, true).await;
+        apply_payout_completed(&known, Some(published)).await;
+        let row = db.get_trade_by_order_id(&known).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::Success);
+        assert_eq!(row.completed_at, Some(published));
+
+        let unknown = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &unknown, true).await;
+        apply_payout_completed(&unknown, None).await;
+        let row = db.get_trade_by_order_id(&unknown).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::Success);
+        assert_eq!(row.completed_at, None, "an unknown time is not made up");
+    }
+
+    /// #642: the buyer's completion is dated by the daemon's
+    /// `purchase-completed`, and recorded by the time its dispatch returns —
+    /// before the TradeUpdate that makes screens re-read the row.
+    #[tokio::test]
+    async fn a_purchase_completed_dates_the_buyers_completion_by_its_message() {
+        use mostro_core::message::Action;
+        let path = std::env::temp_dir()
+            .join(format!("mostro_purchase_completed_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let (order_uuid, order_id) = noted_active_take().await;
+        dispatch_daemon_action(
+            order_uuid,
+            Action::PurchaseCompleted,
+            &format!("test-purchase-completed-{order_id}"),
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::Success);
+        assert_eq!(row.completed_at, Some(1_000), "dated by the message");
+    }
+
     /// A stale trade index must reach the waiting request as the bare marker,
     /// not as prose: `create_order` / `take_order` retry only on an exact
     /// `InvalidTradeIndex` (mostro::trade_index), and Dart localizes it.
@@ -13243,7 +13759,7 @@ mod tests {
         book.claim_mine(&order_id).await;
 
         let ingested =
-            classify_ingested_order(parsed_book_order(&order_id, "pending"), &book).await;
+            classify_ingested_order(parsed_book_order(&order_id, "pending"), &book, None).await;
         assert!(
             ingested.order.is_mine,
             "classified for the identity that claimed it"
@@ -13289,7 +13805,7 @@ mod tests {
         bound_maker_row(&order_id, 65).await;
 
         let ingested =
-            classify_ingested_order(parsed_book_order(&order_id, "in-progress"), &book).await;
+            classify_ingested_order(parsed_book_order(&order_id, "in-progress"), &book, None).await;
         assert!(ingested.order.is_mine);
         assert_eq!(
             ingested.order.status,
@@ -13318,7 +13834,7 @@ mod tests {
         bound_maker_row(&order_id, 66).await;
 
         let ingested =
-            classify_ingested_order(parsed_book_order(&order_id, "in-progress"), &book).await;
+            classify_ingested_order(parsed_book_order(&order_id, "in-progress"), &book, None).await;
         book.apply_ingested_order(ingested, Publish::WhenBatchEnds)
             .await;
 
@@ -13346,7 +13862,7 @@ mod tests {
             .await;
 
         let ingested =
-            classify_ingested_order(parsed_book_order(&order_id, "success"), &book).await;
+            classify_ingested_order(parsed_book_order(&order_id, "success"), &book, None).await;
         assert!(ingested.ours, "a bound take is ours");
         book.forget_ownership().await;
         book.apply_ingested_order(ingested, Publish::WhenBatchEnds)
@@ -13453,6 +13969,9 @@ mod tests {
         }
 
         async fn mark_trade_rated(&self, _order_id: &str, _rated_at: i64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn mark_trade_completed(&self, _order_id: &str, _completed_at: i64) -> Result<()> {
             unimplemented!()
         }
         async fn set_cooperative_cancel_state(
@@ -13832,7 +14351,7 @@ mod tests {
             .await
             .expect("save the trade row");
 
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Pending)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Pending), None).await;
         assert_eq!(
             book_status(&order_id).await,
             Some(OrderStatus::WaitingBuyerInvoice),
@@ -13874,7 +14393,7 @@ mod tests {
         db.save_trade(&cancel_test_row(taken))
             .await
             .expect("save the trade row");
-        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress), None).await;
 
         dispatch_daemon_canceled(order_uuid, "test-lost-take-canceled-first").await;
         assert_eq!(
@@ -13883,7 +14402,7 @@ mod tests {
             "no public pending seen yet: the entry is dropped, not left stale"
         );
 
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Pending)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Pending), None).await;
         assert_eq!(
             book_status(&order_id).await,
             Some(OrderStatus::Pending),
@@ -13910,7 +14429,7 @@ mod tests {
         db.save_trade(&cancel_test_row(taken))
             .await
             .expect("save the trade row");
-        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress), None).await;
 
         ingest_order_event_with(&book_event(&order_id, "pending"), Publish::WhenBatchEnds).await;
         dispatch_daemon_canceled(order_uuid, "test-lost-take-book-feed").await;
@@ -13959,7 +14478,7 @@ mod tests {
         let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
 
         // Act
-        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress), None).await;
 
         // Assert
         assert!(rang_for(&mut touches, &order_id).await);
@@ -14175,7 +14694,7 @@ mod tests {
         db.save_trade(&row).await.expect("save the trade row");
         // The d-tag subscription noted the order as pending at creation; the
         // daemon's `canceled` then reached the book.
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Pending)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Pending), None).await;
         order_book()
             .update_order_status(&order_id, OrderStatus::Canceled)
             .await;
@@ -14440,9 +14959,9 @@ mod tests {
             .install_session(order_id.clone(), TradeRole::Buyer, 1, taken)
             .await
             .expect("install the take's session");
-        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress), None).await;
 
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Canceled)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Canceled), None).await;
 
         assert!(
             trade_row_gone(&order_id).await,
@@ -14480,7 +14999,7 @@ mod tests {
             .await
             .expect("save the trade row");
 
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Canceled)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Canceled), None).await;
 
         assert_eq!(
             db.get_trade_by_order_id(&order_id)
@@ -14596,7 +15115,7 @@ mod tests {
 
         let mut in_progress = wire_order(&order_id, OrderStatus::InProgress);
         in_progress.amount_sats = Some(7_777);
-        apply_single_order_update(in_progress).await;
+        apply_single_order_update(in_progress, None).await;
         let row = db
             .get_trade_by_order_id(&order_id)
             .await
@@ -14613,7 +15132,7 @@ mod tests {
         // it. The row went active, so the `canceled` keeps it as history.
         let mut canceled = wire_order(&order_id, OrderStatus::Canceled);
         canceled.amount_sats = Some(7_777);
-        apply_single_order_update(canceled).await;
+        apply_single_order_update(canceled, None).await;
         let row = db
             .get_trade_by_order_id(&order_id)
             .await
@@ -14831,7 +15350,7 @@ mod tests {
         db.save_trade(&cancel_test_row(wire_order(&order_id, OrderStatus::Active)))
             .await
             .expect("save the trade row");
-        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::InProgress), None).await;
         assert!(
             order_book().has_wire_note(&order_id),
             "precondition: the take's public view is noted"
@@ -14853,7 +15372,7 @@ mod tests {
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
 
         let (_, order_id) = noted_active_take().await;
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Success)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Success), None).await;
         assert!(
             !order_book().has_wire_note(&order_id),
             "a final view on the d-tag path must forget the note"
@@ -14913,7 +15432,7 @@ mod tests {
             "precondition: the book feed wrote the republish into the entry"
         );
 
-        apply_single_order_update(wire_order(&order_id, OrderStatus::Canceled)).await;
+        apply_single_order_update(wire_order(&order_id, OrderStatus::Canceled), None).await;
 
         assert!(trade_row_gone(&order_id).await, "the never-active take is wiped");
         assert_eq!(
@@ -16268,27 +16787,27 @@ mod tests {
         let mine = "308e1272-d5f4-47e6-bd97-3504baea9c23";
         let other = "9b2d8f7e-1c3a-4e5b-8f6d-0a1b2c3d4e5f";
         let pk = daemon.public_key();
+        let revision = |events: Vec<nostr_sdk::prelude::Event>| {
+            newest_book_revision(events, &pk, mine).map(|(at, order)| (at, order.status))
+        };
         assert_eq!(
-            newest_book_status([event(&daemon, other, "success", 20)], &pk, mine),
+            revision(vec![event(&daemon, other, "success", 20)]),
             None,
             "the daemon's success for another order says nothing about this one"
         );
         assert_eq!(
-            newest_book_status([event(&stranger, mine, "success", 20)], &pk, mine),
+            revision(vec![event(&stranger, mine, "success", 20)]),
             None,
             "a success from another key is not the daemon's"
         );
+        // Dated by the revision's own event (#642), not the order's creation.
         assert_eq!(
-            newest_book_status(
-                [
-                    event(&daemon, mine, "in-progress", 10),
-                    event(&daemon, other, "success", 30),
-                    event(&daemon, mine, "success", 20),
-                ],
-                &pk,
-                mine
-            ),
-            Some(S::Success)
+            revision(vec![
+                event(&daemon, mine, "in-progress", 10),
+                event(&daemon, other, "success", 30),
+                event(&daemon, mine, "success", 20),
+            ]),
+            Some((20, S::Success))
         );
     }
 

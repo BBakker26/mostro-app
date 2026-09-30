@@ -32,6 +32,7 @@ TradeRow _row(
 }) => TradeRow(
   orderId: orderId,
   status: status,
+  rowStatus: status,
   state: TradeRowState.of(
     status: status,
     isBuyer: !isSelling,

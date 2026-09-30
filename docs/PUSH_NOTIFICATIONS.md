@@ -554,8 +554,9 @@ plus, from the registration state itself, every key that left that set less than
 **GRACE (24 h)** ago. The grace covers what still arrives after a terminal status:
 `rate-received`, a late `bond-slashed`, an admin outcome, the daemon's `Success` after
 `SettledHoldInvoice`. Its clock is **not** the trade row: `TradeInfo.completed_at` is
-never written by the status syncs, and a terminal timestamp added to every write
-path would be one more thing to keep atomic. Instead the registration records when
+recorded for a `success` alone (#642, the peer chat's grace window), so it cannot
+date a canceled, expired or admin-resolved key, and a terminal timestamp added to
+every write path would be one more thing to keep atomic. Instead the registration records when
 the key first went unwanted (`unwanted_since`, below); a key seen unwanted for longer
 than the grace is unregistered and forgotten. Restart-safe, because the registration
 map is persisted. A key that turned terminal before this feature existed has no

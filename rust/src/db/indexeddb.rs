@@ -682,6 +682,13 @@ impl Storage for IndexedDbStorage {
             .await
     }
 
+    async fn mark_trade_completed(&self, order_id: &str, completed_at: i64) -> Result<()> {
+        self.patch_trade_by_order_id(order_id, |doc| {
+            trade_json::mark_completed(doc, completed_at)
+        })
+        .await
+    }
+
     async fn set_cooperative_cancel_state(
         &self,
         order_id: &str,

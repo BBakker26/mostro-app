@@ -88,6 +88,17 @@ pub(crate) fn mark_rated(trade: &mut Value, rated_at: i64) -> Result<()> {
     Ok(())
 }
 
+/// `$.completed_at = completed_at` as a JSON number, unless the trade already
+/// has one: the first completion recorded wins, so a replayed `success`
+/// never moves the end of the trade (and its chat window) forward.
+pub(crate) fn mark_completed(trade: &mut Value, completed_at: i64) -> Result<()> {
+    let slot = field(trade, &["completed_at"])?;
+    if slot.is_null() {
+        *slot = Value::from(completed_at);
+    }
+    Ok(())
+}
+
 /// `$.cooperative_cancel_state = state`, as serde spells the variant.
 pub(crate) fn set_cooperative_cancel_state(
     trade: &mut Value,
@@ -193,6 +204,15 @@ mod tests {
         assert!(t["peer_rating"].is_f64());
         assert!(t["peer_reviews"].is_u64() && t["peer_days"].is_u64());
         assert!(t["rated_at"].is_i64());
+    }
+
+    #[test]
+    fn the_first_completion_recorded_wins() {
+        let mut t = trade();
+        mark_completed(&mut t, 1700000500).unwrap();
+        assert!(t["completed_at"].is_i64());
+        mark_completed(&mut t, 1700009999).unwrap();
+        assert_eq!(t["completed_at"], 1700000500);
     }
 
     #[test]

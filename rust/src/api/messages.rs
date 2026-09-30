@@ -1177,6 +1177,32 @@ static CHAT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 /// task owns it.
 pub(crate) async fn claim_chat(channel: ChatChannel, order_id: &str) -> Option<u64> {
     let mut active = active_chats().lock().await;
+    claim_chat_locked(&mut active, channel, order_id)
+}
+
+/// Claim the dispute chat for a task bound to `solver_hex`: `None` while
+/// another task owns it, or when the dispute's solver is no longer
+/// `solver_hex`. A listener armed for the previous solver (rehydration on
+/// reconnect) can reach this after a takeover already stopped the chat; it
+/// must not take the chat from the new solver's task. The solver is read
+/// under the guard's lock, so a takeover either happens before this check
+/// or finds the claimed task to stop.
+pub(crate) async fn claim_dispute_chat(order_id: &str, solver_hex: &str) -> Option<u64> {
+    let mut active = active_chats().lock().await;
+    if let Some(current) = crate::api::disputes::solver_pubkey(order_id).await {
+        if current != solver_hex {
+            log::debug!("[messages] dispute chat for a replaced solver order={order_id}");
+            return None;
+        }
+    }
+    claim_chat_locked(&mut active, ChatChannel::Dispute, order_id)
+}
+
+fn claim_chat_locked(
+    active: &mut std::collections::HashMap<String, u64>,
+    channel: ChatChannel,
+    order_id: &str,
+) -> Option<u64> {
     let key = channel.guard_key(order_id);
     if active.contains_key(&key) {
         return None;
@@ -1340,6 +1366,21 @@ async fn load_chat_cursor(channel: ChatChannel, order_id: &str) -> Option<i64> {
         .ok()
 }
 
+/// Forget the `since` cursor of one channel of `order_id`. When the dispute
+/// changes solver, the cursor dates the previous solver's conversation, and
+/// the new solver's clock may be behind it: their first messages would fall
+/// before `since` and never be fetched. The new filter only matches the new
+/// conversation, so starting without a cursor refetches nothing else.
+/// Best-effort, like the cursor itself.
+pub(crate) async fn reset_chat_cursor(channel: ChatChannel, order_id: &str) {
+    if let Some(db) = crate::db::app_db::db() {
+        let key = channel.cursor_key(order_id);
+        if let Err(e) = db.delete_setting(&key).await {
+            log::warn!("[messages] cursor reset failed order={order_id}: {e}");
+        }
+    }
+}
+
 /// Persist the `since` cursor. Best-effort: on web this is a no-op until
 /// IndexedDB lands (#233), so the backlog bound degrades to per-process.
 async fn store_chat_cursor(channel: ChatChannel, order_id: &str, ts: i64) {
@@ -1419,8 +1460,13 @@ pub(crate) async fn subscribe_incoming_chat(
     conv: nostr_sdk::prelude::Keys,
     sign: nostr_sdk::prelude::Keys,
 ) {
-    // Single-owner guard: a second spawn for the same order is a no-op.
-    let Some(generation) = claim_chat(channel, &order_id).await else {
+    // Single-owner guard: a second spawn for the same order is a no-op, and
+    // so is a dispute chat for a solver that was replaced.
+    let claimed = match channel {
+        ChatChannel::Dispute => claim_dispute_chat(&order_id, &peer_pubkey.to_hex()).await,
+        ChatChannel::Peer => claim_chat(channel, &order_id).await,
+    };
+    let Some(generation) = claimed else {
         log::debug!("[messages] chat task already active order={order_id}");
         return;
     };

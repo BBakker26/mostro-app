@@ -631,8 +631,8 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
 /// `admin-took-dispute` that set it. A dispute can change solver (a write
 /// solver taking over from a read-only one), and the catch-up channel replays
 /// every assignment after a reconnect, usually newest first, so the older one
-/// must not win. In memory only: after a restart the rehydrated solver has no
-/// time, and the replay settles it.
+/// must not win. Persisted under `dispute_admin_at:` and seeded again by
+/// rehydration, so the replay order does not matter after a restart either.
 static SOLVER_ASSIGNED_AT: OnceLock<std::sync::Mutex<HashMap<String, i64>>> = OnceLock::new();
 
 fn solver_assigned_at() -> &'static std::sync::Mutex<HashMap<String, i64>> {
@@ -649,14 +649,28 @@ fn note_solver_assignment(trade_id: &str, at: Option<i64>) {
     *newest = (*newest).max(at);
 }
 
-/// Whether an assignment made at `at` is older than the current solver's.
+/// When the current solver of `trade_id` was assigned, if known.
+fn recorded_solver_assignment(trade_id: &str) -> Option<i64> {
+    solver_assigned_at()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(trade_id)
+        .copied()
+}
+
+/// Whether an assignment of a different solver made at `at` must be ignored:
+/// it is not newer than the current solver's. `created_at` has second
+/// resolution, so equal times cannot be ordered; the current assignment is
+/// kept, which makes a newest-first replay deterministic. A real takeover in
+/// the same second as the previous assignment is not a practical case: the
+/// taking solver acts on a dispute already in progress.
 fn is_stale_solver_assignment(trade_id: &str, at: Option<i64>) -> bool {
     let Some(at) = at else { return false };
     solver_assigned_at()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(trade_id)
-        .is_some_and(|&newest| at < newest)
+        .is_some_and(|&newest| at <= newest)
 }
 
 /// [`handle_admin_took_dispute`] with the time the daemon made the assignment
@@ -781,9 +795,15 @@ pub(crate) async fn apply_admin_took_dispute(
     // (its subscription filters on that conversation's signing key), and the
     // chat guard allows one task per order and channel, so the new solver's
     // listener below would be a no-op and their messages would never arrive.
-    // Stop the old task first; the peer chat is left alone.
+    // Stop the old task first; the peer chat is left alone. The cursor dates
+    // the previous conversation, so the new one starts without it.
     if solver_changed {
         let stopped = crate::api::messages::stop_chat_subscription(
+            crate::api::messages::ChatChannel::Dispute,
+            &trade_id,
+        )
+        .await;
+        crate::api::messages::reset_chat_cursor(
             crate::api::messages::ChatChannel::Dispute,
             &trade_id,
         )
@@ -798,6 +818,7 @@ pub(crate) async fn apply_admin_took_dispute(
     }
 
     persist_admin_pubkey(&trade_id, &admin_pubkey_for_key).await;
+    persist_solver_assigned_at(&trade_id).await;
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
 }
 
@@ -832,6 +853,29 @@ async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
         crate::api::logging::blog_warn(
             "disputes",
             format!("could not persist solver pubkey for {order_id}: {e}"),
+        );
+    }
+}
+
+/// Persist when the current solver was assigned (see [`solver_assigned_at`]),
+/// for rehydration. Best-effort, like the pubkey.
+async fn persist_solver_assigned_at(order_id: &str) {
+    let Some(at) = recorded_solver_assignment(order_id) else {
+        return;
+    };
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    if let Err(e) = db
+        .set_setting(
+            &crate::db::settings_keys::dispute_admin_at(order_id),
+            &at.to_string(),
+        )
+        .await
+    {
+        crate::api::logging::blog_warn(
+            "disputes",
+            format!("could not persist solver assignment time for {order_id}: {e}"),
         );
     }
 }
@@ -900,6 +944,7 @@ async fn clear_dispute_keys(order_id: &str) {
     };
     for key in [
         crate::db::settings_keys::dispute_admin(order_id),
+        crate::db::settings_keys::dispute_admin_at(order_id),
         crate::db::settings_keys::dispute_mine(order_id),
     ] {
         if let Err(e) = db.delete_setting(&key).await {
@@ -1074,6 +1119,16 @@ async fn rehydrate_disputes_from_storage() {
                 continue;
             }
         };
+
+        // When that solver was assigned, so a replayed older assignment is
+        // told apart whatever order the catch-up channel delivers it in.
+        let assigned_at = db
+            .get_setting(&crate::db::settings_keys::dispute_admin_at(&order_id))
+            .await
+            .ok()
+            .flatten()
+            .and_then(|at| at.parse::<i64>().ok());
+        note_solver_assignment(&order_id, assigned_at);
 
         let initiated_by_me = match db
             .get_setting(&crate::db::settings_keys::dispute_mine(&order_id))
@@ -1674,6 +1729,114 @@ mod tests {
 
         crate::api::messages::stop_chat_subscriptions(&order).await;
         clear_dispute_keys(&order).await;
+    }
+
+    /// Codex review of #638: on reconnect, rehydration can spawn a listener
+    /// for the persisted previous solver that has not claimed the chat yet
+    /// when the takeover stops it. Once the takeover is applied, that late
+    /// task must not claim the chat; the new solver's task must.
+    #[tokio::test]
+    async fn a_late_listener_for_a_replaced_solver_cannot_claim_the_dispute_chat() {
+        use crate::api::messages::claim_dispute_chat;
+
+        let order = format!("late-claim-{}", uuid::Uuid::new_v4());
+        let serbero = "0000000000000000000000000000000000000000000000000000000000000088";
+        let solver = "0000000000000000000000000000000000000000000000000000000000000099";
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+
+        assert!(
+            claim_dispute_chat(&order, serbero).await.is_none(),
+            "the replaced solver's listener must not claim the chat"
+        );
+        assert!(
+            claim_dispute_chat(&order, solver).await.is_some(),
+            "the current solver's listener claims it"
+        );
+
+        crate::api::messages::stop_chat_subscriptions(&order).await;
+        clear_dispute_keys(&order).await;
+    }
+
+    /// Codex review of #638: `created_at` has second resolution. A replayed
+    /// assignment of another solver with the same time as the current one
+    /// cannot be ordered, so the current assignment is kept.
+    #[tokio::test]
+    async fn an_equal_second_assignment_keeps_the_current_solver() {
+        let order = format!("tie-{}", uuid::Uuid::new_v4());
+        let serbero = "00000000000000000000000000000000000000000000000000000000000000aa";
+        let solver = "00000000000000000000000000000000000000000000000000000000000000bb";
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(150))
+            .await
+            .unwrap();
+        // Replayed with the same second as the current assignment.
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(150))
+            .await
+            .unwrap();
+
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+
+        clear_dispute_keys(&order).await;
+    }
+
+    /// Codex review of #638: the dispute chat cursor dates the previous
+    /// solver's conversation. A takeover clears it, so the new solver's
+    /// messages are fetched even when their clock is behind; a same-solver
+    /// replay keeps it. The assignment time is persisted for rehydration.
+    #[tokio::test]
+    async fn a_takeover_resets_the_dispute_cursor_and_persists_the_assignment_time() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_takeover_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the cursor reset cannot be exercised");
+        };
+
+        let order = format!("cursor-{}", uuid::Uuid::new_v4());
+        let serbero = "00000000000000000000000000000000000000000000000000000000000000cc";
+        let solver = "00000000000000000000000000000000000000000000000000000000000000dd";
+        let cursor_key = crate::db::settings_keys::chat_cursor(&format!("dispute-{order}"));
+        let at_key = crate::db::settings_keys::dispute_admin_at(&order);
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        db.set_setting(&cursor_key, "500").await.unwrap();
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_setting(&cursor_key).await.unwrap().as_deref(),
+            Some("500"),
+            "a same-solver replay keeps the cursor"
+        );
+
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_setting(&cursor_key).await.unwrap(),
+            None,
+            "a takeover clears the previous conversation's cursor"
+        );
+        assert_eq!(
+            db.get_setting(&at_key).await.unwrap().as_deref(),
+            Some("200")
+        );
+
+        clear_dispute_keys(&order).await;
+        assert_eq!(db.get_setting(&at_key).await.unwrap(), None);
     }
 
     /// PR #256 review, manual E2E: the catch-up channel re-delivers

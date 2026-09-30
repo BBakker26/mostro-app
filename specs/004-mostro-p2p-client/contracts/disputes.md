@@ -134,7 +134,7 @@ The Dispute record is **in-memory by design** — its status and resolution come
 back from daemon events, and so, usually, does the solver assignment: the
 offline catch-up channel (`orders.rs`, no `since`) replays `admin-took-dispute`
 on every reconnect, which rebuilds the record and re-arms the dispute chat on
-its own. Two facts are persisted anyway:
+its own. These facts are persisted anyway:
 
 - the **origin** (whether this side opened the dispute), written by a successful
   `open_dispute` under `dispute_mine:<order_id>` (presence is the value). This
@@ -145,6 +145,8 @@ its own. Two facts are persisted anyway:
   replay is bounded by relay retention and by the per-subscription result cap,
   so a long dispute can outlive it. The stored copy is what re-arms the chat
   when the replay no longer covers the assignment.
+- **when that solver was assigned**, under `dispute_admin_at:<order_id>`, so a
+  replayed older assignment is ignored after a restart (see Solver takeover).
 
 **Rehydration**: on relay (re)connect, dispute records are rebuilt for persisted
 trades that have a stored solver, before dispute-chat listeners are re-armed and
@@ -182,10 +184,19 @@ take over an `in-progress` dispute held by a read-only one (for example
 the dispute chat task, bound to the previous solver's conversation keys, is
 stopped before the new one is armed; the chat guard allows one task per order
 and channel, so without the stop the new solver's messages would never be read.
-The peer chat is not touched. Each assignment's time (the event's
-`created_at`) is kept in memory, and an older assignment for the same order is
-ignored: the catch-up channel replays every `admin-took-dispute`, usually
-newest first, and the previous solver must not come back.
+The peer chat is not touched. The dispute chat's `since` cursor is cleared,
+since it dates the previous conversation and the new solver's clock may be
+behind it. A listener armed for the previous solver that has not claimed the
+chat yet (rehydration on reconnect) cannot claim it: the claim checks the
+dispute's current solver under the guard's lock.
+
+Each assignment's time (the event's `created_at`) is recorded, and an
+assignment of another solver that is not newer is ignored: the catch-up
+channel replays every `admin-took-dispute`, usually newest first, and the
+previous solver must not come back. Equal seconds cannot be ordered, so the
+current assignment is kept. The time is persisted under
+`dispute_admin_at:<order_id>` and seeded again by rehydration, so the replay
+order does not matter after a restart either.
 
 Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
 a resolved record or a finished trade is `NoOpenDispute`.

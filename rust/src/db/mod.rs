@@ -107,6 +107,18 @@ pub mod settings_keys {
         format!("{DISPUTE_ADMIN_PREFIX}{order_id}")
     }
 
+    /// Per-order time (unix seconds, decimal string) the current dispute
+    /// solver was assigned: the `created_at` of its `admin-took-dispute`.
+    pub const DISPUTE_ADMIN_AT_PREFIX: &str = "dispute_admin_at:";
+
+    /// Build the settings key holding when the dispute solver of `order_id`
+    /// was assigned. A dispute can change solver (a takeover), and the
+    /// catch-up channel replays every assignment in no guaranteed order, so
+    /// after a restart this is what tells an older one apart.
+    pub fn dispute_admin_at(order_id: &str) -> String {
+        format!("{DISPUTE_ADMIN_AT_PREFIX}{order_id}")
+    }
+
     /// Per-order marker that *this* side opened the dispute.
     pub const DISPUTE_MINE_PREFIX: &str = "dispute_mine:";
 
@@ -195,9 +207,10 @@ pub mod settings_keys {
     /// [`super::Storage::clear_identity_data`] drops it with the rows. What
     /// is left in the store is device preference: the active node, custom
     /// nodes, node caches, push token and toggle, developer overrides.
-    pub const IDENTITY_SCOPED_PREFIXES: [&str; 6] = [
+    pub const IDENTITY_SCOPED_PREFIXES: [&str; 7] = [
         CHAT_CURSOR_PREFIX,
         DISPUTE_ADMIN_PREFIX,
+        DISPUTE_ADMIN_AT_PREFIX,
         DISPUTE_MINE_PREFIX,
         STATUS_CURSOR_PREFIX,
         INVOICE_STEP_PREFIX,

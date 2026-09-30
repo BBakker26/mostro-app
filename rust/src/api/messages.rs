@@ -1255,11 +1255,31 @@ pub(crate) async fn stop_chat_subscriptions(order_id: &str) -> Vec<ChatChannel> 
 /// running task is bound to the old counterpart's keys. Returns whether a task
 /// was running.
 pub(crate) async fn stop_chat_subscription(channel: ChatChannel, order_id: &str) -> bool {
-    let was_running = active_chats()
-        .lock()
-        .await
-        .remove(&channel.guard_key(order_id))
-        .is_some();
+    let mut active = active_chats().lock().await;
+    stop_chat_locked(&mut active, channel, order_id).await
+}
+
+/// Hand an order's dispute chat over to a new solver: stop the running task,
+/// close its REQ and forget the cursor, all under the guard's lock. A new
+/// task (the new solver's, or a reconnect's resubscribe) can only claim the
+/// chat once this is complete, so it neither loads the previous
+/// conversation's cursor nor has its subscription removed by a late close of
+/// the old one. Returns whether a task was running.
+pub(crate) async fn hand_over_dispute_chat(order_id: &str) -> bool {
+    let mut active = active_chats().lock().await;
+    let stopped = stop_chat_locked(&mut active, ChatChannel::Dispute, order_id).await;
+    reset_chat_cursor(ChatChannel::Dispute, order_id).await;
+    stopped
+}
+
+/// Release the chat's claim and close its REQ, with the guard's lock held
+/// throughout, so no new task claims the chat before its old REQ is gone.
+async fn stop_chat_locked(
+    active: &mut std::collections::HashMap<String, u64>,
+    channel: ChatChannel,
+    order_id: &str,
+) -> bool {
+    let was_running = active.remove(&channel.guard_key(order_id)).is_some();
     if was_running {
         if let Ok(pool) = crate::api::nostr::get_pool() {
             crate::nostr::live_subs::live_subs()
@@ -1372,7 +1392,7 @@ async fn load_chat_cursor(channel: ChatChannel, order_id: &str) -> Option<i64> {
 /// before `since` and never be fetched. The new filter only matches the new
 /// conversation, so starting without a cursor refetches nothing else.
 /// Best-effort, like the cursor itself.
-pub(crate) async fn reset_chat_cursor(channel: ChatChannel, order_id: &str) {
+async fn reset_chat_cursor(channel: ChatChannel, order_id: &str) {
     if let Some(db) = crate::db::app_db::db() {
         let key = channel.cursor_key(order_id);
         if let Err(e) = db.delete_setting(&key).await {
@@ -2728,6 +2748,76 @@ mod tests {
 
         crate::nostr::live_subs::live_subs().close(&client, &sub_id).await;
         release_chat(ChatChannel::Dispute, &order, new).await;
+    }
+
+    /// Codex review of #638: a new dispute chat task (a reconnect's
+    /// resubscribe for the new solver) can try to claim the chat while the
+    /// takeover is still handing it over. It must only get the chat once the
+    /// handover is complete, or it loads the previous conversation's `since`.
+    /// The old REQ's close sits under the same lock, but needs a relay pool,
+    /// which unit tests do not have, so only the cursor is observed here.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_claim_during_the_handover_sees_it_complete() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_takeover_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the cursor reset cannot be exercised");
+        };
+        let client = std::sync::Arc::new(nostr_sdk::prelude::Client::default());
+        let filter = || {
+            nostr_sdk::prelude::Filter::new().kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
+        };
+
+        for _ in 0..30 {
+            let order = format!("handover-{}", uuid::Uuid::new_v4());
+            let sub_id = chat_subscription_id(ChatChannel::Dispute, &order);
+            db.set_setting(&ChatChannel::Dispute.cursor_key(&order), "500")
+                .await
+                .unwrap();
+            let old = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+            let _ = replace_chat_subscription_if_current(
+                ChatChannel::Dispute,
+                &order,
+                old,
+                &client,
+                sub_id.clone(),
+                filter(),
+            )
+            .await;
+
+            let new_task = {
+                let order = order.clone();
+                let client = client.clone();
+                let sub_id = sub_id.clone();
+                tokio::spawn(async move {
+                    let generation = loop {
+                        if let Some(g) = claim_chat(ChatChannel::Dispute, &order).await {
+                            break g;
+                        }
+                        tokio::task::yield_now().await;
+                    };
+                    let cursor = load_chat_cursor(ChatChannel::Dispute, &order).await;
+                    let _ = replace_chat_subscription_if_current(
+                        ChatChannel::Dispute,
+                        &order,
+                        generation,
+                        &client,
+                        sub_id,
+                        filter(),
+                    )
+                    .await;
+                    (generation, cursor)
+                })
+            };
+            hand_over_dispute_chat(&order).await;
+            let (generation, cursor) = new_task.await.unwrap();
+
+            assert_eq!(cursor, None, "the new task must not load the old cursor");
+
+            crate::nostr::live_subs::live_subs().close(&client, &sub_id).await;
+            release_chat(ChatChannel::Dispute, &order, generation).await;
+        }
     }
 
     /// PR #527 review: stop, then a replacement task claims the same chat,

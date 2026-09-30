@@ -813,16 +813,7 @@ pub(crate) async fn apply_admin_took_dispute(
     // Stop the old task first; the peer chat is left alone. The cursor dates
     // the previous conversation, so the new one starts without it.
     if solver_changed {
-        let stopped = crate::api::messages::stop_chat_subscription(
-            crate::api::messages::ChatChannel::Dispute,
-            &trade_id,
-        )
-        .await;
-        crate::api::messages::reset_chat_cursor(
-            crate::api::messages::ChatChannel::Dispute,
-            &trade_id,
-        )
-        .await;
+        let stopped = crate::api::messages::hand_over_dispute_chat(&trade_id).await;
         crate::api::logging::blog_info(
             "disputes",
             format!(

@@ -182,7 +182,9 @@ take over an `in-progress` dispute held by a read-only one (for example
 [Serbero](https://github.com/MostroP2P/serbero)), and sends both parties a new
 `admin-took-dispute` with the new pubkey. The record takes the new solver, and
 the dispute chat task, bound to the previous solver's conversation keys, is
-stopped before the new one is armed; the chat guard allows one task per order
+stopped before the new one is armed (the handover releases the claim, closes
+the old REQ and clears the cursor under the chat guard's lock, so no new task
+claims the chat half-way); the chat guard allows one task per order
 and channel, so without the stop the new solver's messages would never be read.
 The peer chat is not touched. The dispute chat's `since` cursor is cleared,
 since it dates the previous conversation and the new solver's clock may be

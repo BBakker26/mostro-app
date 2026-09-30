@@ -128,6 +128,20 @@ fn validate_lightning_address(address: &str) -> Result<()> {
     )
 }
 
+/// A node pubkey the way the active node is stored: validated, lowercase hex.
+///
+/// Lowercase because the node registry compares pubkeys as lowercase hex, and
+/// an uppercase active key would read as unknown there (auto-imported
+/// duplicate, never flagged active, undeletable).
+///
+/// **Errors**: `InvalidPubkey` if `pubkey` is not a valid 64-char hex key.
+fn normalize_node_pubkey(pubkey: &str) -> Result<String> {
+    let pubkey = pubkey.to_lowercase();
+    nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
+        .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
+    Ok(pubkey)
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Return current settings with `privacy_mode` mirrored from the Identity layer.
@@ -207,12 +221,7 @@ pub fn get_mostro_pubkey() -> String {
 ///
 /// **Errors**: `InvalidPubkey` if `pubkey` is not a valid 64-char hex key.
 pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
-    // Lowercase before persisting: the node registry compares pubkeys as
-    // lowercase hex, and an uppercase active key would read as unknown there
-    // (auto-imported duplicate, never flagged active, undeletable).
-    let pubkey = pubkey.to_lowercase();
-    nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
-        .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
+    let pubkey = normalize_node_pubkey(&pubkey)?;
     let previous = crate::config::active_mostro_pubkey();
 
     {

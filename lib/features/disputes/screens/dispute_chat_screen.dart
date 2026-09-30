@@ -195,7 +195,12 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
         for (final m in messages)
           if (m.senderPubkey case final sender? when !m.isMine) sender,
       })
-        pubkey: ref.watch(solverRoleProvider(pubkey)).valueOrNull,
+        pubkey:
+            ref
+                .watch(
+                  solverRoleProvider((tradeId: tradeId, solverPubkey: pubkey)),
+                )
+                .valueOrNull,
     };
 
     final isResolved = dispute.status == DisputeStatus.resolved;

@@ -575,15 +575,40 @@ pub(crate) async fn record_late_acceptance(trade_id: &str, dispute_id: Option<St
     }
 }
 
-/// Who the solver `solver_pubkey` (hex) is, for the label the dispute chat
-/// shows (#637): the assistant a known node announces as its Serbero, or a
-/// person. Read at display time, so a label shown before the node's info
-/// event arrived corrects itself on the next read.
-pub async fn solver_role(solver_pubkey: String) -> SolverRole {
-    if crate::mostro::serbero::is_assistant(&solver_pubkey).await {
+/// Who the solver `solver_pubkey` (hex) of `trade_id`'s dispute is, for the
+/// label the dispute chat shows (#637): the assistant the dispute's own node
+/// announces as its Serbero, or a person. Another node's announcement never
+/// counts, and a dispute whose node is not recorded yet (assigned before the
+/// app recorded it, until a replay does) shows a person. Read at display
+/// time, so a label shown before the node's info event arrived corrects
+/// itself on the next read.
+pub async fn solver_role(trade_id: String, solver_pubkey: String) -> SolverRole {
+    let Some(node) = dispute_node(&trade_id).await else {
+        return SolverRole::Human;
+    };
+    if crate::mostro::serbero::is_assistant(&node, &solver_pubkey).await {
         SolverRole::Assistant
     } else {
         SolverRole::Human
+    }
+}
+
+/// The node `order_id`'s dispute belongs to (hex), as its assignment
+/// recorded it (see [`persist_dispute_node`]).
+async fn dispute_node(order_id: &str) -> Option<String> {
+    let db = crate::db::app_db::db()?;
+    match db
+        .get_setting(&crate::db::settings_keys::dispute_node(order_id))
+        .await
+    {
+        Ok(node) => node,
+        Err(e) => {
+            crate::api::logging::blog_warn(
+                "disputes",
+                format!("could not read the node of {order_id}: {e}"),
+            );
+            None
+        }
     }
 }
 
@@ -703,6 +728,18 @@ static SOLVER_ASSIGNMENT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::cons
 /// (`assigned_at`, the event's `created_at`), so a replayed older assignment
 /// cannot replace a newer solver.
 pub(crate) async fn apply_admin_took_dispute(
+    trade_id: String,
+    admin_pubkey: String,
+    assigned_at: Option<i64>,
+) -> Result<()> {
+    let node = crate::config::active_mostro_pubkey();
+    apply_admin_took_dispute_from(&node, trade_id, admin_pubkey, assigned_at).await
+}
+
+/// [`apply_admin_took_dispute`] for an assignment `node` (hex) sent: the
+/// daemon message's authenticated author, which becomes the dispute's node.
+pub(crate) async fn apply_admin_took_dispute_from(
+    node: &str,
     trade_id: String,
     admin_pubkey: String,
     assigned_at: Option<i64>,
@@ -867,6 +904,7 @@ pub(crate) async fn apply_admin_took_dispute(
     }
 
     persist_admin_pubkey(&trade_id, &admin_pubkey_for_key).await;
+    persist_dispute_node(&trade_id, node).await;
     persist_solver_assigned_at(&trade_id, &admin_pubkey_for_key).await;
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
 }
@@ -902,6 +940,28 @@ async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
         crate::api::logging::blog_warn(
             "disputes",
             format!("could not persist solver pubkey for {order_id}: {e}"),
+        );
+    }
+}
+
+/// Persist the node `order_id`'s dispute belongs to: the one that sent its
+/// assignment. Only that node's Serbero announcement labels the dispute's
+/// solvers (#637), so it outlives a node switch. Best-effort, like the
+/// pubkey: without it the solvers show as a person.
+async fn persist_dispute_node(order_id: &str, node: &str) {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    if let Err(e) = db
+        .set_setting(
+            &crate::db::settings_keys::dispute_node(order_id),
+            &node.to_lowercase(),
+        )
+        .await
+    {
+        crate::api::logging::blog_warn(
+            "disputes",
+            format!("could not persist the node of {order_id}: {e}"),
         );
     }
 }
@@ -1029,6 +1089,7 @@ async fn clear_dispute_keys(order_id: &str) {
     for key in [
         crate::db::settings_keys::dispute_admin(order_id),
         crate::db::settings_keys::dispute_admin_at(order_id),
+        crate::db::settings_keys::dispute_node(order_id),
         crate::db::settings_keys::dispute_mine(order_id),
     ] {
         if let Err(e) = db.delete_setting(&key).await {
@@ -1438,29 +1499,102 @@ mod tests {
             .expect("seed_dispute: insert failed")
     }
 
-    /// #637: the dispute chat labels a solver the node announces as its
-    /// Serbero as the assistant, anyone else as a person — and a later fetch
-    /// without the tag takes the label back.
+    /// #637: the dispute chat labels a solver as the assistant only when the
+    /// dispute's own node announces it as its Serbero — another node's
+    /// announcement never counts — and a later fetch without the tag takes
+    /// the label back.
     #[tokio::test]
-    async fn the_solver_role_follows_the_nodes_serbero_announcement() {
+    async fn the_solver_role_follows_the_dispute_nodes_serbero_announcement() {
         use nostr_sdk::prelude::Keys;
-        // Arrange: the active node announces a Serbero of this test's own, so
-        // no other test's key can match. A node outside the registry would
-        // not count.
-        let node = crate::config::active_mostro_pubkey();
-        let serbero = Keys::generate().public_key().to_hex();
+        let path = std::env::temp_dir().join(format!(
+            "mostro_dispute_solver_role_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the dispute's node cannot be recorded");
+        };
+
+        // Arrange: the active node and another registry node each announce a
+        // Serbero of this test's own, so no other test's key can match. One
+        // dispute of each, and one whose node was never recorded.
+        let active = crate::config::active_mostro_pubkey();
+        let other = crate::config::TRUSTED_MOSTRO_NODES
+            .iter()
+            .map(|n| n.pubkey.to_string())
+            .find(|pubkey| *pubkey != active)
+            .expect("a registry node besides the active one");
+        let active_serbero = Keys::generate().public_key().to_hex();
+        let other_serbero = Keys::generate().public_key().to_hex();
         let person = Keys::generate().public_key().to_hex();
-        let announcing = vec![vec!["serbero".to_string(), serbero.clone()]];
+        let on_active = format!("role-active-{}", uuid::Uuid::new_v4());
+        let on_other = format!("role-other-{}", uuid::Uuid::new_v4());
+        let unrecorded = format!("role-unrecorded-{}", uuid::Uuid::new_v4());
+        for (order_id, node) in [(&on_active, &active), (&on_other, &other)] {
+            db.set_setting(&crate::db::settings_keys::dispute_node(order_id), node)
+                .await
+                .unwrap();
+        }
+        let announce = |serbero: &str| vec![vec!["serbero".to_string(), serbero.to_string()]];
 
         // Act
-        crate::mostro::serbero::set_from_tags(&node, &announcing);
+        crate::mostro::serbero::set_from_tags(&active, &announce(&active_serbero));
+        crate::mostro::serbero::set_from_tags(&other, &announce(&other_serbero));
 
         // Assert
-        assert_eq!(solver_role(serbero.clone()).await, SolverRole::Assistant);
-        assert_eq!(solver_role(person).await, SolverRole::Human);
+        let role =
+            |order_id: &String, solver: &String| solver_role(order_id.clone(), solver.clone());
+        assert_eq!(
+            role(&on_active, &active_serbero).await,
+            SolverRole::Assistant
+        );
+        assert_eq!(role(&on_other, &other_serbero).await, SolverRole::Assistant);
+        assert_eq!(
+            role(&on_active, &other_serbero).await,
+            SolverRole::Human,
+            "another node's Serbero is a person on this node's dispute"
+        );
+        assert_eq!(role(&on_other, &active_serbero).await, SolverRole::Human);
+        assert_eq!(role(&on_active, &person).await, SolverRole::Human);
+        assert_eq!(
+            role(&unrecorded, &active_serbero).await,
+            SolverRole::Human,
+            "no recorded node vouches for anyone"
+        );
 
-        crate::mostro::serbero::set_from_tags(&node, &[]);
-        assert_eq!(solver_role(serbero).await, SolverRole::Human);
+        crate::mostro::serbero::set_from_tags(&other, &[]);
+        assert_eq!(role(&on_other, &other_serbero).await, SolverRole::Human);
+
+        crate::mostro::serbero::set_from_tags(&active, &[]);
+        for order_id in [&on_active, &on_other] {
+            clear_dispute_keys(order_id).await;
+        }
+    }
+
+    /// The node an assignment came from is the dispute's node: recorded with
+    /// the solver, and cleared with the other dispute keys.
+    #[tokio::test]
+    async fn an_assignment_records_the_node_it_came_from() {
+        let path =
+            std::env::temp_dir().join(format!("mostro_dispute_node_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the dispute's node cannot be recorded");
+        };
+        let order = format!("node-order-{}", uuid::Uuid::new_v4());
+        let node = "0000cc02101ec29eea9ce623258752b9d7da66c27845ed26846dd0b0fc736b40";
+        let solver = "00000000000000000000000000000000000000000000000000000000000000f1";
+        let key = crate::db::settings_keys::dispute_node(&order);
+
+        // Act
+        apply_admin_took_dispute_from(node, order.clone(), solver.to_string(), Some(100))
+            .await
+            .unwrap();
+
+        // Assert
+        assert_eq!(db.get_setting(&key).await.unwrap().as_deref(), Some(node));
+        clear_dispute_keys(&order).await;
+        assert_eq!(db.get_setting(&key).await.unwrap(), None);
     }
 
     #[test]

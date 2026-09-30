@@ -595,7 +595,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiSettingsSetTheme({required ThemeMode theme});
 
-  Future<SolverRole> crateApiDisputesSolverRole({required String solverPubkey});
+  Future<SolverRole> crateApiDisputesSolverRole({
+    required String tradeId,
+    required String solverPubkey,
+  });
 
   Future<void> crateApiBondSubmitBondPayoutInvoice({
     required String orderId,
@@ -6124,12 +6127,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<SolverRole> crateApiDisputesSolverRole({
+    required String tradeId,
     required String solverPubkey,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(tradeId, serializer);
           sse_encode_String(solverPubkey, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -6143,14 +6148,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: null,
         ),
         constMeta: kCrateApiDisputesSolverRoleConstMeta,
-        argValues: [solverPubkey],
+        argValues: [tradeId, solverPubkey],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiDisputesSolverRoleConstMeta =>
-      const TaskConstMeta(debugName: "solver_role", argNames: ["solverPubkey"]);
+  TaskConstMeta get kCrateApiDisputesSolverRoleConstMeta => const TaskConstMeta(
+    debugName: "solver_role",
+    argNames: ["tradeId", "solverPubkey"],
+  );
 
   @override
   Future<void> crateApiBondSubmitBondPayoutInvoice({

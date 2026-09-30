@@ -130,15 +130,23 @@ Get dispute details for a trade. Returns null if no dispute exists.
 
 ---
 
-### solver_role(solver_pubkey: String) → SolverRole
-Who a solver is, for the label the dispute chat shows (app#637):
-`Assistant` when a known node announces `solver_pubkey` as its Serbero in
-the info event (kind 38385, `["serbero", "<hex>"]`, mostro#1009), otherwise
-`Human`. Known nodes: the active node's latest capability fetch, which
-wins for that node (a fetch without the tag retracts an older
-announcement), and every registry node's cached info event, so a dispute
-of a node the user switched away from keeps its label. The solver's own
-profile never counts.
+### solver_role(trade_id: String, solver_pubkey: String) → SolverRole
+Who a solver of `trade_id`'s dispute is, for the label the dispute chat
+shows (app#637): `Assistant` when **the dispute's own node** announces
+`solver_pubkey` as its Serbero in the info event (kind 38385,
+`["serbero", "<hex>"]`, mostro#1009), otherwise `Human`. Another node's
+announcement never counts: a key one node runs as its Serbero can be a
+person on another node's dispute.
+
+The dispute's node is the authenticated author of its `admin-took-dispute`,
+recorded under `dispute_node:<order_id>` (see Persistence and restart). A
+dispute with no node recorded — assigned before the app recorded it, until
+a replay does — shows `Human`. That node's announcement comes from its
+latest capability fetch, which wins (a fetch without the tag, or without an
+info event, retracts an older one), or else from its cached info event, so
+a dispute of a node the user switched away from keeps its label. A node
+outside the registry and not active (a removed custom node) vouches for
+nobody. The solver's own profile never counts.
 
 Read at display time rather than stored with a message: a history replay
 can land before the capability fetch, and the label corrects itself on the
@@ -165,6 +173,10 @@ its own. These facts are persisted anyway:
 - **when that solver was assigned**, under `dispute_admin_at:<order_id>` as
   `<time>:<pubkey>`, so a replayed older assignment is ignored after a restart
   (see Solver takeover).
+- the dispute's **node** (hex), the authenticated author of its
+  `admin-took-dispute`, under `dispute_node:<order_id>`: only that node's
+  Serbero announcement labels the dispute's solvers (see `solver_role`), and
+  the user can switch nodes while the dispute lasts.
 
 **Rehydration**: on relay (re)connect, dispute records are rebuilt for persisted
 trades that have a stored solver, before dispute-chat listeners are re-armed and

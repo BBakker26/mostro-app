@@ -88,8 +88,8 @@ FundsToMe | FundsToCounterparty | CooperativeCancel
 ```text
 Assistant | Human
 ```
-`Assistant` = a Serbero a known node announces; `Human` = anyone else. See
-`disputes.md` → `solver_role`.
+`Assistant` = the Serbero the dispute's own node announces; `Human` = anyone
+else. See `disputes.md` → `solver_role`.
 
 ### RelayStatus
 ```text

@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `all`, `apply_admin_took_dispute`, `apply_admin_verdict`, `clear_dispute_keys`, `cursor_is_unvouched`, `derive_admin_shared_key`, `dispute_store`, `forget_identity_disputes`, `get`, `has_dispute_keys`, `is_order_finished`, `is_peer_placeholder`, `is_stale_solver_assignment`, `new`, `note_peer_opened_dispute`, `note_solver_assignment`, `pending_opens`, `persist_admin_pubkey`, `persist_dispute_origin`, `persist_solver_assigned_at`, `persisted_order_is_finished`, `persisted_solver_assigned_at`, `record_late_acceptance`, `recorded_solver_assignment`, `rehydrate_disputes_from_storage`, `resolve_dispute`, `resubscribe_active_dispute_chats`, `solver_assigned_at`, `solver_conversation`, `solver_pubkey`, `status_allows_dispute`, `try_insert_if_absent_or_resolved`, `update_conditional`, `upsert_or_update`
+// These functions are ignored because they are not marked as `pub`: `all`, `apply_admin_took_dispute_from`, `apply_admin_took_dispute`, `apply_admin_verdict`, `clear_dispute_keys`, `cursor_is_unvouched`, `derive_admin_shared_key`, `dispute_node`, `dispute_store`, `forget_identity_disputes`, `get`, `has_dispute_keys`, `is_order_finished`, `is_peer_placeholder`, `is_stale_solver_assignment`, `new`, `note_peer_opened_dispute`, `note_solver_assignment`, `pending_opens`, `persist_admin_pubkey`, `persist_dispute_node`, `persist_dispute_origin`, `persist_solver_assigned_at`, `persisted_order_is_finished`, `persisted_solver_assigned_at`, `record_late_acceptance`, `recorded_solver_assignment`, `rehydrate_disputes_from_storage`, `resolve_dispute`, `resubscribe_active_dispute_chats`, `solver_assigned_at`, `solver_conversation`, `solver_pubkey`, `status_allows_dispute`, `try_insert_if_absent_or_resolved`, `update_conditional`, `upsert_or_update`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DisputeStore`, `PendingOpenGuard`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
@@ -67,12 +67,20 @@ Future<ChatMessage> sendDisputeFile({
   uploadId: uploadId,
 );
 
-/// Who the solver `solver_pubkey` (hex) is, for the label the dispute chat
-/// shows (#637): the assistant a known node announces as its Serbero, or a
-/// person. Read at display time, so a label shown before the node's info
-/// event arrived corrects itself on the next read.
-Future<SolverRole> solverRole({required String solverPubkey}) =>
-    RustLib.instance.api.crateApiDisputesSolverRole(solverPubkey: solverPubkey);
+/// Who the solver `solver_pubkey` (hex) of `trade_id`'s dispute is, for the
+/// label the dispute chat shows (#637): the assistant the dispute's own node
+/// announces as its Serbero, or a person. Another node's announcement never
+/// counts, and a dispute whose node is not recorded yet (assigned before the
+/// app recorded it, until a replay does) shows a person. Read at display
+/// time, so a label shown before the node's info event arrived corrects
+/// itself on the next read.
+Future<SolverRole> solverRole({
+  required String tradeId,
+  required String solverPubkey,
+}) => RustLib.instance.api.crateApiDisputesSolverRole(
+  tradeId: tradeId,
+  solverPubkey: solverPubkey,
+);
 
 /// Get dispute details for a trade.
 ///

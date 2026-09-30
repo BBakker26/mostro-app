@@ -67,6 +67,9 @@ class _FakeDisputeGateway extends DisputeChatGateway {
   /// The solver pubkeys a node announces as its Serbero.
   final Set<String> assistants;
 
+  /// The trades whose solvers were asked about.
+  final roleTrades = <String>{};
+
   /// What `getDispute` answers; null when absent.
   final Future<rust_types.Dispute?> Function()? refresh;
   final texts = <String>[];
@@ -85,10 +88,15 @@ class _FakeDisputeGateway extends DisputeChatGateway {
       refresh?.call() ?? Future.value();
 
   @override
-  Future<rust_types.SolverRole> solverRole(String solverPubkey) async =>
-      assistants.contains(solverPubkey)
-          ? rust_types.SolverRole.assistant
-          : rust_types.SolverRole.human;
+  Future<rust_types.SolverRole> solverRole(
+    String tradeId,
+    String solverPubkey,
+  ) async {
+    roleTrades.add(tradeId);
+    return assistants.contains(solverPubkey)
+        ? rust_types.SolverRole.assistant
+        : rust_types.SolverRole.human;
+  }
 }
 
 rust_types.Dispute _bridgeDispute({
@@ -450,10 +458,11 @@ void main() {
       tester,
     ) async {
       // Arrange: Serbero talked first, then a person took the dispute.
+      final gateway = serberoNode();
       await _pumpScreen(
         tester,
         dispute: _dispute(),
-        disputeGateway: serberoNode(),
+        disputeGateway: gateway,
         history: [
           _message(id: 's1', sender: _serbero, content: 'Hi, I am Serbero'),
           _message(id: 'm1', isMine: true, content: 'Hi', createdAt: 1100),
@@ -476,6 +485,11 @@ void main() {
         tester.getTopLeft(line).dy,
         lessThan(tester.getTopLeft(find.text('Resolver here')).dy),
         reason: 'and comes before the resolver speaks',
+      );
+      expect(
+        gateway.roleTrades,
+        {_trade},
+        reason: "only the dispute's own node can vouch for its Serbero",
       );
     });
 

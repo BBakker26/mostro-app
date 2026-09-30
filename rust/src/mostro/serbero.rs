@@ -4,10 +4,12 @@
 //! 38385) as `["serbero", "<hex>"]`, and registers it as a read-only solver:
 //! it takes a dispute first and hands it to a person when needed, who takes
 //! it over with a new `admin-took-dispute`. The app trusts the node it
-//! already trusts, so a solver is shown as the assistant only when a known
-//! node announces its key — never on the solver's own say-so.
+//! already trusts, so a solver is shown as the assistant only when the
+//! dispute's own node announces its key — never on the solver's own say-so,
+//! and never on another node's: a key one node runs as its Serbero can be a
+//! person's on another.
 //!
-//! Two sources, the live one first:
+//! Two sources for that node, the live one first:
 //! - the active node's announcement from its capability fetch, kept here per
 //!   node (`None` once a fetch saw no tag, which retracts a cached one);
 //! - every registry node's kind 38385 cached by `node_stats`, so a dispute of
@@ -47,38 +49,40 @@ pub(crate) fn set_from_tags(node: &str, tags: &[Vec<String>]) {
         .insert(node.to_lowercase(), parse_tag(tags));
 }
 
-/// Whether `pubkey` is a Serbero some known node announces. `live` wins over
-/// `cached` for a node it has an answer for; a live answer of a node not in
-/// `known` (removed from the registry) no longer counts. `cached` is pruned
-/// to the registry where it is written.
+/// Whether `pubkey` is the Serbero `node` announces. Its `live` answer wins
+/// over its `cached` info event; a node not in `known` (removed from the
+/// registry) vouches for nobody, although its live answer stays in memory.
 fn is_assistant_in(
     pubkey: &str,
+    node: &str,
     live: &HashMap<String, Option<String>>,
     cached: &HashMap<String, Vec<Vec<String>>>,
     known: &HashSet<String>,
 ) -> bool {
-    let pubkey = pubkey.trim().to_lowercase();
-    let announced_live = live
-        .iter()
-        .filter(|(node, _)| known.contains(node.as_str()))
-        .any(|(_, serbero)| serbero.as_deref() == Some(pubkey.as_str()));
-    announced_live
-        || cached
+    let node = node.trim().to_lowercase();
+    if !known.contains(&node) {
+        return false;
+    }
+    let announced = match live.get(&node) {
+        Some(answer) => answer.clone(),
+        None => cached
             .iter()
-            .filter(|(node, _)| !live.contains_key(&node.to_lowercase()))
-            .any(|(_, tags)| parse_tag(tags).as_deref() == Some(pubkey.as_str()))
+            .find(|(cached_node, _)| cached_node.to_lowercase() == node)
+            .and_then(|(_, tags)| parse_tag(tags)),
+    };
+    announced.is_some_and(|serbero| serbero == pubkey.trim().to_lowercase())
 }
 
-/// Whether the solver `pubkey` (hex) is a Serbero, by the live
-/// announcements and the cached info events of every registry node.
-pub(crate) async fn is_assistant(pubkey: &str) -> bool {
+/// Whether the solver `pubkey` (hex) is the Serbero `node` (hex) announces,
+/// by that node's live announcement or its cached info event.
+pub(crate) async fn is_assistant(node: &str, pubkey: &str) -> bool {
     let live = LIVE
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
         .unwrap_or_default();
     let cached = crate::api::node_stats::cached_info_tags().await;
-    is_assistant_in(pubkey, &live, &cached, &known_nodes().await)
+    is_assistant_in(pubkey, node, &live, &cached, &known_nodes().await)
 }
 
 /// The registry's nodes and the active one (lowercase hex). A node removed
@@ -126,7 +130,11 @@ mod tests {
             Some(SERBERO)
         );
         assert_eq!(
-            parse_tag(&tags(&[("serbero", &format!(" {} ", SERBERO.to_uppercase()))])).as_deref(),
+            parse_tag(&tags(&[(
+                "serbero",
+                &format!(" {} ", SERBERO.to_uppercase())
+            )]))
+            .as_deref(),
             Some(SERBERO)
         );
     }
@@ -141,19 +149,40 @@ mod tests {
     }
 
     #[test]
-    fn a_solver_is_the_assistant_only_when_a_known_node_announces_it() {
-        // Arrange: another node's cached info event announces the Serbero.
+    fn a_solver_is_the_assistant_only_when_the_disputes_node_announces_it() {
+        // Arrange: only OTHER_NODE's cached info event announces the Serbero.
         let live = HashMap::new();
         let cached = HashMap::from([
             (NODE.to_string(), tags(&[("pow", "0")])),
             (OTHER_NODE.to_string(), tags(&[("serbero", SERBERO)])),
         ]);
+        let registry = known(&[NODE, OTHER_NODE]);
 
         // Act + Assert
-        assert!(is_assistant_in(SERBERO, &live, &cached, &known(&[NODE, OTHER_NODE])));
-        assert!(is_assistant_in(&SERBERO.to_uppercase(), &live, &cached, &known(&[NODE, OTHER_NODE])));
-        assert!(!is_assistant_in(HUMAN, &live, &cached, &known(&[NODE, OTHER_NODE])));
-        assert!(!is_assistant_in(SERBERO, &live, &HashMap::new(), &known(&[NODE, OTHER_NODE])));
+        assert!(is_assistant_in(
+            SERBERO, OTHER_NODE, &live, &cached, &registry
+        ));
+        assert!(is_assistant_in(
+            &SERBERO.to_uppercase(),
+            &OTHER_NODE.to_uppercase(),
+            &live,
+            &cached,
+            &registry
+        ));
+        assert!(
+            !is_assistant_in(SERBERO, NODE, &live, &cached, &registry),
+            "another node's Serbero is a person on this node's dispute"
+        );
+        assert!(!is_assistant_in(
+            HUMAN, OTHER_NODE, &live, &cached, &registry
+        ));
+        assert!(!is_assistant_in(
+            SERBERO,
+            OTHER_NODE,
+            &live,
+            &HashMap::new(),
+            &registry
+        ));
     }
 
     #[test]
@@ -163,8 +192,21 @@ mod tests {
         let live = HashMap::from([(OTHER_NODE.to_string(), Some(SERBERO.to_string()))]);
 
         // Act + Assert
-        assert!(!is_assistant_in(SERBERO, &live, &HashMap::new(), &known(&[NODE])));
-        assert!(is_assistant_in(SERBERO, &live, &HashMap::new(), &known(&[OTHER_NODE])));
+        let none = HashMap::new();
+        assert!(!is_assistant_in(
+            SERBERO,
+            OTHER_NODE,
+            &live,
+            &none,
+            &known(&[NODE])
+        ));
+        assert!(is_assistant_in(
+            SERBERO,
+            OTHER_NODE,
+            &live,
+            &none,
+            &known(&[OTHER_NODE])
+        ));
     }
 
     #[test]
@@ -176,7 +218,16 @@ mod tests {
         let announced = HashMap::from([(NODE.to_string(), Some(SERBERO.to_string()))]);
 
         // Act + Assert
-        assert!(!is_assistant_in(SERBERO, &retracted, &cached, &known(&[NODE, OTHER_NODE])));
-        assert!(is_assistant_in(SERBERO, &announced, &HashMap::new(), &known(&[NODE, OTHER_NODE])));
+        let registry = known(&[NODE, OTHER_NODE]);
+        assert!(!is_assistant_in(
+            SERBERO, NODE, &retracted, &cached, &registry
+        ));
+        assert!(is_assistant_in(
+            SERBERO,
+            NODE,
+            &announced,
+            &HashMap::new(),
+            &registry
+        ));
     }
 }

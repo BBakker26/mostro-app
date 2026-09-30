@@ -4285,7 +4285,10 @@ async fn dispatch_mostro_message(
             };
             match admin_pubkey_from_payload(kind.payload.as_ref()) {
                 Some(admin_pubkey) => {
-                    if let Err(e) = crate::api::disputes::apply_admin_took_dispute(
+                    // The authenticated author is the dispute's node, which
+                    // alone can vouch for its Serbero (#637).
+                    if let Err(e) = crate::api::disputes::apply_admin_took_dispute_from(
+                        &sender_hex,
                         order_id,
                         admin_pubkey,
                         Some(event_ts),

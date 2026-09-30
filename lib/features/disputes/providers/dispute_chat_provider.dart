@@ -86,22 +86,30 @@ class DisputeChatGateway {
   Future<rust_types.Dispute?> getDispute(String tradeId) =>
       disputes_api.getDispute(tradeId: tradeId);
 
-  /// Whether [solverPubkey] is a node's Serbero or a person (#637).
-  Future<rust_types.SolverRole> solverRole(String solverPubkey) =>
-      disputes_api.solverRole(solverPubkey: solverPubkey);
+  /// Whether [solverPubkey] is the Serbero of [tradeId]'s node or a person
+  /// (#637).
+  Future<rust_types.SolverRole> solverRole(
+    String tradeId,
+    String solverPubkey,
+  ) => disputes_api.solverRole(tradeId: tradeId, solverPubkey: solverPubkey);
 }
 
 final disputeChatGatewayProvider = Provider<DisputeChatGateway>(
   (ref) => const DisputeChatGateway(),
 );
 
+/// One solver of one trade's dispute: only that dispute's node can vouch
+/// that the solver is its Serbero.
+typedef SolverOfDispute = ({String tradeId, String solverPubkey});
+
 /// Who one solver is, as Rust decides it (#637). Read each time a dispute
 /// chat opens: the node's announcement can arrive after the history did.
 /// A person until answered — never "Serbero" on a guess.
 final solverRoleProvider = FutureProvider.autoDispose
-    .family<rust_types.SolverRole, String>(
-      (ref, solverPubkey) =>
-          ref.watch(disputeChatGatewayProvider).solverRole(solverPubkey),
+    .family<rust_types.SolverRole, SolverOfDispute>(
+      (ref, solver) => ref
+          .watch(disputeChatGatewayProvider)
+          .solverRole(solver.tradeId, solver.solverPubkey),
     );
 
 /// How many times [disputeUpdatesProvider] subscribes again after the

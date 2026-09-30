@@ -6880,13 +6880,15 @@ fn wire__crate__api__disputes__solver_role_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_trade_id = <String>::sse_decode(&mut deserializer);
             let api_solver_pubkey = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, ()>(
                     (move || async move {
                         let output_ok = Result::<_, ()>::Ok(
-                            crate::api::disputes::solver_role(api_solver_pubkey).await,
+                            crate::api::disputes::solver_role(api_trade_id, api_solver_pubkey)
+                                .await,
                         )?;
                         Ok(output_ok)
                     })()

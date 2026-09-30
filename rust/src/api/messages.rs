@@ -1600,6 +1600,32 @@ impl ChatRxState {
     }
 }
 
+/// Install the chat's relay subscription only while `generation` still owns
+/// the chat, checked and replaced under the guard's lock. All tasks of a chat
+/// share one subscription id, so a task stopped by a solver takeover between
+/// its claim and this point would otherwise overwrite the new solver's filter
+/// with the previous one and leave the current task deaf. A stop takes the
+/// same lock: it lands either before the check (`None`, nothing installed)
+/// or after the replace (it closes the REQ, and the new task replaces it).
+async fn replace_chat_subscription_if_current(
+    channel: ChatChannel,
+    order_id: &str,
+    generation: u64,
+    client: &nostr_sdk::prelude::Client,
+    sub_id: nostr_sdk::prelude::SubscriptionId,
+    filter: nostr_sdk::prelude::Filter,
+) -> Option<Result<crate::nostr::live_subs::Issued>> {
+    let active = active_chats().lock().await;
+    if active.get(&channel.guard_key(order_id)) != Some(&generation) {
+        return None;
+    }
+    Some(
+        crate::nostr::live_subs::live_subs()
+            .replace(client, sub_id, filter)
+            .await,
+    )
+}
+
 async fn run_chat_subscription(
     channel: ChatChannel,
     order_id: &str,
@@ -1641,13 +1667,23 @@ async fn run_chat_subscription(
 
     // `replace`, not a bare subscribe: issued while relays are still coming
     // back (a resume), it must reach each of them as it connects.
-    let issued = match crate::nostr::live_subs::live_subs()
-        .replace(&client, sub_id.clone(), filter)
-        .await
+    let issued = match replace_chat_subscription_if_current(
+        channel,
+        order_id,
+        generation,
+        &client,
+        sub_id.clone(),
+        filter,
+    )
+    .await
     {
-        Ok(issued) => issued,
-        Err(e) => {
+        Some(Ok(issued)) => issued,
+        Some(Err(e)) => {
             log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
+            return;
+        }
+        None => {
+            log::debug!("[messages] chat task stopped before subscribing order={order_id}");
             return;
         }
     };
@@ -2644,6 +2680,54 @@ mod tests {
             None,
             "a stopped task must not restore the cursor"
         );
+    }
+
+    /// Codex and CodeRabbit review of #638: a dispute chat task can be
+    /// stopped by a takeover after its claim but before it installs its relay
+    /// subscription. It must not install it then: the id is shared with the
+    /// new solver's task, whose filter it would overwrite.
+    #[tokio::test]
+    async fn a_chat_task_stopped_before_subscribing_installs_nothing() {
+        let order = format!("claimed-before-req-{}", uuid::Uuid::new_v4());
+        let client = nostr_sdk::prelude::Client::default();
+        let filter = || {
+            nostr_sdk::prelude::Filter::new().kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
+        };
+
+        let old = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+        stop_chat_subscription(ChatChannel::Dispute, &order).await;
+        let new = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
+
+        let sub_id = chat_subscription_id(ChatChannel::Dispute, &order);
+        assert!(
+            replace_chat_subscription_if_current(
+                ChatChannel::Dispute,
+                &order,
+                old,
+                &client,
+                sub_id.clone(),
+                filter(),
+            )
+            .await
+            .is_none(),
+            "the stopped task must not install its subscription"
+        );
+        assert!(
+            replace_chat_subscription_if_current(
+                ChatChannel::Dispute,
+                &order,
+                new,
+                &client,
+                sub_id.clone(),
+                filter(),
+            )
+            .await
+            .is_some(),
+            "the owning task installs it"
+        );
+
+        crate::nostr::live_subs::live_subs().close(&client, &sub_id).await;
+        release_chat(ChatChannel::Dispute, &order, new).await;
     }
 
     /// PR #527 review: stop, then a replacement task claims the same chat,

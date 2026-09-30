@@ -197,6 +197,12 @@ pub(crate) async fn forget_identity_disputes() {
     if let Ok(mut opens) = pending_opens().lock() {
         opens.clear();
     }
+    // The assignment times describe the deleted identity's disputes too: kept,
+    // they would reject a reimported identity's replayed assignments.
+    solver_assigned_at()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
 }
 
 /// Whether `dispute` is the record `handle_admin_took_dispute` writes when it
@@ -1820,6 +1826,44 @@ mod tests {
             );
             clear_dispute_keys(&order).await;
         }
+    }
+
+    /// Codex review of #638: deleting the identity forgets its assignment
+    /// times with its disputes. Otherwise, after reimporting the same seed
+    /// without a restart, an oldest-first replay would recreate the record
+    /// with the previous solver and then reject the current one as not newer.
+    ///
+    /// `#[ignore]`d because `forget_identity_disputes` empties the
+    /// process-wide dispute store other tests use. Run with:
+    ///   cargo test --lib forgetting_the_identity -- --ignored
+    #[tokio::test]
+    #[ignore = "empties the process-global dispute store — run with --ignored"]
+    async fn forgetting_the_identity_forgets_solver_assignment_times() {
+        let order = format!("reimport-{}", uuid::Uuid::new_v4());
+        let serbero = "0000000000000000000000000000000000000000000000000000000000000111";
+        let solver = "0000000000000000000000000000000000000000000000000000000000000222";
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+
+        forget_identity_disputes().await;
+
+        // Reimport: the replay arrives oldest first.
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+
+        clear_dispute_keys(&order).await;
     }
 
     /// Codex review of #638: `created_at` has second resolution. A replayed

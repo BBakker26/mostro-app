@@ -1165,6 +1165,17 @@ async fn rehydrate_disputes_from_storage() {
                 let (at, solver) = value.split_once(':')?;
                 (solver == admin_hex).then(|| at.parse::<i64>().ok()).flatten()
             });
+        // No time for this solver means nothing vouches that the dispute
+        // chat cursor dates its conversation. A release before takeover
+        // handling left exactly that behind: the new solver persisted, the
+        // previous conversation's cursor kept. Restored here as the current
+        // solver, its replayed assignment is no takeover and would never
+        // clear it, so the new solver's messages dated before it stayed
+        // unfetched for good. Dropping it costs one refetch of this
+        // conversation; the replay then records the time and ends this.
+        if assigned_at.is_none() {
+            crate::api::messages::hand_over_dispute_chat(&order_id).await;
+        }
         note_solver_assignment(&order_id, assigned_at);
 
         let initiated_by_me = match db
@@ -2088,6 +2099,76 @@ mod tests {
 
         clear_dispute_keys(&order).await;
         assert_eq!(db.get_setting(&at_key).await.unwrap(), None);
+    }
+
+    /// Codex review of #638: a release before this one handled a takeover by
+    /// persisting the new solver and leaving the previous conversation's
+    /// cursor. Rehydration restores the new solver straight into the record,
+    /// so its replayed assignment is no takeover and would never clear that
+    /// cursor. A solver restored without an assignment time recorded for it
+    /// is that legacy state: its dispute cursor cannot be trusted and goes.
+    #[tokio::test]
+    async fn rehydration_drops_a_dispute_cursor_no_assignment_time_vouches_for() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_legacy_cursor_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the cursor migration cannot be exercised");
+        };
+
+        // Arrange: `legacy` was taken over under the previous release (solver
+        // persisted, no assignment time); `current` has its time recorded.
+        let legacy = format!("legacy-{}", uuid::Uuid::new_v4());
+        let current = format!("current-{}", uuid::Uuid::new_v4());
+        let solver = "00000000000000000000000000000000000000000000000000000000000000ee";
+        for order_id in [&legacy, &current] {
+            db.save_trade(&persisted_trade(order_id, OrderStatus::Dispute))
+                .await
+                .unwrap();
+            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
+                .await
+                .unwrap();
+            for channel in ["dispute-", ""] {
+                db.set_setting(
+                    &crate::db::settings_keys::chat_cursor(&format!("{channel}{order_id}")),
+                    "500",
+                )
+                .await
+                .unwrap();
+            }
+        }
+        db.set_setting(
+            &crate::db::settings_keys::dispute_admin_at(&current),
+            &format!("100:{solver}"),
+        )
+        .await
+        .unwrap();
+
+        // Act
+        rehydrate_disputes_from_storage().await;
+
+        // Assert
+        let cursor = |key: String| async move { db.get_setting(&key).await.unwrap() };
+        let dispute_cursor = |o: &str| crate::db::settings_keys::chat_cursor(&format!("dispute-{o}"));
+        assert_eq!(
+            cursor(dispute_cursor(&legacy)).await,
+            None,
+            "a cursor no assignment time vouches for is dropped"
+        );
+        assert_eq!(
+            cursor(dispute_cursor(&current)).await.as_deref(),
+            Some("500"),
+            "a cursor of the recorded assignment is kept"
+        );
+        assert_eq!(
+            cursor(crate::db::settings_keys::chat_cursor(&legacy)).await.as_deref(),
+            Some("500"),
+            "the peer chat cursor is never touched"
+        );
+
+        for order_id in [&legacy, &current] {
+            clear_dispute_keys(order_id).await;
+        }
     }
 
     /// PR #256 review, manual E2E: the catch-up channel re-delivers

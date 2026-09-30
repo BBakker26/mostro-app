@@ -2334,9 +2334,6 @@ mod tests {
             db.save_trade(&persisted_trade(order_id, OrderStatus::Dispute))
                 .await
                 .unwrap();
-            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
-                .await
-                .unwrap();
             for channel in ["dispute-", ""] {
                 db.set_setting(
                     &crate::db::settings_keys::chat_cursor(&format!("{channel}{order_id}")),
@@ -2352,6 +2349,14 @@ mod tests {
         )
         .await
         .unwrap();
+        // The solver last: the store is shared, and a parallel test's
+        // rehydration that saw `current`'s solver before its time would take
+        // it for a legacy dispute and drop its cursor.
+        for order_id in [&legacy, &current] {
+            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
+                .await
+                .unwrap();
+        }
 
         // Act
         rehydrate_disputes_from_storage().await;
@@ -2407,9 +2412,6 @@ mod tests {
             db.save_trade(&persisted_trade(order_id, OrderStatus::Dispute))
                 .await
                 .unwrap();
-            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
-                .await
-                .unwrap();
             for channel in ["dispute-", ""] {
                 db.set_setting(
                     &crate::db::settings_keys::chat_cursor(&format!("{channel}{order_id}")),
@@ -2425,6 +2427,14 @@ mod tests {
         )
         .await
         .unwrap();
+        // The solver last: the store is shared, and a parallel test's
+        // rehydration that saw `current`'s solver before its time would take
+        // it for a legacy dispute and drop its cursor.
+        for order_id in [&legacy, &current] {
+            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
+                .await
+                .unwrap();
+        }
 
         // Act: the replay wins the startup race, then rehydration runs.
         for order_id in [&legacy, &current] {

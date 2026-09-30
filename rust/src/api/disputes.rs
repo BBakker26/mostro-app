@@ -841,12 +841,26 @@ pub(crate) async fn apply_admin_took_dispute(
     // listener below would be a no-op and their messages would never arrive.
     // Stop the old task first; the peer chat is left alone. The cursor dates
     // the previous conversation, so the new one starts without it.
-    if solver_changed {
+    //
+    // The same goes for a cursor no persisted time vouches for: a release
+    // before takeover handling kept the previous conversation's cursor with
+    // the new solver. The daemon feed opens before rehydration, so this
+    // replay can be the first to see that state, and the time it writes
+    // below would certify the cursor for good.
+    let unvouched = !solver_changed
+        && assigned_at.is_some()
+        && cursor_is_unvouched(&trade_id, &admin_pubkey_for_key).await;
+    if solver_changed || unvouched {
+        let reason = if solver_changed {
+            "solver changed"
+        } else {
+            "unvouched cursor"
+        };
         let stopped = crate::api::messages::hand_over_dispute_chat(&trade_id).await;
         crate::api::logging::blog_info(
             "disputes",
             format!(
-                "solver changed order={}: dispute chat restarted (was running: {stopped})",
+                "{reason} order={}: dispute chat restarted (was running: {stopped})",
                 crate::api::logging::short_id(&trade_id),
             ),
         );
@@ -917,6 +931,37 @@ async fn persist_solver_assigned_at(order_id: &str, admin_pubkey_hex: &str) {
             format!("could not persist solver assignment time for {order_id}: {e}"),
         );
     }
+}
+
+/// The persisted assignment time of `order_id`, if it was recorded for
+/// `admin_pubkey_hex` (see [`persist_solver_assigned_at`]); a time left by
+/// any other solver does not count.
+async fn persisted_solver_assigned_at(
+    db: &impl Storage,
+    order_id: &str,
+    admin_pubkey_hex: &str,
+) -> Option<i64> {
+    let value = db
+        .get_setting(&crate::db::settings_keys::dispute_admin_at(order_id))
+        .await
+        .ok()
+        .flatten()?;
+    let (at, solver) = value.split_once(':')?;
+    (solver == admin_pubkey_hex)
+        .then(|| at.parse::<i64>().ok())
+        .flatten()
+}
+
+/// Whether the dispute chat cursor of `order_id` may date another
+/// conversation than `admin_pubkey_hex`'s: no assignment time was persisted
+/// for that solver. Without a store there is no persisted cursor either.
+async fn cursor_is_unvouched(order_id: &str, admin_pubkey_hex: &str) -> bool {
+    let Some(db) = crate::db::app_db::db() else {
+        return false;
+    };
+    persisted_solver_assigned_at(db, order_id, admin_pubkey_hex)
+        .await
+        .is_none()
 }
 
 /// `true` when the persisted trade for `order_id` has reached a terminal
@@ -1168,15 +1213,19 @@ async fn rehydrate_disputes_from_storage() {
         // told apart whatever order the catch-up channel delivers it in. Only
         // a time recorded for this very solver counts (see
         // `persist_solver_assigned_at`).
-        let assigned_at = db
-            .get_setting(&crate::db::settings_keys::dispute_admin_at(&order_id))
-            .await
-            .ok()
-            .flatten()
-            .and_then(|value| {
-                let (at, solver) = value.split_once(':')?;
-                (solver == admin_hex).then(|| at.parse::<i64>().ok()).flatten()
-            });
+        let assigned_at = persisted_solver_assigned_at(db, &order_id, &admin_hex).await;
+        // No time for this solver means nothing vouches that the dispute
+        // chat cursor dates its conversation. A release before takeover
+        // handling left exactly that behind: the new solver persisted, the
+        // previous conversation's cursor kept. Restored here as the current
+        // solver, its replayed assignment is no takeover and would never
+        // clear it, so the new solver's messages dated before it stayed
+        // unfetched for good. Dropping it costs one refetch of this
+        // conversation; the replay then records the time and ends this. A
+        // replay that ran first already did the same (`apply_admin_took_dispute`).
+        if assigned_at.is_none() {
+            crate::api::messages::hand_over_dispute_chat(&order_id).await;
+        }
         note_solver_assignment(&order_id, assigned_at);
 
         let initiated_by_me = match db
@@ -2125,6 +2174,157 @@ mod tests {
 
         clear_dispute_keys(&order).await;
         assert_eq!(db.get_setting(&at_key).await.unwrap(), None);
+    }
+
+    /// Codex review of #638: a release before this one handled a takeover by
+    /// persisting the new solver and leaving the previous conversation's
+    /// cursor. Rehydration restores the new solver straight into the record,
+    /// so its replayed assignment is no takeover and would never clear that
+    /// cursor. A solver restored without an assignment time recorded for it
+    /// is that legacy state: its dispute cursor cannot be trusted and goes.
+    #[tokio::test]
+    async fn rehydration_drops_a_dispute_cursor_no_assignment_time_vouches_for() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_legacy_cursor_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the cursor migration cannot be exercised");
+        };
+
+        // Arrange: `legacy` was taken over under the previous release (solver
+        // persisted, no assignment time); `current` has its time recorded.
+        let legacy = format!("legacy-{}", uuid::Uuid::new_v4());
+        let current = format!("current-{}", uuid::Uuid::new_v4());
+        let solver = "00000000000000000000000000000000000000000000000000000000000000ee";
+        for order_id in [&legacy, &current] {
+            db.save_trade(&persisted_trade(order_id, OrderStatus::Dispute))
+                .await
+                .unwrap();
+            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
+                .await
+                .unwrap();
+            for channel in ["dispute-", ""] {
+                db.set_setting(
+                    &crate::db::settings_keys::chat_cursor(&format!("{channel}{order_id}")),
+                    "500",
+                )
+                .await
+                .unwrap();
+            }
+        }
+        db.set_setting(
+            &crate::db::settings_keys::dispute_admin_at(&current),
+            &format!("100:{solver}"),
+        )
+        .await
+        .unwrap();
+
+        // Act
+        rehydrate_disputes_from_storage().await;
+
+        // Assert
+        let cursor = |key: String| async move { db.get_setting(&key).await.unwrap() };
+        let dispute_cursor =
+            |o: &str| crate::db::settings_keys::chat_cursor(&format!("dispute-{o}"));
+        assert_eq!(
+            cursor(dispute_cursor(&legacy)).await,
+            None,
+            "a cursor no assignment time vouches for is dropped"
+        );
+        assert_eq!(
+            cursor(dispute_cursor(&current)).await.as_deref(),
+            Some("500"),
+            "a cursor of the recorded assignment is kept"
+        );
+        assert_eq!(
+            cursor(crate::db::settings_keys::chat_cursor(&legacy))
+                .await
+                .as_deref(),
+            Some("500"),
+            "the peer chat cursor is never touched"
+        );
+
+        for order_id in [&legacy, &current] {
+            clear_dispute_keys(order_id).await;
+        }
+    }
+
+    /// Review of #640: the daemon feed opens before rehydration runs, so the
+    /// replayed assignment of that legacy solver can arrive first. It creates
+    /// the record (no takeover: nothing to compare with) and records the
+    /// time, after which rehydration skips the record and every later restart
+    /// finds a matching time. The assignment must drop the cursor itself.
+    #[tokio::test]
+    async fn a_replayed_assignment_ahead_of_rehydration_drops_a_legacy_dispute_cursor() {
+        let path = std::env::temp_dir().join(format!(
+            "mostro_dispute_legacy_cursor_replay_{}.db",
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the cursor migration cannot be exercised");
+        };
+
+        // Arrange: same two states as above, neither in the dispute store yet.
+        let legacy = format!("legacy-replay-{}", uuid::Uuid::new_v4());
+        let current = format!("current-replay-{}", uuid::Uuid::new_v4());
+        let solver = "00000000000000000000000000000000000000000000000000000000000000ef";
+        for order_id in [&legacy, &current] {
+            db.save_trade(&persisted_trade(order_id, OrderStatus::Dispute))
+                .await
+                .unwrap();
+            db.set_setting(&crate::db::settings_keys::dispute_admin(order_id), solver)
+                .await
+                .unwrap();
+            for channel in ["dispute-", ""] {
+                db.set_setting(
+                    &crate::db::settings_keys::chat_cursor(&format!("{channel}{order_id}")),
+                    "500",
+                )
+                .await
+                .unwrap();
+            }
+        }
+        db.set_setting(
+            &crate::db::settings_keys::dispute_admin_at(&current),
+            &format!("100:{solver}"),
+        )
+        .await
+        .unwrap();
+
+        // Act: the replay wins the startup race, then rehydration runs.
+        for order_id in [&legacy, &current] {
+            apply_admin_took_dispute(order_id.clone(), solver.to_string(), Some(100))
+                .await
+                .unwrap();
+        }
+        rehydrate_disputes_from_storage().await;
+
+        // Assert
+        let cursor = |key: String| async move { db.get_setting(&key).await.unwrap() };
+        let dispute_cursor =
+            |o: &str| crate::db::settings_keys::chat_cursor(&format!("dispute-{o}"));
+        assert_eq!(
+            cursor(dispute_cursor(&legacy)).await,
+            None,
+            "a cursor no assignment time vouches for is dropped by the replay"
+        );
+        assert_eq!(
+            cursor(dispute_cursor(&current)).await.as_deref(),
+            Some("500"),
+            "a cursor of the recorded assignment is kept"
+        );
+        assert_eq!(
+            cursor(crate::db::settings_keys::chat_cursor(&legacy))
+                .await
+                .as_deref(),
+            Some("500"),
+            "the peer chat cursor is never touched"
+        );
+
+        for order_id in [&legacy, &current] {
+            clear_dispute_keys(order_id).await;
+        }
     }
 
     /// PR #256 review, manual E2E: the catch-up channel re-delivers

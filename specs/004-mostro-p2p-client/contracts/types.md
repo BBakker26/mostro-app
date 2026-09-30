@@ -84,6 +84,13 @@ Open | InReview | Resolved
 FundsToMe | FundsToCounterparty | CooperativeCancel
 ```
 
+### SolverRole
+```text
+Assistant | Human
+```
+`Assistant` = a Serbero a known node announces; `Human` = anyone else. See
+`disputes.md` → `solver_role`.
+
 ### RelayStatus
 ```text
 Connected | Disconnected | Connecting | Error

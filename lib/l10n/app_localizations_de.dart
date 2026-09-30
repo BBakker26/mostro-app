@@ -51,8 +51,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get orderDispute => 'Bestellstreit';
 
   @override
-  String get disputeAdminAssigned =>
-      'Ein Administrator wurde deinem Streitfall zugewiesen. Er wird sich hier in Kürze bei dir melden.';
+  String get disputeSolverAssigned =>
+      'Ein Schlichter hat deinen Streitfall übernommen. Er meldet sich hier in Kürze bei dir.';
 
   @override
   String get disputeChatClosed =>
@@ -112,11 +112,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get disputeLostFundsToBuyer =>
-      'Der Administrator hat den Streitfall zugunsten des Käufers entschieden. Die Sats wurden an den Käufer freigegeben.';
+      'Der Schlichter hat den Streitfall zugunsten des Käufers entschieden. Die Sats wurden an den Käufer freigegeben.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'Der Administrator hat die Bestellung storniert und die Sats an den Verkäufer zurückgegeben. Du hast keine Sats erhalten.';
+      'Der Schlichter hat die Bestellung storniert und die Sats an den Verkäufer zurückgegeben. Du hast keine Sats erhalten.';
 
   @override
   String get walkthroughSlideOneTitle => 'Bitcoin frei handeln — kein KYC';
@@ -144,7 +144,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Jeder Trade hat seinen eigenen privaten Chat, der Ende-zu-Ende verschlüsselt ist. Nur die beiden beteiligten Nutzer können ihn lesen. Im Streitfall kannst du den gemeinsamen Schlüssel einem Administrator geben, um bei der Lösung zu helfen.';
+      'Jeder Trade hat seinen eigenen privaten Chat, der Ende-zu-Ende verschlüsselt ist. Nur die beiden beteiligten Nutzer können ihn lesen. Im Streitfall kannst du den gemeinsamen Schlüssel einem Schlichter geben, um bei der Lösung zu helfen.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Ein Angebot annehmen';
@@ -987,7 +987,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Möchtest du wirklich einen Streitfall eröffnen? Dies eskaliert den Handel an einen Administrator und kann nicht rückgängig gemacht werden.';
+      'Möchtest du wirklich einen Streitfall eröffnen? Dies eskaliert den Handel an einen Schlichter und kann nicht rückgängig gemacht werden.';
 
   @override
   String get disputeAlreadyOpen =>
@@ -1236,7 +1236,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Admin-Aktionen und Streitbeilegungen';
+      'Schlichter-Aktionen und Streitbeilegungen';
 
   @override
   String get searchCurrenciesHint => 'Währungen suchen…';
@@ -1812,7 +1812,18 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Administrator';
+  String get solverLabel => 'Schlichter';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, ein automatischer Assistent, hilft bei deinem Streitfall. Er stellt dir hier ein paar Fragen und übergibt den Fall bei Bedarf an einen Menschen.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'Ein Schlichter hat deinen Streitfall übernommen.';
 
   @override
   String get disputeScreenTitle => 'Streitfall';

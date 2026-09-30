@@ -12,14 +12,42 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 // ── DisputeMessagesList ───────────────────────────────────────────────────────
 
+/// Who a solver pubkey is (#637); `null` for a message without a sender.
+typedef SolverRoleOf = rust_types.SolverRole Function(String? solverPubkey);
+
+/// Where the "a resolver took over" line goes among [sorted] messages
+/// (#637): before the first message of the person who took the dispute over
+/// from Serbero, or last when they have not written yet. `null` while
+/// Serbero still holds it ([current]), or when Serbero never spoke.
+@visibleForTesting
+int? takeoverLineIndex(
+  List<DisputeMessage> sorted,
+  SolverRoleOf roleOf,
+  rust_types.SolverRole current,
+) {
+  if (current != rust_types.SolverRole.human) return null;
+  bool from(DisputeMessage m, rust_types.SolverRole role) =>
+      !m.isMine && m.isAdmin && roleOf(m.senderPubkey) == role;
+  final lastAssistant = sorted.lastIndexWhere(
+    (m) => from(m, rust_types.SolverRole.assistant),
+  );
+  if (lastAssistant < 0) return null;
+  final firstPerson = sorted.indexWhere(
+    (m) => from(m, rust_types.SolverRole.human),
+    lastAssistant + 1,
+  );
+  return firstPerson < 0 ? sorted.length : firstPerson;
+}
+
 /// Scrollable list of dispute messages with info card and optional banners.
 ///
 /// Slot order (always shown in this sequence):
 ///   1. [DisputeInfoCard] — always first
-///   2. "Admin assigned" banner — shown when status is `inReview` and no
-///      messages yet
+///   2. "Solver assigned" banner — shown when status is `inReview` and no
+///      messages yet; it names Serbero while Serbero holds the dispute
 ///   3. [DisputeMessageBubble] entries — sorted by `createdAt`, deduped by
-///      `nostrEventId` if present
+///      `nostrEventId` if present, with a "resolver took over" line where a
+///      person took the dispute over from Serbero (#637)
 ///   4. [UploadBubble]s — files still on their way to the solver
 ///   5. "Chat closed" lock banner — shown when status is resolved/closed
 ///
@@ -32,6 +60,7 @@ class DisputeMessagesList extends StatefulWidget {
     this.uploads = const [],
     this.onRetryUpload,
     this.onDiscardUpload,
+    this.roleOf = _unknownIsAPerson,
   });
 
   final DisputeItem dispute;
@@ -39,6 +68,12 @@ class DisputeMessagesList extends StatefulWidget {
   final List<PendingUpload> uploads;
   final ValueChanged<String>? onRetryUpload;
   final ValueChanged<String>? onDiscardUpload;
+
+  /// Who a solver pubkey is, as Rust decided it (#637).
+  final SolverRoleOf roleOf;
+
+  static rust_types.SolverRole _unknownIsAPerson(String? _) =>
+      rust_types.SolverRole.human;
 
   @override
   State<DisputeMessagesList> createState() => _DisputeMessagesListState();
@@ -89,6 +124,21 @@ class _DisputeMessagesListState extends State<DisputeMessagesList> {
 
     final isResolved = widget.dispute.status == DisputeStatus.resolved;
     final isInReview = widget.dispute.status == DisputeStatus.inReview;
+    final currentRole = widget.roleOf(widget.dispute.adminPubkey);
+    final takeoverAt = takeoverLineIndex(deduped, widget.roleOf, currentRole);
+    final entries = [...deduped];
+    if (takeoverAt != null) {
+      entries.insert(
+        takeoverAt,
+        DisputeMessage(
+          id: 'solver-took-over',
+          content: AppLocalizations.of(context).disputeSolverTookOver,
+          isMine: false,
+          isAdmin: false,
+          createdAt: 0,
+        ),
+      );
+    }
 
     return CustomScrollView(
       controller: _scrollController,
@@ -98,20 +148,23 @@ class _DisputeMessagesListState extends State<DisputeMessagesList> {
           child: DisputeInfoCard(dispute: widget.dispute, colors: colors),
         ),
 
-        // 2. "Admin assigned" banner (inReview + no messages)
+        // 2. "Solver assigned" banner (inReview + no messages)
         if (isInReview && deduped.isEmpty)
-          const SliverToBoxAdapter(
-            child: _AdminAssignedBanner(),
+          SliverToBoxAdapter(
+            child: _SolverAssignedBanner(
+              isAssistant: currentRole == rust_types.SolverRole.assistant,
+            ),
           ),
 
-        // 3. Message bubbles
+        // 3. Message bubbles, and the takeover line among them
         SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) => DisputeMessageBubble(
-              message: deduped[index],
+              message: entries[index],
               colors: colors,
+              solverRole: widget.roleOf(entries[index].senderPubkey),
             ),
-            childCount: deduped.length,
+            childCount: entries.length,
           ),
         ),
 
@@ -267,10 +320,14 @@ class DisputeMessageBubble extends StatelessWidget {
     super.key,
     required this.message,
     required this.colors,
+    this.solverRole = rust_types.SolverRole.human,
   });
 
   final DisputeMessage message;
   final AppColors colors;
+
+  /// Who wrote a solver's message: it is labelled Serbero or as a person.
+  final rust_types.SolverRole solverRole;
 
   @override
   Widget build(BuildContext context) {
@@ -358,7 +415,9 @@ class DisputeMessageBubble extends StatelessWidget {
               children: [
                 if (message.isAdmin && !message.isMine)
                   Text(
-                    AppLocalizations.of(context).adminLabel,
+                    solverRole == rust_types.SolverRole.assistant
+                        ? AppLocalizations.of(context).serberoLabel
+                        : AppLocalizations.of(context).solverLabel,
                     style: textTheme.bodySmall?.copyWith(
                       color: colors.tealAccent,
                       fontWeight: FontWeight.bold,
@@ -391,8 +450,11 @@ class DisputeMessageBubble extends StatelessWidget {
 
 // ── Banners ───────────────────────────────────────────────────────────────────
 
-class _AdminAssignedBanner extends StatelessWidget {
-  const _AdminAssignedBanner();
+class _SolverAssignedBanner extends StatelessWidget {
+  const _SolverAssignedBanner({required this.isAssistant});
+
+  /// Serbero holds the dispute, not a person.
+  final bool isAssistant;
 
   @override
   Widget build(BuildContext context) {
@@ -412,7 +474,9 @@ class _AdminAssignedBanner extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              AppLocalizations.of(context).disputeAdminAssigned,
+              isAssistant
+                  ? AppLocalizations.of(context).disputeSerberoAssigned
+                  : AppLocalizations.of(context).disputeSolverAssigned,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.statusActive.$2,
                   ),

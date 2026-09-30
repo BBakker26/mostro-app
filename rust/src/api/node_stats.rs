@@ -413,6 +413,22 @@ async fn load_info_cache(db: &impl Storage) -> Result<HashMap<String, CachedNode
     }
 }
 
+/// Every registry node's cached kind 38385 tags, keyed by node pubkey (hex).
+/// Empty without a store or when the cache cannot be read: a reader of one
+/// tag (the Serbero announcement) then falls back to what it knows live.
+pub(crate) async fn cached_info_tags() -> HashMap<String, Vec<Vec<String>>> {
+    let Some(db) = crate::db::app_db::db() else {
+        return HashMap::new();
+    };
+    match load_info_cache(db).await {
+        Ok(cache) => cache.into_iter().map(|(node, info)| (node, info.tags)).collect(),
+        Err(e) => {
+            log::warn!("[node_stats] kind 38385 cache unreadable: {e}");
+            HashMap::new()
+        }
+    }
+}
+
 /// Merge `fresh` into the persisted cache. With `keep`, entries of nodes no
 /// longer in it are dropped (a removed custom node). Writes only on a change.
 async fn store_info(

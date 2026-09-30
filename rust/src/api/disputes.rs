@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use tokio::sync::{broadcast, RwLock};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::api::types::{Dispute, DisputeResolution, DisputeStatus, OrderStatus};
+use crate::api::types::{Dispute, DisputeResolution, DisputeStatus, OrderStatus, SolverRole};
 use crate::db::Storage;
 
 // ── Dispute store ─────────────────────────────────────────────────────────────
@@ -572,6 +572,18 @@ pub(crate) async fn record_late_acceptance(trade_id: &str, dispute_id: Option<St
         Err(e) => log::warn!(
             "[disputes] could not reconcile late acceptance for trade={trade_id}: {e}"
         ),
+    }
+}
+
+/// Who the solver `solver_pubkey` (hex) is, for the label the dispute chat
+/// shows (#637): the assistant a known node announces as its Serbero, or a
+/// person. Read at display time, so a label shown before the node's info
+/// event arrived corrects itself on the next read.
+pub async fn solver_role(solver_pubkey: String) -> SolverRole {
+    if crate::mostro::serbero::is_assistant(&solver_pubkey).await {
+        SolverRole::Assistant
+    } else {
+        SolverRole::Human
     }
 }
 
@@ -1375,6 +1387,29 @@ mod tests {
             .try_insert_if_absent_or_resolved(dispute)
             .await
             .expect("seed_dispute: insert failed")
+    }
+
+    /// #637: the dispute chat labels a solver the node announces as its
+    /// Serbero as the assistant, anyone else as a person — and a later fetch
+    /// without the tag takes the label back.
+    #[tokio::test]
+    async fn the_solver_role_follows_the_nodes_serbero_announcement() {
+        use nostr_sdk::prelude::Keys;
+        // Arrange: a node of its own, so no other test's announcement counts.
+        let node = Keys::generate().public_key().to_hex();
+        let serbero = Keys::generate().public_key().to_hex();
+        let person = Keys::generate().public_key().to_hex();
+        let announcing = vec![vec!["serbero".to_string(), serbero.clone()]];
+
+        // Act
+        crate::mostro::serbero::set_from_tags(&node, &announcing);
+
+        // Assert
+        assert_eq!(solver_role(serbero.clone()).await, SolverRole::Assistant);
+        assert_eq!(solver_role(person).await, SolverRole::Human);
+
+        crate::mostro::serbero::set_from_tags(&node, &[]);
+        assert_eq!(solver_role(serbero).await, SolverRole::Human);
     }
 
     #[test]

@@ -15,6 +15,7 @@ import 'package:mostro/features/disputes/widgets/dispute_message_input.dart';
 import 'package:mostro/features/disputes/widgets/dispute_messages_list.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 /// Dispute chat screen — Route `/dispute_details/:disputeId`.
 ///
@@ -183,6 +184,16 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
     );
     final messages = ref.watch(disputeChatProvider(tradeId));
     final uploads = ref.watch(disputeUploadsProvider(tradeId));
+    // Who each solver is (#637): the current one and whoever wrote here —
+    // Serbero, then the person who took over. A person until Rust answers.
+    final roles = {
+      for (final pubkey in <String>{
+        if (dispute.adminPubkey case final admin?) admin,
+        for (final m in messages)
+          if (m.senderPubkey case final sender? when !m.isMine) sender,
+      })
+        pubkey: ref.watch(solverRoleProvider(pubkey)).valueOrNull,
+    };
 
     final isResolved = dispute.status == DisputeStatus.resolved;
     // Only a solver can be written to: until one takes the dispute there is
@@ -209,6 +220,8 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
               dispute: dispute,
               messages: messages,
               uploads: uploads,
+              roleOf: (pubkey) =>
+                  roles[pubkey] ?? rust_types.SolverRole.human,
               onRetryUpload: (id) => _retryUpload(tradeId, id),
               onDiscardUpload:
                   (id) => ref

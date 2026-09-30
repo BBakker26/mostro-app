@@ -52,7 +52,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1499212638;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1351531358;
 
 // Section: executor
 
@@ -6858,6 +6858,44 @@ fn wire__crate__api__settings__set_theme_impl(
         },
     )
 }
+fn wire__crate__api__disputes__solver_role_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "solver_role",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_solver_pubkey = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, ()>(
+                    (move || async move {
+                        let output_ok = Result::<_, ()>::Ok(
+                            crate::api::disputes::solver_role(api_solver_pubkey).await,
+                        )?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__bond__submit_bond_payout_invoice_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -9444,6 +9482,18 @@ impl SseDecode for crate::api::types::SlashCause {
     }
 }
 
+impl SseDecode for crate::api::types::SolverRole {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::types::SolverRole::Assistant,
+            1 => crate::api::types::SolverRole::Human,
+            _ => unreachable!("Invalid variant for SolverRole: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::types::ThemeMode {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -10153,17 +10203,18 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         171 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
-        172 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
+        172 => wire__crate__api__disputes__solver_role_impl(port, ptr, rust_vec_len, data_len),
+        173 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        173 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
-        174 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
-        175 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
-        176 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
-        177 => {
+        174 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
+        175 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
+        176 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
+        177 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
+        178 => {
             wire__crate__api__invoice__trade_step_started_at_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -12048,6 +12099,24 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::SlashCause>
     for crate::api::types::SlashCause
 {
     fn into_into_dart(self) -> crate::api::types::SlashCause {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::types::SolverRole {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Assistant => 0.into_dart(),
+            Self::Human => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::types::SolverRole {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::types::SolverRole>
+    for crate::api::types::SolverRole
+{
+    fn into_into_dart(self) -> crate::api::types::SolverRole {
         self
     }
 }
@@ -14225,6 +14294,22 @@ impl SseEncode for crate::api::types::SlashCause {
             match self {
                 crate::api::types::SlashCause::Timeout => 0,
                 crate::api::types::SlashCause::Dispute => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::types::SolverRole {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::types::SolverRole::Assistant => 0,
+                crate::api::types::SolverRole::Human => 1,
                 _ => {
                     unimplemented!("");
                 }

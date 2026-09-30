@@ -894,6 +894,10 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
                 &mostro_pubkey_hex,
                 crate::mostro::bond_policy::parse_tags(&tags),
             );
+            // Its dispute assistant, so the dispute chat can tell Serbero from
+            // the person who takes a case over (#637). A fetch without the tag
+            // retracts an older announcement. See mostro::serbero.
+            crate::mostro::serbero::set_from_tags(&mostro_pubkey_hex, &tags);
             // The service fee. Only Cashu mode needs it client-side — there the
             // seller funds the whole fee as its own token — but it rides in the
             // same event, so reading it here costs nothing.

@@ -128,6 +128,23 @@ open these files; the solver cannot open the P2P chat's (FR-036).
 ### get_dispute(trade_id: String) → Dispute?
 Get dispute details for a trade. Returns null if no dispute exists.
 
+---
+
+### solver_role(solver_pubkey: String) → SolverRole
+Who a solver is, for the label the dispute chat shows (app#637):
+`Assistant` when a known node announces `solver_pubkey` as its Serbero in
+the info event (kind 38385, `["serbero", "<hex>"]`, mostro#1009), otherwise
+`Human`. Known nodes: the active node's latest capability fetch, which
+wins for that node (a fetch without the tag retracts an older
+announcement), and every registry node's cached info event, so a dispute
+of a node the user switched away from keeps its label. The solver's own
+profile never counts.
+
+Read at display time rather than stored with a message: a history replay
+can land before the capability fetch, and the label corrects itself on the
+next read. The dispute chat labels each solver message by its sender, and
+shows a system line where a person took the dispute over from Serbero.
+
 ## Persistence and restart
 
 The Dispute record is **in-memory by design** — its status and resolution come

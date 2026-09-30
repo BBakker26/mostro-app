@@ -21,6 +21,7 @@ DisputeMessage disputeMessageFromRust(rust_types.ChatMessage message) =>
       createdAt: platformInt64ToInt(message.createdAt),
       nostrEventId: message.id,
       attachment: message.attachment,
+      senderPubkey: message.senderPubkey,
     );
 
 /// The conversation with the solver of one trade's dispute (#143).
@@ -84,11 +85,24 @@ class DisputeChatGateway {
 
   Future<rust_types.Dispute?> getDispute(String tradeId) =>
       disputes_api.getDispute(tradeId: tradeId);
+
+  /// Whether [solverPubkey] is a node's Serbero or a person (#637).
+  Future<rust_types.SolverRole> solverRole(String solverPubkey) =>
+      disputes_api.solverRole(solverPubkey: solverPubkey);
 }
 
 final disputeChatGatewayProvider = Provider<DisputeChatGateway>(
   (ref) => const DisputeChatGateway(),
 );
+
+/// Who one solver is, as Rust decides it (#637). Read each time a dispute
+/// chat opens: the node's announcement can arrive after the history did.
+/// A person until answered — never "Serbero" on a guess.
+final solverRoleProvider = FutureProvider.autoDispose
+    .family<rust_types.SolverRole, String>(
+      (ref, solverPubkey) =>
+          ref.watch(disputeChatGatewayProvider).solverRole(solverPubkey),
+    );
 
 /// How many times [disputeUpdatesProvider] subscribes again after the
 /// bridge stream fails, before it gives up.

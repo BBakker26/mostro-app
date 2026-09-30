@@ -51,8 +51,8 @@ class AppLocalizationsEs extends AppLocalizations {
   String get orderDispute => 'Disputa de orden';
 
   @override
-  String get disputeAdminAssigned =>
-      'Se ha asignado un administrador a tu disputa. Se pondrá en contacto contigo aquí en breve.';
+  String get disputeSolverAssigned =>
+      'Un resolutor ha tomado tu disputa. Se pondrá en contacto contigo aquí en breve.';
 
   @override
   String get disputeChatClosed =>
@@ -112,11 +112,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get disputeLostFundsToBuyer =>
-      'El administrador resolvió la disputa a favor del comprador. Los sats fueron liberados al comprador.';
+      'El resolutor falló la disputa a favor del comprador. Los sats fueron liberados al comprador.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'El administrador canceló la orden y devolvió los sats al vendedor. No recibiste los sats.';
+      'El resolutor canceló la orden y devolvió los sats al vendedor. No recibiste los sats.';
 
   @override
   String get walkthroughSlideOneTitle =>
@@ -145,7 +145,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Cada operación tiene su propio chat privado, cifrado de extremo a extremo. Solo los dos usuarios involucrados pueden leerlo. En caso de disputa, puedes compartir la clave con un administrador para ayudar a resolver el problema.';
+      'Cada operación tiene su propio chat privado, cifrado de extremo a extremo. Solo los dos usuarios involucrados pueden leerlo. En caso de disputa, puedes compartir la clave con un resolutor para ayudar a resolver el problema.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Toma una oferta';
@@ -988,7 +988,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      '¿Seguro que quieres abrir una disputa? Esto escala la operación a un administrador y no se puede deshacer.';
+      '¿Seguro que quieres abrir una disputa? Esto escala la operación a un resolutor y no se puede deshacer.';
 
   @override
   String get disputeAlreadyOpen =>
@@ -1230,7 +1230,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Acciones de administradores y resoluciones de disputas';
+      'Acciones de los resolutores y resoluciones de disputas';
 
   @override
   String get searchCurrenciesHint => 'Buscar monedas…';
@@ -1805,7 +1805,18 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Administrador';
+  String get solverLabel => 'Resolutor';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, un asistente automático, está ayudando con tu disputa. Te hará algunas preguntas aquí y pasará el caso a una persona si hace falta.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'Un resolutor ha tomado el relevo en tu disputa.';
 
   @override
   String get disputeScreenTitle => 'Disputa';

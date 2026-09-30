@@ -67,6 +67,13 @@ Future<ChatMessage> sendDisputeFile({
   uploadId: uploadId,
 );
 
+/// Who the solver `solver_pubkey` (hex) is, for the label the dispute chat
+/// shows (#637): the assistant a known node announces as its Serbero, or a
+/// person. Read at display time, so a label shown before the node's info
+/// event arrived corrects itself on the next read.
+Future<SolverRole> solverRole({required String solverPubkey}) =>
+    RustLib.instance.api.crateApiDisputesSolverRole(solverPubkey: solverPubkey);
+
 /// Get dispute details for a trade.
 ///
 /// Returns `None` if no dispute exists.

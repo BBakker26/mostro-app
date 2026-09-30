@@ -1027,6 +1027,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SlashCause dco_decode_slash_cause(dynamic raw);
 
   @protected
+  SolverRole dco_decode_solver_role(dynamic raw);
+
+  @protected
   ThemeMode dco_decode_theme_mode(dynamic raw);
 
   @protected
@@ -2065,6 +2068,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SlashCause sse_decode_slash_cause(SseDeserializer deserializer);
+
+  @protected
+  SolverRole sse_decode_solver_role(SseDeserializer deserializer);
 
   @protected
   ThemeMode sse_decode_theme_mode(SseDeserializer deserializer);
@@ -3366,6 +3372,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_slash_cause(SlashCause self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_solver_role(SolverRole self, SseSerializer serializer);
 
   @protected
   void sse_encode_theme_mode(ThemeMode self, SseSerializer serializer);

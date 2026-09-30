@@ -425,16 +425,42 @@ mod tests {
         assert!(err.to_string().contains("InvalidLightningAddress"));
     }
 
-    #[tokio::test]
-    async fn set_active_mostro_node_normalizes_to_lowercase() {
-        let _g = settings_lock().lock().unwrap();
+    #[test]
+    fn a_node_key_is_normalized_to_lowercase() {
         // The node registry compares pubkeys as lowercase hex; an uppercase
         // active key would read as unknown there.
         let upper = crate::config::DEFAULT_MOSTRO_PUBKEY.to_uppercase();
-        set_active_mostro_node(upper).await.unwrap();
-        assert_eq!(get_mostro_pubkey(), crate::config::DEFAULT_MOSTRO_PUBKEY);
-        // Restore the compiled-in default.
-        crate::config::set_active_mostro_pubkey(None);
+        assert_eq!(
+            normalize_node_pubkey(&upper).unwrap(),
+            crate::config::DEFAULT_MOSTRO_PUBKEY
+        );
+    }
+
+    /// The test above never sees the switch itself (see the next one), so
+    /// this pins that the switch persists and activates only the normalized
+    /// key: rebinding `pubkey` shadows the caller's before either happens.
+    #[test]
+    fn the_node_switch_uses_the_normalized_key() {
+        let source = include_str!("settings.rs");
+        // Production only, or this test's own text would answer for it.
+        let production = source
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .expect("split always yields a first chunk");
+        let start = production
+            .find("pub async fn set_active_mostro_node")
+            .expect("the node switch exists");
+        let body = &production[start..];
+        let body = &body[..body.find("\n}\n").expect("the node switch ends")];
+
+        let normalized = body
+            .find("let pubkey = normalize_node_pubkey(&pubkey)?;")
+            .expect("rebinds the key to its normalized form");
+        let persisted = body.find("save_active_mostro_pubkey(&pubkey)");
+        let activated = body.find("set_active_mostro_pubkey(Some(pubkey");
+
+        assert!(normalized < persisted.expect("persists the key"));
+        assert!(normalized < activated.expect("activates the key"));
     }
 
     /// A node switch empties the process-wide order book and rewrites the

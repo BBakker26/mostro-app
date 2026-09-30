@@ -220,6 +220,20 @@ solver with the newer time. A chat task's own cleanup likewise releases its
 claim and closes its REQ under the chat guard's lock, so a takeover's new task
 cannot install its subscription in between and lose it to the late close.
 
+**Unvouched cursor**: a persisted time recorded for the current solver is what
+vouches that the dispute chat cursor dates that solver's conversation. A
+release before takeover handling persisted the new solver and kept the
+previous conversation's cursor, with no time. So wherever a solver is found
+without a time recorded for it, the dispute chat is handed over as in a
+takeover (task stopped, REQ closed, cursor cleared; the peer chat is not
+touched), at the cost of one refetch of that conversation, deduplicated by
+event id. Both paths do it: rehydration, for a restored solver, and an
+assignment with a time, before it writes that time — the daemon feed opens
+before rehydration, so a replayed assignment can be the first to see that
+state, and the time it writes would otherwise certify the cursor for good. The
+recorded time ends it; it repeats only while no replay brings the assignment
+back to record it (rehydration on every restart).
+
 Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
 a resolved record or a finished trade is `NoOpenDispute`.
 

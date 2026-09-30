@@ -6338,11 +6338,24 @@ async fn record_status_event(order_id: &str, event_created_at: i64) {
 /// heals for one that corrupts. It heals because the failed message is not
 /// blocked on its next delivery: its timestamp equals the mark, and equal
 /// passes. The global feed carries no `since`, so the next start replays it.
+///
+/// An admin verdict that refines the plain terminal already applied passes
+/// either check, whatever order a replay brings the two in: mostrod sends
+/// `admin-settled` before it pays out, and the `purchase-completed` it sends
+/// after the payout reaches a newest-first replay first. Refused as older, the
+/// verdict would leave an admin-settled trade reading as an ordinary
+/// completion — and keeping its peer chat open for an hour (#642).
 async fn status_write_blocked(
     order_id: &str,
     action: &mostro_core::message::Action,
     event_created_at: i64,
 ) -> bool {
+    if current_local_status(order_id)
+        .await
+        .is_some_and(|local| crate::mostro::status::admin_verdict_refines(&local, action))
+    {
+        return false;
+    }
     if status_sync_blocked_by_terminal(order_id, action).await {
         return true;
     }
@@ -9366,11 +9379,28 @@ async fn release_finished_chats(
     order_id: &str,
     chat_grace: Option<&(crate::api::types::TradeInfo, i64)>,
 ) -> Vec<crate::api::messages::ChatChannel> {
+    release_finished_chats_with(order_id, chat_grace, |trade| async move {
+        crate::api::messages::spawn_peer_chat(&trade).await;
+    })
+    .await
+}
+
+/// [`release_finished_chats`] with the peer chat's start injected: deriving
+/// its keys needs the process-wide identity, which tests do not touch.
+async fn release_finished_chats_with<F, Fut>(
+    order_id: &str,
+    chat_grace: Option<&(crate::api::types::TradeInfo, i64)>,
+    start_peer_chat: F,
+) -> Vec<crate::api::messages::ChatChannel>
+where
+    F: FnOnce(crate::api::types::TradeInfo) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
     use crate::api::messages::ChatChannel;
     let Some((trade, until)) = chat_grace else {
         return crate::api::messages::stop_chat_subscriptions(order_id).await;
     };
-    crate::api::messages::spawn_peer_chat(trade).await;
+    start_peer_chat(trade.clone()).await;
     schedule_chat_grace_end(order_id, *until);
     if crate::api::messages::stop_chat_subscription(ChatChannel::Dispute, order_id).await {
         vec![ChatChannel::Dispute]
@@ -9428,6 +9458,13 @@ async fn note_public_success(order_id: &str, revision_at: i64) {
 /// sleep would keep the chat open for as long as the device slept.
 const CHAT_GRACE_CHECK_SECS: i64 = 60;
 
+/// How long a grace-window timer sleeps before it looks at the wall clock
+/// again, or `None` once the window's end (`until`) has come.
+fn grace_check_delay(until: i64, now: i64) -> Option<u64> {
+    let left = until.saturating_sub(now);
+    (left > 0).then(|| left.min(CHAT_GRACE_CHECK_SECS) as u64)
+}
+
 /// Close a completed trade's peer chat when its grace window ends (#642).
 pub(crate) fn schedule_chat_grace_end(order_id: &str, until: i64) {
     #[cfg(not(target_arch = "wasm32"))]
@@ -9438,10 +9475,8 @@ pub(crate) fn schedule_chat_grace_end(order_id: &str, until: i64) {
     crate::rt::spawn(async move {
         let mut until = until;
         loop {
-            let left = until.saturating_sub(crate::rt::unix_now());
-            if left > 0 {
-                let slice = left.min(CHAT_GRACE_CHECK_SECS) as u64;
-                crate::rt::time::sleep(crate::rt::time::Duration::from_secs(slice)).await;
+            if let Some(secs) = grace_check_delay(until, crate::rt::unix_now()) {
+                crate::rt::time::sleep(crate::rt::time::Duration::from_secs(secs)).await;
                 continue;
             }
             match close_grace_chat_if_over(&order_id).await {
@@ -12852,18 +12887,59 @@ mod tests {
         claim_chat(ChatChannel::Peer, &kept).await.expect("peer chat claimed");
         claim_chat(ChatChannel::Dispute, &kept).await.expect("dispute chat claimed");
         let until = now - 60 + crate::api::messages::PEER_CHAT_GRACE_SECS;
-        let stopped = release_finished_chats(&kept, Some(&(row, until))).await;
+        let started = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let stopped = release_finished_chats_with(&kept, Some(&(row, until)), |trade| {
+            let started = started.clone();
+            async move {
+                *started.lock().unwrap() = Some(trade.order.id);
+            }
+        })
+        .await;
         assert_eq!(stopped, vec![ChatChannel::Dispute]);
         assert!(chat_running(ChatChannel::Peer, &kept).await);
         assert!(!chat_running(ChatChannel::Dispute, &kept).await);
+        // A process that does not run the peer chat yet starts it.
+        assert_eq!(started.lock().unwrap().as_deref(), Some(kept.as_str()));
         stop_chat_subscription(ChatChannel::Peer, &kept).await;
 
         let ended = format!("grace-ended-{}", uuid::Uuid::new_v4());
         claim_chat(ChatChannel::Peer, &ended).await.expect("peer chat claimed");
         claim_chat(ChatChannel::Dispute, &ended).await.expect("dispute chat claimed");
-        let stopped = release_finished_chats(&ended, None).await;
+        let stopped = release_finished_chats_with(&ended, None, |_| async {
+            panic!("no chat is started outside a window");
+        })
+        .await;
         assert_eq!(stopped.len(), 2);
         assert!(!chat_running(ChatChannel::Peer, &ended).await);
+    }
+
+    /// #642: the timer looks at the wall clock at least once a minute — a
+    /// sleep does not advance while the device is suspended — and stops
+    /// waiting once the window's end has come.
+    #[test]
+    fn the_grace_timer_checks_the_wall_clock_every_minute() {
+        let now = 1_700_000_000;
+        assert_eq!(grace_check_delay(now + 3_600, now), Some(60));
+        assert_eq!(grace_check_delay(now + 30, now), Some(30));
+        assert_eq!(grace_check_delay(now, now), None);
+        assert_eq!(grace_check_delay(now - 5, now), None);
+    }
+
+    /// #642: a window that ended while the app was away (a suspended device
+    /// runs no timer) is closed by the resume's resubscription.
+    #[tokio::test]
+    async fn the_resume_closes_a_grace_window_that_ended_while_away() {
+        use crate::api::messages::{chat_running, claim_chat, ChatChannel};
+        let db = bond_test_db().await;
+        let now = crate::rt::unix_now();
+        let away = format!("grace-away-{}", uuid::Uuid::new_v4());
+        saved_completed_row(db, &away, Some(now - crate::api::messages::PEER_CHAT_GRACE_SECS - 10))
+            .await;
+        claim_chat(ChatChannel::Peer, &away).await.expect("peer chat claimed");
+
+        crate::api::messages::resubscribe_active_chats().await;
+
+        assert!(!chat_running(ChatChannel::Peer, &away).await);
     }
 
     /// #642: the end of the window gives the peer chat back; a window that
@@ -13050,6 +13126,39 @@ mod tests {
         let row = db.get_trade_by_order_id(&unknown).await.unwrap().unwrap();
         assert_eq!(row.order.status, OrderStatus::Success);
         assert_eq!(row.completed_at, None, "an unknown time is not made up");
+    }
+
+    /// #642: a buyer who missed the dispute replays the backlog newest-first:
+    /// the `purchase-completed` mostrod sends after the payout lands before
+    /// the `admin-settled` it sent first. The older verdict must still refine
+    /// the row, so the admin-resolved trade gets no chat window.
+    #[tokio::test]
+    async fn an_older_admin_settled_still_refines_a_replayed_purchase_completed() {
+        use mostro_core::message::Action;
+        let path = std::env::temp_dir()
+            .join(format!("mostro_admin_settle_replay_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let (order_uuid, order_id) = noted_active_take().await;
+        dispatch_daemon_action_at(
+            order_uuid,
+            Action::PurchaseCompleted,
+            &format!("test-replayed-purchase-completed-{order_id}"),
+            2_000,
+        )
+        .await;
+        dispatch_daemon_action_at(
+            order_uuid,
+            Action::AdminSettled,
+            &format!("test-replayed-admin-settled-{order_id}"),
+            1_000,
+        )
+        .await;
+
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::SettledByAdmin);
+        assert_eq!(crate::api::messages::chat_grace_ends_at(&row), None);
     }
 
     /// #642: the buyer's completion is dated by the daemon's
@@ -15324,6 +15433,16 @@ mod tests {
         action: mostro_core::message::Action,
         event_id: &str,
     ) {
+        dispatch_daemon_action_at(order_uuid, action, event_id, 1_000).await;
+    }
+
+    /// [`dispatch_daemon_action`] sent at `at`.
+    async fn dispatch_daemon_action_at(
+        order_uuid: uuid::Uuid,
+        action: mostro_core::message::Action,
+        event_id: &str,
+        at: u64,
+    ) {
         use mostro_core::message::Message;
         let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
@@ -15333,7 +15452,7 @@ mod tests {
                 signature: None,
                 sender,
                 identity: sender,
-                created_at: nostr_sdk::prelude::Timestamp::from(1_000u64),
+                created_at: nostr_sdk::prelude::Timestamp::from(at),
             },
             event_id,
             "ff00ff22",

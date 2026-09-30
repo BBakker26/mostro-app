@@ -68,7 +68,8 @@ normative list):
   - *Dated by the completion itself.* The window runs from the row's
     `completed_at` (`Storage::mark_trade_completed`: first write wins,
     never later than now), recorded where the trade moves to `success` and
-    **before** that status reaches the row or the book, from the
+    **before** that status reaches the trade row (the in-memory book can
+    show the public `success` first; the UI decides on the row), from the
     `created_at` of what carried it: the buyer's `purchase-completed` (or a
     row rebuilt from such a message), or — for the seller, who learns of it
     only from the public book — the Kind 38383 `success` revision (d-tag
@@ -81,7 +82,10 @@ normative list):
     is closed.
   - *No window* for canceled, expired or admin-resolved trades, nor for a
     dispute the book shows as `success`. The book's plain terminal never
-    replaces an admin verdict (`wire_status_applies`).
+    replaces an admin verdict (`wire_status_applies`), and an admin verdict
+    refines a plain terminal whatever order a replay brings them in
+    (`status_write_blocked`): mostrod's `purchase-completed` follows its
+    `admin-settled`, and a newest-first replay delivers it first.
   - *Lifecycle.* While the window runs, `chat_still_relevant` holds
     (restart resubscription, session rebuild, reveal replays).
     `release_finished_trade_subscriptions` keeps the peer chat — starting
@@ -89,8 +93,9 @@ normative list):
     every other subscription at once; `schedule_chat_grace_end` closes it
     at the end, looking at the wall clock at least once a minute (a sleep
     does not advance while the device is suspended), and
-    `resubscribe_active_chats` closes a window that ended while the app was
-    away, ahead of the resume's subscription repair.
+    `resubscribe_active_chats`, on every start and resume, closes a window
+    that ended while the app was away (a relay that reconnected first may be
+    sent the expired REQ again; the CLOSE follows).
   - *UI.* `ChatRowState` decides from the persisted row (`TradeRow.rowStatus`
     and `completedAt`), as Rust does: the book's live status may run ahead
     of the row, and the composer must not drop out while it catches up.

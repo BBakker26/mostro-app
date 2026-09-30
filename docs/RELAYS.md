@@ -64,8 +64,8 @@ other end: the subscription never existed, and the `NOTICE` names none.
    instead of holding them until an idle timeout. The one deferral is a `success`'s peer chat,
    held for its one-hour grace window (`PEER_CHAT_GRACE_SECS`, #642) and closed at its end by
    `schedule_chat_grace_end` — or, when the window ended while the app was away, by the
-   resume's `resubscribe_active_chats`, ahead of `repair_all`, so the expired REQ is not
-   re-issued. Every order we follow by d-tag shares one
+   resume's `resubscribe_active_chats` (a relay that reconnects first may be sent the expired
+   REQ again; the CLOSE follows). Every order we follow by d-tag shares one
    REQ, `mostro-orders-watched`, rebuilt by `sync_watched_orders` whenever the set of d-tag
    tasks changes: one REQ per order filled nos.lol's per-connection cap. strfry relays refuse a
    REQ past that cap with a `NOTICE` that names no subscription, so unlike a `CLOSED` there is

@@ -89,6 +89,21 @@ void main() {
       expect(helper.ids(), ['padded']);
     });
 
+    test('a method the book offers finds its orders', () async {
+      // The EUR order form offers "SEPA instant"; the old fixed chip "SEPA"
+      // matched none of those orders.
+      final helper = await bookWith([
+        fakeOrder(id: 'sepa', kind: 'sell', paymentMethod: 'SEPA instant'),
+        fakeOrder(id: 'wise', kind: 'sell', paymentMethod: 'Wise'),
+      ]);
+      helper.setTab(OrderType.buy);
+      final offered = helper.container.read(bookPaymentMethodsProvider);
+      await helper.filter(OrderFilters(paymentMethods: [offered.first]));
+
+      expect(offered, ['SEPA instant', 'Wise']);
+      expect(helper.ids(), ['sepa']);
+    });
+
     test('an order splits its payment methods once, not per filter pass', () {
       // Arrange
       final order = fakeOrder(
@@ -157,6 +172,47 @@ void main() {
       helper.setTab(OrderType.buy);
 
       expect(helper.ids(), ['range']);
+    });
+  });
+
+  group('bookPaymentMethodsProvider', () {
+    test('offers each method once, as first spelled, sorted', () async {
+      final helper = await bookWith([
+        fakeOrder(id: 'a', kind: 'sell', paymentMethod: 'Wire, Revolut'),
+        fakeOrder(id: 'b', kind: 'sell', paymentMethod: ' revolut ,bizum'),
+      ]);
+      helper.setTab(OrderType.buy);
+
+      expect(helper.container.read(bookPaymentMethodsProvider), [
+        'bizum',
+        'Revolut',
+        'Wire',
+      ]);
+    });
+
+    test('only the active tab\'s pending orders count', () async {
+      final helper = await bookWith([
+        fakeOrder(id: 'listed', kind: 'sell', paymentMethod: 'Wise'),
+        fakeOrder(id: 'other-tab', kind: 'buy', paymentMethod: 'Zelle'),
+        fakeOrder(
+          id: 'taken',
+          kind: 'sell',
+          paymentMethod: 'Cash',
+          status: OrderStatus.active,
+        ),
+      ]);
+      helper.setTab(OrderType.buy);
+
+      expect(helper.container.read(bookPaymentMethodsProvider), ['Wise']);
+    });
+
+    test('skips empty entries of a sloppy tag', () async {
+      final helper = await bookWith([
+        fakeOrder(id: 'a', kind: 'sell', paymentMethod: 'Wise,, '),
+      ]);
+      helper.setTab(OrderType.buy);
+
+      expect(helper.container.read(bookPaymentMethodsProvider), ['Wise']);
     });
   });
 }

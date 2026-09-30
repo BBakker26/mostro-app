@@ -315,6 +315,31 @@ final tabHasOrdersProvider = Provider.autoDispose<bool>((ref) {
   return orders.any((order) => _isListedOnTab(order, tab));
 });
 
+/// The payment methods the active tab's orders carry, as the filter dialog
+/// offers them: one entry per method however makers cased it, spelled the
+/// way it first appears, sorted alphabetically.
+///
+/// Taken from the book rather than a fixed list, because the filter matches
+/// a method exactly: a catalogue chip "SEPA" found no order that says
+/// "SEPA instant" — the name the order form itself offers for EUR.
+final bookPaymentMethodsProvider = Provider.autoDispose<List<String>>((ref) {
+  final orders =
+      ref.watch(orderBookProvider).valueOrNull ?? const <OrderItem>[];
+  final tab = ref.watch(homeOrderTypeProvider);
+  final byToken = <String, String>{};
+  for (final order in orders) {
+    if (!_isListedOnTab(order, tab)) continue;
+    for (final method in order.paymentMethod.split(',')) {
+      final label = method.trim();
+      if (label.isEmpty) continue;
+      byToken.putIfAbsent(label.toLowerCase(), () => label);
+    }
+  }
+  final methods = byToken.values.toList();
+  methods.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return methods;
+});
+
 /// Filtered orders based on active tab, all filter providers and the selected
 /// [OrderSort].
 ///

@@ -175,6 +175,18 @@ restart. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
 - a resolution reaching the dispute store clears them too: the verdicts are
   routed there since #596.
 
+**Solver takeover**: a dispute can change solver. mostrod lets a write solver
+take over an `in-progress` dispute held by a read-only one (for example
+[Serbero](https://github.com/MostroP2P/serbero)), and sends both parties a new
+`admin-took-dispute` with the new pubkey. The record takes the new solver, and
+the dispute chat task, bound to the previous solver's conversation keys, is
+stopped before the new one is armed; the chat guard allows one task per order
+and channel, so without the stop the new solver's messages would never be read.
+The peer chat is not touched. Each assignment's time (the event's
+`created_at`) is kept in memory, and an older assignment for the same order is
+ignored: the catch-up channel replays every `admin-took-dispute`, usually
+newest first, and the previous solver must not come back.
+
 Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
 a resolved record or a finished trade is `NoOpenDispute`.
 

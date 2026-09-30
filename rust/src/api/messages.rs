@@ -1175,7 +1175,7 @@ static CHAT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 
 /// Claim the chat for a new task: its generation, or `None` while another
 /// task owns it.
-async fn claim_chat(channel: ChatChannel, order_id: &str) -> Option<u64> {
+pub(crate) async fn claim_chat(channel: ChatChannel, order_id: &str) -> Option<u64> {
     let mut active = active_chats().lock().await;
     let key = channel.guard_key(order_id);
     if active.contains_key(&key) {
@@ -1187,7 +1187,11 @@ async fn claim_chat(channel: ChatChannel, order_id: &str) -> Option<u64> {
 }
 
 /// Whether `generation` still owns the chat.
-async fn chat_is_current(channel: ChatChannel, order_id: &str, generation: u64) -> bool {
+pub(crate) async fn chat_is_current(
+    channel: ChatChannel,
+    order_id: &str,
+    generation: u64,
+) -> bool {
     active_chats().lock().await.get(&channel.guard_key(order_id)) == Some(&generation)
 }
 
@@ -1210,24 +1214,34 @@ async fn release_chat(channel: ChatChannel, order_id: &str, generation: u64) -> 
 /// task sees its ownership gone and exits at its next wake. Returns the
 /// channels that were running.
 pub(crate) async fn stop_chat_subscriptions(order_id: &str) -> Vec<ChatChannel> {
-    let stopped: Vec<ChatChannel> = {
-        let mut active = active_chats().lock().await;
-        [ChatChannel::Peer, ChatChannel::Dispute]
-            .into_iter()
-            .filter(|channel| active.remove(&channel.guard_key(order_id)).is_some())
-            .collect()
-    };
-    if !stopped.is_empty() {
-        if let Ok(pool) = crate::api::nostr::get_pool() {
-            let client = pool.client();
-            for channel in &stopped {
-                crate::nostr::live_subs::live_subs()
-                    .close(&client, &chat_subscription_id(*channel, order_id))
-                    .await;
-            }
+    let mut stopped = Vec::new();
+    for channel in [ChatChannel::Peer, ChatChannel::Dispute] {
+        if stop_chat_subscription(channel, order_id).await {
+            stopped.push(channel);
         }
     }
     stopped
+}
+
+/// Stop one channel's chat task of an order: release its ownership and close
+/// its REQ, so a replacement task can claim it. Used when the counterpart of a
+/// live conversation changes — a solver taking over a dispute — since the
+/// running task is bound to the old counterpart's keys. Returns whether a task
+/// was running.
+pub(crate) async fn stop_chat_subscription(channel: ChatChannel, order_id: &str) -> bool {
+    let was_running = active_chats()
+        .lock()
+        .await
+        .remove(&channel.guard_key(order_id))
+        .is_some();
+    if was_running {
+        if let Ok(pool) = crate::api::nostr::get_pool() {
+            crate::nostr::live_subs::live_subs()
+                .close(&pool.client(), &chat_subscription_id(channel, order_id))
+                .await;
+        }
+    }
+    was_running
 }
 
 /// Forget every conversation of the identity being deleted (issue #533):

@@ -620,8 +620,53 @@ pub(crate) async fn note_peer_opened_dispute(trade_id: &str, dispute_id: Option<
 /// Handle an incoming `adminTookDispute` event.
 ///
 /// Extracts the admin pubkey, marks the dispute as `InReview`, and derives
-/// the ECDH admin shared key for dispute chat encryption.
+/// the ECDH admin shared key for dispute chat encryption. Without the event's
+/// time, a solver change is always applied; the daemon path goes through
+/// [`apply_admin_took_dispute`] with it.
 pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -> Result<()> {
+    apply_admin_took_dispute(trade_id, admin_pubkey, None).await
+}
+
+/// When each order's current solver was assigned: the `created_at` of the
+/// `admin-took-dispute` that set it. A dispute can change solver (a write
+/// solver taking over from a read-only one), and the catch-up channel replays
+/// every assignment after a reconnect, usually newest first, so the older one
+/// must not win. In memory only: after a restart the rehydrated solver has no
+/// time, and the replay settles it.
+static SOLVER_ASSIGNED_AT: OnceLock<std::sync::Mutex<HashMap<String, i64>>> = OnceLock::new();
+
+fn solver_assigned_at() -> &'static std::sync::Mutex<HashMap<String, i64>> {
+    SOLVER_ASSIGNED_AT.get_or_init(Default::default)
+}
+
+/// Record that the current solver of `trade_id` was assigned at `at`.
+fn note_solver_assignment(trade_id: &str, at: Option<i64>) {
+    let Some(at) = at else { return };
+    let mut times = solver_assigned_at()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let newest = times.entry(trade_id.to_string()).or_insert(at);
+    *newest = (*newest).max(at);
+}
+
+/// Whether an assignment made at `at` is older than the current solver's.
+fn is_stale_solver_assignment(trade_id: &str, at: Option<i64>) -> bool {
+    let Some(at) = at else { return false };
+    solver_assigned_at()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(trade_id)
+        .is_some_and(|&newest| at < newest)
+}
+
+/// [`handle_admin_took_dispute`] with the time the daemon made the assignment
+/// (`assigned_at`, the event's `created_at`), so a replayed older assignment
+/// cannot replace a newer solver.
+pub(crate) async fn apply_admin_took_dispute(
+    trade_id: String,
+    admin_pubkey: String,
+    assigned_at: Option<i64>,
+) -> Result<()> {
     let admin_pubkey_for_key = admin_pubkey.clone();
 
     // The offline catch-up channel has no `since` (orders.rs), so this action
@@ -656,6 +701,11 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
     // insert fail with its metadata lost.
     let trade_id_for_new = trade_id.clone();
     let admin_for_new = admin_pubkey.clone();
+    let mut solver_changed = false;
+    let mut stale = false;
+    let solver_changed_in_update = &mut solver_changed;
+    let stale_in_update = &mut stale;
+    let trade_id_for_update = trade_id.clone();
     dispute_store()
         .upsert_or_update(
             &trade_id,
@@ -691,8 +741,13 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
                     // the old key would leave the actual solver unreachable
                     // (PR #253 review).
                     if dispute.admin_pubkey.as_deref() != Some(admin_pubkey.as_str()) {
+                        if is_stale_solver_assignment(&trade_id_for_update, assigned_at) {
+                            *stale_in_update = true;
+                            return Ok(());
+                        }
                         dispute.admin_pubkey = Some(admin_pubkey);
                         dispute.is_read = false;
+                        *solver_changed_in_update = true;
                     }
                     return Ok(());
                 }
@@ -709,6 +764,38 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
             },
         )
         .await?;
+
+    if stale {
+        crate::api::logging::blog_info(
+            "disputes",
+            format!(
+                "skip older admin-took-dispute order={}: a newer solver is assigned",
+                crate::api::logging::short_id(&trade_id),
+            ),
+        );
+        return Ok(());
+    }
+    note_solver_assignment(&trade_id, assigned_at);
+
+    // The running dispute chat task is bound to the previous solver's keys
+    // (its subscription filters on that conversation's signing key), and the
+    // chat guard allows one task per order and channel, so the new solver's
+    // listener below would be a no-op and their messages would never arrive.
+    // Stop the old task first; the peer chat is left alone.
+    if solver_changed {
+        let stopped = crate::api::messages::stop_chat_subscription(
+            crate::api::messages::ChatChannel::Dispute,
+            &trade_id,
+        )
+        .await;
+        crate::api::logging::blog_info(
+            "disputes",
+            format!(
+                "solver changed order={}: dispute chat restarted (was running: {stopped})",
+                crate::api::logging::short_id(&trade_id),
+            ),
+        );
+    }
 
     persist_admin_pubkey(&trade_id, &admin_pubkey_for_key).await;
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
@@ -804,6 +891,10 @@ async fn persist_dispute_origin(order_id: &str) {
 /// Best-effort like the writes: a storage failure only means the stale key is
 /// seen again — and cleared again — on the next pass.
 async fn clear_dispute_keys(order_id: &str) {
+    solver_assigned_at()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(order_id);
     let Some(db) = crate::db::app_db::db() else {
         return;
     };
@@ -1489,6 +1580,100 @@ mod tests {
             clear_dispute_keys(order_id).await;
             db.delete_trade_by_order_id(order_id).await.unwrap();
         }
+    }
+
+    /// A write solver taking over a dispute from a read-only one (Serbero):
+    /// the daemon re-sends `admin-took-dispute` with the new pubkey. The
+    /// dispute chat task still bound to the previous solver's keys must be
+    /// stopped, or the guard keeps it as the only listener and the new
+    /// solver's messages never arrive. A same-solver replay keeps it running.
+    #[tokio::test]
+    async fn a_solver_takeover_restarts_the_dispute_chat_listener() {
+        use crate::api::messages::{chat_is_current, claim_chat, ChatChannel};
+
+        let order = format!("takeover-{}", uuid::Uuid::new_v4());
+        let first = "0000000000000000000000000000000000000000000000000000000000000044";
+        let second = "0000000000000000000000000000000000000000000000000000000000000055";
+
+        handle_admin_took_dispute(order.clone(), first.to_string())
+            .await
+            .unwrap();
+        // The listener armed for the first solver (the test has no trade key,
+        // so claim the chat the way that task would).
+        let listener = claim_chat(ChatChannel::Dispute, &order)
+            .await
+            .expect("claim");
+        let peer = claim_chat(ChatChannel::Peer, &order).await.expect("claim");
+
+        handle_admin_took_dispute(order.clone(), first.to_string())
+            .await
+            .unwrap();
+        assert!(
+            chat_is_current(ChatChannel::Dispute, &order, listener).await,
+            "a same-solver replay must keep the running listener"
+        );
+
+        handle_admin_took_dispute(order.clone(), second.to_string())
+            .await
+            .unwrap();
+        assert!(
+            !chat_is_current(ChatChannel::Dispute, &order, listener).await,
+            "the previous solver's listener must be stopped"
+        );
+        assert!(
+            claim_chat(ChatChannel::Dispute, &order).await.is_some(),
+            "the new solver's listener must be able to claim the chat"
+        );
+        assert!(
+            chat_is_current(ChatChannel::Peer, &order, peer).await,
+            "the peer chat is not touched"
+        );
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(second));
+
+        crate::api::messages::stop_chat_subscriptions(&order).await;
+        clear_dispute_keys(&order).await;
+    }
+
+    /// After a reconnect the catch-up channel replays every assignment, the
+    /// newest usually first. The takeover's older `admin-took-dispute` (the
+    /// read-only solver's) must not bring the previous solver back, nor
+    /// restart the listener armed for the current one.
+    #[tokio::test]
+    async fn an_older_replayed_assignment_does_not_replace_the_solver() {
+        use crate::api::messages::{chat_is_current, claim_chat, ChatChannel};
+
+        let order = format!("replay-order-{}", uuid::Uuid::new_v4());
+        let serbero = "0000000000000000000000000000000000000000000000000000000000000066";
+        let solver = "0000000000000000000000000000000000000000000000000000000000000077";
+
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+        let listener = claim_chat(ChatChannel::Dispute, &order)
+            .await
+            .expect("claim");
+
+        // Replay, newest first.
+        apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))
+            .await
+            .unwrap();
+        apply_admin_took_dispute(order.clone(), serbero.to_string(), Some(100))
+            .await
+            .unwrap();
+
+        let dispute = get_dispute(order.clone()).await.unwrap().expect("record");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(solver));
+        assert!(
+            chat_is_current(ChatChannel::Dispute, &order, listener).await,
+            "a stale assignment must not restart the current solver's listener"
+        );
+
+        crate::api::messages::stop_chat_subscriptions(&order).await;
+        clear_dispute_keys(&order).await;
     }
 
     /// PR #256 review, manual E2E: the catch-up channel re-delivers

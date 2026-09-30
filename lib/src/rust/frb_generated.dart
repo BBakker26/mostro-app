@@ -83,7 +83,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1499212638;
+  int get rustContentHash => -1351531358;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -594,6 +594,11 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSettingsSetTestOrderExpiry({BigInt? secs});
 
   Future<void> crateApiSettingsSetTheme({required ThemeMode theme});
+
+  Future<SolverRole> crateApiDisputesSolverRole({
+    required String tradeId,
+    required String solverPubkey,
+  });
 
   Future<void> crateApiBondSubmitBondPayoutInvoice({
     required String orderId,
@@ -6121,6 +6126,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_theme", argNames: ["theme"]);
 
   @override
+  Future<SolverRole> crateApiDisputesSolverRole({
+    required String tradeId,
+    required String solverPubkey,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(tradeId, serializer);
+          sse_encode_String(solverPubkey, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 172,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_solver_role,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiDisputesSolverRoleConstMeta,
+        argValues: [tradeId, solverPubkey],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiDisputesSolverRoleConstMeta => const TaskConstMeta(
+    debugName: "solver_role",
+    argNames: ["tradeId", "solverPubkey"],
+  );
+
+  @override
   Future<void> crateApiBondSubmitBondPayoutInvoice({
     required String orderId,
     required String invoice,
@@ -6134,7 +6173,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 172,
+            funcId: 173,
             port: port_,
           );
         },
@@ -6169,7 +6208,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 173,
+            funcId: 174,
             port: port_,
           );
         },
@@ -6204,7 +6243,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 174,
+            funcId: 175,
             port: port_,
           );
         },
@@ -6234,7 +6273,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 175,
+            funcId: 176,
             port: port_,
           );
         },
@@ -6268,7 +6307,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 176,
+            funcId: 177,
             port: port_,
           );
         },
@@ -6300,7 +6339,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 177,
+            funcId: 178,
             port: port_,
           );
         },
@@ -8503,6 +8542,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SlashCause dco_decode_slash_cause(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return SlashCause.values[raw as int];
+  }
+
+  @protected
+  SolverRole dco_decode_solver_role(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return SolverRole.values[raw as int];
   }
 
   @protected
@@ -11373,6 +11418,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SolverRole sse_decode_solver_role(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return SolverRole.values[inner];
+  }
+
+  @protected
   ThemeMode sse_decode_theme_mode(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
@@ -14128,6 +14180,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_slash_cause(SlashCause self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_solver_role(SolverRole self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
   }

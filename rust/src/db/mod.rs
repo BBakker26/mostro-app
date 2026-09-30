@@ -120,6 +120,16 @@ pub mod settings_keys {
         format!("{DISPUTE_ADMIN_AT_PREFIX}{order_id}")
     }
 
+    /// Per-order prefix for the node a dispute belongs to (hex): the node
+    /// that sent its `admin-took-dispute`. Only that node's Serbero
+    /// announcement labels its solvers (#637).
+    pub const DISPUTE_NODE_PREFIX: &str = "dispute_node:";
+
+    /// Build the settings key holding the node of `order_id`'s dispute.
+    pub fn dispute_node(order_id: &str) -> String {
+        format!("{DISPUTE_NODE_PREFIX}{order_id}")
+    }
+
     /// Per-order marker that *this* side opened the dispute.
     pub const DISPUTE_MINE_PREFIX: &str = "dispute_mine:";
 
@@ -208,10 +218,11 @@ pub mod settings_keys {
     /// [`super::Storage::clear_identity_data`] drops it with the rows. What
     /// is left in the store is device preference: the active node, custom
     /// nodes, node caches, push token and toggle, developer overrides.
-    pub const IDENTITY_SCOPED_PREFIXES: [&str; 7] = [
+    pub const IDENTITY_SCOPED_PREFIXES: [&str; 8] = [
         CHAT_CURSOR_PREFIX,
         DISPUTE_ADMIN_PREFIX,
         DISPUTE_ADMIN_AT_PREFIX,
+        DISPUTE_NODE_PREFIX,
         DISPUTE_MINE_PREFIX,
         STATUS_CURSOR_PREFIX,
         INVOICE_STEP_PREFIX,

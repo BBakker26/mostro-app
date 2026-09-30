@@ -37,6 +37,7 @@ class DisputeMessage {
     required this.createdAt,
     this.nostrEventId,
     this.attachment,
+    this.senderPubkey,
   });
 
   final String id;
@@ -45,6 +46,10 @@ class DisputeMessage {
   final bool isAdmin;
   final int createdAt;
   final String? nostrEventId;
+
+  /// Who wrote it (hex). A solver's decides its label: Serbero or a person
+  /// (#637). A dispute can have two — Serbero, then who took it over.
+  final String? senderPubkey;
 
   /// An image or file sent in the dispute chat (#589 phase 3); [content] is
   /// then its file name.

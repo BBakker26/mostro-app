@@ -51,8 +51,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get orderDispute => 'Litige de commande';
 
   @override
-  String get disputeAdminAssigned =>
-      'Un administrateur a été assigné à votre litige. Il vous contactera ici sous peu.';
+  String get disputeSolverAssigned =>
+      'Un médiateur a pris en charge votre litige. Il vous contactera ici sous peu.';
 
   @override
   String get disputeChatClosed => 'Ce litige a été résolu. Le chat est fermé.';
@@ -111,11 +111,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get disputeLostFundsToBuyer =>
-      'L\'administrateur a réglé le litige en faveur de l\'acheteur. Les sats ont été libérés à l\'acheteur.';
+      'Le médiateur a tranché le litige en faveur de l\'acheteur. Les sats ont été libérés à l\'acheteur.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'L\'administrateur a annulé la commande et retourné les sats au vendeur. Vous n\'avez pas reçu les sats.';
+      'Le médiateur a annulé la commande et retourné les sats au vendeur. Vous n\'avez pas reçu les sats.';
 
   @override
   String get walkthroughSlideOneTitle =>
@@ -144,7 +144,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Chaque transaction dispose de son propre chat privé, chiffré de bout en bout. Seuls les deux utilisateurs impliqués peuvent le lire. En cas de litige, vous pouvez donner la clé partagée à un administrateur pour l\'aider à résoudre le problème.';
+      'Chaque transaction dispose de son propre chat privé, chiffré de bout en bout. Seuls les deux utilisateurs impliqués peuvent le lire. En cas de litige, vous pouvez donner la clé partagée à un médiateur pour l\'aider à résoudre le problème.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Prenez une offre';
@@ -986,7 +986,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Êtes-vous sûr de vouloir ouvrir un litige ? Cela transmet l\'échange à un administrateur et ne peut pas être annulé.';
+      'Êtes-vous sûr de vouloir ouvrir un litige ? Cela transmet l\'échange à un médiateur et ne peut pas être annulé.';
 
   @override
   String get disputeAlreadyOpen =>
@@ -1231,7 +1231,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Actions des administrateurs et résolutions de litiges';
+      'Actions des médiateurs et résolutions de litiges';
 
   @override
   String get searchCurrenciesHint => 'Rechercher des devises…';
@@ -1808,7 +1808,17 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Administrateur';
+  String get solverLabel => 'Médiateur';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, un assistant automatique, vous aide avec votre litige. Il vous posera quelques questions ici et transmettra le dossier à une personne si nécessaire.';
+
+  @override
+  String get disputeSolverTookOver => 'Un médiateur a repris votre litige.';
 
   @override
   String get disputeScreenTitle => 'Litige';

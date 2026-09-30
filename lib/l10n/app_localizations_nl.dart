@@ -51,8 +51,8 @@ class AppLocalizationsNl extends AppLocalizations {
   String get orderDispute => 'Dispuut over de order';
 
   @override
-  String get disputeAdminAssigned =>
-      'Er is een beheerder aan je dispuut toegewezen. Hij neemt hier binnenkort contact met je op.';
+  String get disputeSolverAssigned =>
+      'Een solver heeft je dispuut opgepakt. Hij neemt hier binnenkort contact met je op.';
 
   @override
   String get disputeChatClosed =>
@@ -112,11 +112,11 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get disputeLostFundsToBuyer =>
-      'De beheerder heeft het dispuut in het voordeel van de koper beslist. De sats zijn aan de koper vrijgegeven.';
+      'De solver heeft het dispuut in het voordeel van de koper beslist. De sats zijn aan de koper vrijgegeven.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'De beheerder heeft de order geannuleerd en de sats aan de verkoper teruggegeven. Jij hebt de sats niet ontvangen.';
+      'De solver heeft de order geannuleerd en de sats aan de verkoper teruggegeven. Jij hebt de sats niet ontvangen.';
 
   @override
   String get walkthroughSlideOneTitle => 'Handel vrij in bitcoin, zonder KYC';
@@ -144,7 +144,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen de twee betrokken gebruikers kunnen hem lezen. Bij een dispuut kun je de gedeelde sleutel aan een beheerder geven om de zaak op te lossen.';
+      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen de twee betrokken gebruikers kunnen hem lezen. Bij een dispuut kun je de gedeelde sleutel aan een solver geven om de zaak op te lossen.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Een aanbod accepteren';
@@ -984,7 +984,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Weet je zeker dat je een dispuut wilt openen? Daarmee gaat de trade naar een beheerder en dat kan niet ongedaan worden gemaakt.';
+      'Weet je zeker dat je een dispuut wilt openen? Daarmee gaat de trade naar een solver en dat kan niet ongedaan worden gemaakt.';
 
   @override
   String get disputeAlreadyOpen => 'Voor deze trade loopt al een dispuut.';
@@ -1227,7 +1227,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Acties van de beheerder en uitkomsten van disputen';
+      'Acties van de solver en uitkomsten van disputen';
 
   @override
   String get searchCurrenciesHint => 'Valuta zoeken…';
@@ -1801,7 +1801,18 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Beheerder';
+  String get solverLabel => 'Solver';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, een automatische assistent, helpt bij je dispuut. Hij stelt je hier een paar vragen en geeft de zaak zo nodig door aan een persoon.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'Een solver heeft je dispuut overgenomen.';
 
   @override
   String get disputeScreenTitle => 'Dispuut';

@@ -23,6 +23,7 @@ import '../../support/provider_harness.dart';
 const _trade = 'order-dispute';
 const _disputeId = 'dispute-1';
 const _solver = 'solver-pubkey';
+const _serbero = 'serbero-pubkey';
 
 rust_types.ChatMessage _message({
   required String id,
@@ -31,10 +32,11 @@ rust_types.ChatMessage _message({
   String content = 'hello',
   rust_types.AttachmentInfo? attachment,
   int createdAt = 1000,
+  String sender = _solver,
 }) => rust_types.ChatMessage(
   id: id,
   tradeId: _trade,
-  senderPubkey: isMine ? 'me' : _solver,
+  senderPubkey: isMine ? 'me' : sender,
   content: attachment?.fileName ?? content,
   messageType: type,
   isMine: isMine,
@@ -58,9 +60,15 @@ DisputeItem _dispute({
 
 /// Answers the dispute chat's text sends with what the test set.
 class _FakeDisputeGateway extends DisputeChatGateway {
-  _FakeDisputeGateway(this.onSend, {this.refresh});
+  _FakeDisputeGateway(this.onSend, {this.refresh, this.assistants = const {}});
 
   final Future<rust_types.ChatMessage> Function(String text) onSend;
+
+  /// The solver pubkeys a node announces as its Serbero.
+  final Set<String> assistants;
+
+  /// The trades whose solvers were asked about.
+  final roleTrades = <String>{};
 
   /// What `getDispute` answers; null when absent.
   final Future<rust_types.Dispute?> Function()? refresh;
@@ -78,6 +86,17 @@ class _FakeDisputeGateway extends DisputeChatGateway {
   @override
   Future<rust_types.Dispute?> getDispute(String tradeId) =>
       refresh?.call() ?? Future.value();
+
+  @override
+  Future<rust_types.SolverRole> solverRole(
+    String tradeId,
+    String solverPubkey,
+  ) async {
+    roleTrades.add(tradeId);
+    return assistants.contains(solverPubkey)
+        ? rust_types.SolverRole.assistant
+        : rust_types.SolverRole.human;
+  }
 }
 
 rust_types.Dispute _bridgeDispute({
@@ -425,6 +444,128 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.byType(EncryptedFileMessage), findsOneWidget);
+    });
+  });
+
+  group('solver roles (#637)', () {
+    final l10n = AppLocalizationsEn();
+    _FakeDisputeGateway serberoNode() => _FakeDisputeGateway(
+      (_) => Completer<Never>().future,
+      assistants: {_serbero},
+    );
+
+    testWidgets('labels Serbero and the resolver who took the case over', (
+      tester,
+    ) async {
+      // Arrange: Serbero talked first, then a person took the dispute.
+      final gateway = serberoNode();
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        disputeGateway: gateway,
+        history: [
+          _message(id: 's1', sender: _serbero, content: 'Hi, I am Serbero'),
+          _message(id: 'm1', isMine: true, content: 'Hi', createdAt: 1100),
+          _message(id: 'h1', content: 'Resolver here', createdAt: 1200),
+        ],
+      );
+      await tester.pump();
+
+      // Assert
+      expect(find.text(l10n.serberoLabel), findsOneWidget);
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+      final line = find.text(l10n.disputeSolverTookOver);
+      expect(line, findsOneWidget);
+      expect(
+        tester.getTopLeft(line).dy,
+        greaterThan(tester.getTopLeft(find.text('Hi')).dy),
+        reason: 'the takeover line follows the conversation with Serbero',
+      );
+      expect(
+        tester.getTopLeft(line).dy,
+        lessThan(tester.getTopLeft(find.text('Resolver here')).dy),
+        reason: 'and comes before the resolver speaks',
+      );
+      expect(
+        gateway.roleTrades,
+        {_trade},
+        reason: "only the dispute's own node can vouch for its Serbero",
+      );
+    });
+
+    testWidgets('marks a takeover the resolver has not spoken in yet', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        disputeGateway: serberoNode(),
+        history: [
+          _message(id: 's1', sender: _serbero, content: 'Hi, I am Serbero'),
+        ],
+      );
+      await tester.pump();
+
+      expect(find.text(l10n.disputeSolverTookOver), findsOneWidget);
+    });
+
+    testWidgets('while Serbero holds the dispute, it is named and no takeover '
+        'is shown', (tester) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(adminPubkey: _serbero),
+        disputeGateway: serberoNode(),
+      );
+      await tester.pump();
+
+      expect(find.text(l10n.disputeSerberoAssigned), findsOneWidget);
+      expect(find.text(l10n.disputeSolverTookOver), findsNothing);
+    });
+
+    testWidgets('a dispute update reads the solver roles again', (
+      tester,
+    ) async {
+      // Arrange: the history lands before the node's announcement.
+      final assistants = <String>{};
+      final updates = StreamController<rust_types.Dispute>();
+      addTearDown(updates.close);
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(adminPubkey: _serbero),
+        disputeGateway: _FakeDisputeGateway(
+          (_) => Completer<Never>().future,
+          assistants: assistants,
+        ),
+        updates: updates.stream,
+        history: [_message(id: 's1', sender: _serbero, content: 'Hi')],
+      );
+      await tester.pump();
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+
+      // Act: the announcement arrives, then an update of the dispute.
+      assistants.add(_serbero);
+      updates.add(_bridgeDispute());
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
+
+      // Assert
+      expect(find.text(l10n.serberoLabel), findsOneWidget);
+    });
+
+    testWidgets('a node without Serbero shows every solver as a resolver', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        history: [_message(id: 'h1', content: 'Resolver here')],
+      );
+      await tester.pump();
+
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+      expect(find.text(l10n.serberoLabel), findsNothing);
+      expect(find.text(l10n.disputeSolverTookOver), findsNothing);
     });
   });
 }

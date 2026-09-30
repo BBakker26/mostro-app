@@ -107,6 +107,18 @@ pub enum DisputeStatus {
     Resolved,
 }
 
+/// Who a dispute solver is, for the label the dispute chat shows (#637).
+/// Rust decides it; Dart only localizes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolverRole {
+    /// The dispute assistant (Serbero) a known node announces in its info
+    /// event: it helps the parties and hands the case to a person.
+    Assistant,
+    /// Anyone else: a person who can settle or cancel. Every solver of a node
+    /// that announces no assistant is one.
+    Human,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DisputeResolution {
     /// Admin settled the dispute — sats released to the buyer.

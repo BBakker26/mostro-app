@@ -51,8 +51,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get orderDispute => 'Order dispute';
 
   @override
-  String get disputeAdminAssigned =>
-      'An administrator has been assigned to your dispute. They will contact you here shortly.';
+  String get disputeSolverAssigned =>
+      'A dispute resolver has taken your dispute. They will contact you here shortly.';
 
   @override
   String get disputeChatClosed =>
@@ -110,11 +110,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get disputeLostFundsToBuyer =>
-      'The administrator settled the dispute in the buyer\'s favour. The sats were released to the buyer.';
+      'The dispute resolver settled the dispute in the buyer\'s favour. The sats were released to the buyer.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'The administrator canceled the order and returned the sats to the seller. You did not receive the sats.';
+      'The dispute resolver canceled the order and returned the sats to the seller. You did not receive the sats.';
 
   @override
   String get walkthroughSlideOneTitle => 'Trade Bitcoin freely — no KYC';
@@ -142,7 +142,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to an admin to help resolve the issue.';
+      'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to a dispute resolver to help resolve the issue.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Take an offer';
@@ -975,7 +975,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Are you sure you want to open a dispute? This escalates the trade to an admin and cannot be undone.';
+      'Are you sure you want to open a dispute? This escalates the trade to a dispute resolver and cannot be undone.';
 
   @override
   String get disputeAlreadyOpen => 'A dispute for this trade is already open.';
@@ -1217,7 +1217,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Admin actions and dispute resolutions';
+      'Resolver actions and dispute resolutions';
 
   @override
   String get searchCurrenciesHint => 'Search currencies…';
@@ -1789,7 +1789,18 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Admin';
+  String get solverLabel => 'Resolver';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, an automated assistant, is helping with your dispute. It will ask you a few questions here and hand the case to a person if needed.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'A dispute resolver has taken over your dispute.';
 
   @override
   String get disputeScreenTitle => 'Dispute';

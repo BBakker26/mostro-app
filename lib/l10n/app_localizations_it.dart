@@ -51,8 +51,8 @@ class AppLocalizationsIt extends AppLocalizations {
   String get orderDispute => 'Disputa ordine';
 
   @override
-  String get disputeAdminAssigned =>
-      'Un amministratore è stato assegnato alla tua disputa. Ti contatterà qui a breve.';
+  String get disputeSolverAssigned =>
+      'Un mediatore ha preso in carico la tua disputa. Ti contatterà qui a breve.';
 
   @override
   String get disputeChatClosed =>
@@ -111,11 +111,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get disputeLostFundsToBuyer =>
-      'L\'amministratore ha risolto la controversia a favore dell\'acquirente. I sats sono stati rilasciati all\'acquirente.';
+      'Il mediatore ha risolto la controversia a favore dell\'acquirente. I sats sono stati rilasciati all\'acquirente.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'L\'amministratore ha annullato l\'ordine e restituito i sats al venditore. Non hai ricevuto i sats.';
+      'Il mediatore ha annullato l\'ordine e restituito i sats al venditore. Non hai ricevuto i sats.';
 
   @override
   String get walkthroughSlideOneTitle =>
@@ -144,7 +144,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Ogni operazione ha la propria chat privata, cifrata end-to-end. Solo i due utenti coinvolti possono leggerla. In caso di disputa, puoi fornire la chiave condivisa a un amministratore per aiutare a risolvere il problema.';
+      'Ogni operazione ha la propria chat privata, cifrata end-to-end. Solo i due utenti coinvolti possono leggerla. In caso di disputa, puoi fornire la chiave condivisa a un mediatore per aiutare a risolvere il problema.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Prendi un\'offerta';
@@ -985,7 +985,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Sei sicuro di voler aprire una contestazione? Questo inoltra lo scambio a un amministratore e non può essere annullato.';
+      'Sei sicuro di voler aprire una contestazione? Questo inoltra lo scambio a un mediatore e non può essere annullato.';
 
   @override
   String get disputeAlreadyOpen =>
@@ -1229,7 +1229,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Azioni degli amministratori e risoluzioni delle dispute';
+      'Azioni dei mediatori e risoluzioni delle dispute';
 
   @override
   String get searchCurrenciesHint => 'Cerca valute…';
@@ -1802,7 +1802,18 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Amministratore';
+  String get solverLabel => 'Mediatore';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, un assistente automatico, sta aiutando con la tua disputa. Ti farà alcune domande qui e passerà il caso a una persona se necessario.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'Un mediatore ha preso in carico la tua disputa.';
 
   @override
   String get disputeScreenTitle => 'Disputa';

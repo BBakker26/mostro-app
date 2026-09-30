@@ -190,11 +190,11 @@ abstract class AppLocalizations {
   /// **'Order dispute'**
   String get orderDispute;
 
-  /// Banner shown when an admin is assigned but no messages exist yet
+  /// Banner shown when a person took the dispute but no messages exist yet
   ///
   /// In en, this message translates to:
-  /// **'An administrator has been assigned to your dispute. They will contact you here shortly.'**
-  String get disputeAdminAssigned;
+  /// **'A dispute resolver has taken your dispute. They will contact you here shortly.'**
+  String get disputeSolverAssigned;
 
   /// Lock banner shown when the dispute is resolved
   ///
@@ -289,13 +289,13 @@ abstract class AppLocalizations {
   /// Resolution text shown to the seller when admin released funds to the buyer
   ///
   /// In en, this message translates to:
-  /// **'The administrator settled the dispute in the buyer\'s favour. The sats were released to the buyer.'**
+  /// **'The dispute resolver settled the dispute in the buyer\'s favour. The sats were released to the buyer.'**
   String get disputeLostFundsToBuyer;
 
   /// Resolution text shown to the buyer when admin returned funds to the seller
   ///
   /// In en, this message translates to:
-  /// **'The administrator canceled the order and returned the sats to the seller. You did not receive the sats.'**
+  /// **'The dispute resolver canceled the order and returned the sats to the seller. You did not receive the sats.'**
   String get disputeLostFundsToSeller;
 
   /// Title for walkthrough slide 1
@@ -343,7 +343,7 @@ abstract class AppLocalizations {
   /// Body text for walkthrough slide 4
   ///
   /// In en, this message translates to:
-  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to an admin to help resolve the issue.'**
+  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to a dispute resolver to help resolve the issue.'**
   String get walkthroughSlideFourBody;
 
   /// Title for walkthrough slide 5
@@ -1837,7 +1837,7 @@ abstract class AppLocalizations {
   /// Body of the open-dispute confirmation dialog
   ///
   /// In en, this message translates to:
-  /// **'Are you sure you want to open a dispute? This escalates the trade to an admin and cannot be undone.'**
+  /// **'Are you sure you want to open a dispute? This escalates the trade to a dispute resolver and cannot be undone.'**
   String get openDisputeConfirmation;
 
   /// Snackbar shown when a dispute is opened for a trade that already has one, or while a previous attempt is still in flight
@@ -2257,7 +2257,7 @@ abstract class AppLocalizations {
   /// Subtitle of the dispute updates notification toggle
   ///
   /// In en, this message translates to:
-  /// **'Admin actions and dispute resolutions'**
+  /// **'Resolver actions and dispute resolutions'**
   String get notifDisputeUpdatesSubtitle;
 
   /// Hint text of the currency search field
@@ -3190,11 +3190,29 @@ abstract class AppLocalizations {
   /// **'Reason: {reason}'**
   String disputeReasonLabel(String reason);
 
-  /// Sender label for administrator messages in a dispute
+  /// Sender label for a person solving the dispute (not the Serbero assistant)
   ///
   /// In en, this message translates to:
-  /// **'Admin'**
-  String get adminLabel;
+  /// **'Resolver'**
+  String get solverLabel;
+
+  /// Sender label for Serbero, the node's automated dispute assistant; a product name, not translated
+  ///
+  /// In en, this message translates to:
+  /// **'Serbero'**
+  String get serberoLabel;
+
+  /// Banner shown when Serbero, the automated assistant, took the dispute but no messages exist yet
+  ///
+  /// In en, this message translates to:
+  /// **'Serbero, an automated assistant, is helping with your dispute. It will ask you a few questions here and hand the case to a person if needed.'**
+  String get disputeSerberoAssigned;
+
+  /// System line in the dispute chat where a person took the dispute over from Serbero
+  ///
+  /// In en, this message translates to:
+  /// **'A dispute resolver has taken over your dispute.'**
+  String get disputeSolverTookOver;
 
   /// App bar title of the dispute chat screen
   ///

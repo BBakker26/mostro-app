@@ -57,9 +57,9 @@
   "@orderDispute": {
     "description": "Title label for a dispute list item"
   },
-  "disputeAdminAssigned": "An administrator has been assigned to your dispute. They will contact you here shortly.",
-  "@disputeAdminAssigned": {
-    "description": "Banner shown when an admin is assigned but no messages exist yet"
+  "disputeSolverAssigned": "A dispute resolver has taken your dispute. They will contact you here shortly.",
+  "@disputeSolverAssigned": {
+    "description": "Banner shown when a person took the dispute but no messages exist yet"
   },
   "disputeChatClosed": "This dispute has been resolved. The chat is closed.",
   "@disputeChatClosed": {
@@ -136,11 +136,11 @@
   "@disputeStatusClosed": {
     "description": "Status chip label for a resolved/closed dispute"
   },
-  "disputeLostFundsToBuyer": "The administrator settled the dispute in the buyer's favour. The sats were released to the buyer.",
+  "disputeLostFundsToBuyer": "The dispute resolver settled the dispute in the buyer's favour. The sats were released to the buyer.",
   "@disputeLostFundsToBuyer": {
     "description": "Resolution text shown to the seller when admin released funds to the buyer"
   },
-  "disputeLostFundsToSeller": "The administrator canceled the order and returned the sats to the seller. You did not receive the sats.",
+  "disputeLostFundsToSeller": "The dispute resolver canceled the order and returned the sats to the seller. You did not receive the sats.",
   "@disputeLostFundsToSeller": {
     "description": "Resolution text shown to the buyer when admin returned funds to the seller"
   },
@@ -172,7 +172,7 @@
   "@walkthroughSlideFourTitle": {
     "description": "Title for walkthrough slide 4"
   },
-  "walkthroughSlideFourBody": "Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to an admin to help resolve the issue.",
+  "walkthroughSlideFourBody": "Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to a dispute resolver to help resolve the issue.",
   "@walkthroughSlideFourBody": {
     "description": "Body text for walkthrough slide 4"
   },
@@ -1252,7 +1252,7 @@
   "@openDisputeTitle": {
     "description": "Title of the open-dispute confirmation dialog"
   },
-  "openDisputeConfirmation": "Are you sure you want to open a dispute? This escalates the trade to an admin and cannot be undone.",
+  "openDisputeConfirmation": "Are you sure you want to open a dispute? This escalates the trade to a dispute resolver and cannot be undone.",
   "@openDisputeConfirmation": {
     "description": "Body of the open-dispute confirmation dialog"
   },
@@ -1547,7 +1547,7 @@
   "@notifDisputeUpdatesTitle": {
     "description": "Title of the dispute updates notification toggle"
   },
-  "notifDisputeUpdatesSubtitle": "Admin actions and dispute resolutions",
+  "notifDisputeUpdatesSubtitle": "Resolver actions and dispute resolutions",
   "@notifDisputeUpdatesSubtitle": {
     "description": "Subtitle of the dispute updates notification toggle"
   },
@@ -2383,9 +2383,21 @@
       }
     }
   },
-  "adminLabel": "Admin",
-  "@adminLabel": {
-    "description": "Sender label for administrator messages in a dispute"
+  "solverLabel": "Resolver",
+  "@solverLabel": {
+    "description": "Sender label for a person solving the dispute (not the Serbero assistant)"
+  },
+  "serberoLabel": "Serbero",
+  "@serberoLabel": {
+    "description": "Sender label for Serbero, the node's automated dispute assistant; a product name, not translated"
+  },
+  "disputeSerberoAssigned": "Serbero, an automated assistant, is helping with your dispute. It will ask you a few questions here and hand the case to a person if needed.",
+  "@disputeSerberoAssigned": {
+    "description": "Banner shown when Serbero, the automated assistant, took the dispute but no messages exist yet"
+  },
+  "disputeSolverTookOver": "A dispute resolver has taken over your dispute.",
+  "@disputeSolverTookOver": {
+    "description": "System line in the dispute chat where a person took the dispute over from Serbero"
   },
   "disputeScreenTitle": "Dispute",
   "@disputeScreenTitle": {

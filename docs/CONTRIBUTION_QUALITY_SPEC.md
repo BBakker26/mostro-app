@@ -317,7 +317,7 @@ where it ran, and a step names who runs it instead of a trade actor.
 The same rules apply, including **Regression** and **(fails on `main`)**.
 Without this, a `ci` pull request could not describe its testing
 truthfully. The `manual-testing` check (§7.1) is unchanged: it counts
-steps and `Expected:` lines, not where they run.
+steps, `Expected:` lines and the `Regression` step, not where they run.
 
 ### 6.2 Screenshots
 
@@ -391,7 +391,7 @@ shared action is extracted later (§15).
 |---|---|---|
 | `issue` | A closing keyword links an issue labelled `status: accepted` | "No accepted issue is linked" |
 | `template` | Every heading of §5 is present, and none is empty or only its placeholder | "Section `<name>` is missing or empty" |
-| `manual-testing` | **Steps** has at least 2 numbered steps, each with an `Expected:` line; for type `fix`, one step is marked `(fails on main)` | "Manual testing: `<what is missing>`" |
+| `manual-testing` | **Steps** has at least 2 numbered steps, each with an `Expected:` line; one of them begins with `Regression`; for type `fix`, another is marked `(fails on main)` | "Manual testing: `<what is missing>`" |
 | `screenshots` | The diff touches `lib/` outside `lib/src/rust/` and `lib/l10n/app_localizations*.dart`, and **Screenshots** has an image or video, or says `No visible change` | "Screenshots: this changes the UI layer but shows no screenshot" |
 | `fix-has-test` | For type `fix` (template field or `fix` title prefix), the diff adds a Rust test (`#[test]`, `#[tokio::test]`) or a Dart test (`test(`, `testWidgets(` in a `test/**/*_test.dart` file) | "A fix needs a regression test" |
 | `automation-ids` | The diff does not remove or rename a constant in `lib/core/automation/automation_ids.dart`, or the pull request carries `automation:coordinated` | "Changes an automation identifier; coordinate it in the issue (docs/automation-contract.md)" |

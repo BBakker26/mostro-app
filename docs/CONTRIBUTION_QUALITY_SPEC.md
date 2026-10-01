@@ -483,8 +483,11 @@ The test is separated from its fix by commit, as in the daemon:
   `CONTRIBUTING.md` ("Keep the git history clean"), not a fixup: it is
   not squashed into the fix before review. It stays separate until
   merge, and the maintainer may squash when merging.
-- The test commit does not change `rust/src/api/`, `.arb` files or any
-  generated file: it has to run on the committed bindings of `main`.
+- The test commit changes nothing outside `#[cfg(test)]` modules,
+  `rust/tests/` and `test/` (§8.2 step 3), so no `.arb` file and no
+  generated file: it has to run on the committed bindings of `main`. A
+  test module inside `rust/src/api/` is fine: the generated bindings do
+  not list test functions, so adding one there needs no regeneration.
 - The commits do not need to be on the latest `main`: the job applies
   them to the current base itself.
 

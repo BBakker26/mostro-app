@@ -316,8 +316,9 @@ workflow run and its conclusion, the file it produces). **Setup** says
 where it ran, and a step names who runs it instead of a trade actor.
 The same rules apply, including **Regression** and **(fails on `main`)**.
 Without this, a `ci` pull request could not describe its testing
-truthfully. The `manual-testing` check (§7.1) is unchanged: it counts
-steps, `Expected:` lines and the `Regression` step, not where they run.
+truthfully. The `manual-testing` check (§7.1) needs no special case for
+it: it counts steps, `Expected:` lines and the `Regression` step, and
+never looks at where they run.
 
 ### 6.2 Screenshots
 

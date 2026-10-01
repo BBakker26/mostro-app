@@ -48,6 +48,15 @@ void main() {
       expect(_glyphCount(font.readAsBytesSync()), kNymAnimals.length + 1);
     });
 
+    test('every glyph stays where its SVG drew it', () {
+      // TrueType puts a glyph's origin at xMin - lsb. A left side bearing
+      // other than xMin draws the animal shifted in its advance, so off
+      // centre in the avatar (FreeType: Android, Linux and web).
+      final font = File('assets/fonts/nym_animals/NymAnimals.ttf');
+
+      expect(_misplacedGlyphs(font.readAsBytesSync()), isEmpty);
+    });
+
     test('pubspec bundles the font and its licence', () {
       final pubspec = File('pubspec.yaml').readAsStringSync();
 
@@ -112,13 +121,45 @@ Widget _wrap(Widget child) => MaterialApp(
 );
 
 /// `numGlyphs` of the font's `maxp` table.
-int _glyphCount(Uint8List bytes) {
+int _glyphCount(Uint8List bytes) =>
+    ByteData.sublistView(bytes).getUint16(_tableOffset(bytes, 'maxp') + 4);
+
+/// The outlined glyphs whose left side bearing (`hmtx`) is not their `xMin`
+/// (`glyf`), by glyph index, as `(lsb, xMin)`.
+Map<int, (int, int)> _misplacedGlyphs(Uint8List bytes) {
+  final data = ByteData.sublistView(bytes);
+  final longLoca = data.getInt16(_tableOffset(bytes, 'head') + 50) == 1;
+  final loca = _tableOffset(bytes, 'loca');
+  final glyf = _tableOffset(bytes, 'glyf');
+  final hmtx = _tableOffset(bytes, 'hmtx');
+  final hMetrics = data.getUint16(_tableOffset(bytes, 'hhea') + 34);
+  int glyphStart(int i) =>
+      longLoca
+          ? data.getUint32(loca + i * 4)
+          : data.getUint16(loca + i * 2) * 2;
+  int lsbOf(int i) =>
+      i < hMetrics
+          ? data.getInt16(hmtx + i * 4 + 2)
+          : data.getInt16(hmtx + hMetrics * 4 + (i - hMetrics) * 2);
+  final misplaced = <int, (int, int)>{};
+  for (var i = 0; i < _glyphCount(bytes); i++) {
+    if (glyphStart(i + 1) == glyphStart(i)) continue; // no outline
+    final lsb = lsbOf(i);
+    final xMin = data.getInt16(glyf + glyphStart(i) + 2);
+    if (lsb != xMin) misplaced[i] = (lsb, xMin);
+  }
+  return misplaced;
+}
+
+/// Offset of the table [tag] in the font [bytes].
+int _tableOffset(Uint8List bytes, String tag) {
   final data = ByteData.sublistView(bytes);
   final tables = data.getUint16(4);
   for (var i = 0; i < tables; i++) {
     final record = 12 + i * 16;
-    final tag = String.fromCharCodes(bytes.sublist(record, record + 4));
-    if (tag == 'maxp') return data.getUint16(data.getUint32(record + 8) + 4);
+    if (String.fromCharCodes(bytes.sublist(record, record + 4)) == tag) {
+      return data.getUint32(record + 8);
+    }
   }
-  throw StateError('no maxp table');
+  throw StateError('no $tag table');
 }

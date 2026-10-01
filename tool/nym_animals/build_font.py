@@ -100,8 +100,10 @@ def main() -> int:
     fb = FontBuilder(UPM, isTTF=True)
     fb.setupGlyphOrder(order)
     fb.setupCharacterMap({FIRST_CODEPOINT + i: n for i, n in enumerate(names)})
-    fb.setupGlyf(glyphs)
-    fb.setupHorizontalMetrics({n: (UPM, 0) for n in order})
+    fb.setupGlyf(glyphs)  # also computes each glyph's bounds
+    # TrueType puts a glyph's origin at xMin - lsb: any left side bearing other
+    # than xMin moves the drawing in its advance (FreeType draws it flush left).
+    fb.setupHorizontalMetrics({n: (UPM, glyphs[n].xMin) for n in order})
     fb.setupHorizontalHeader(ascent=UPM, descent=0)
     fb.setupNameTable({"familyName": FAMILY, "styleName": "Regular"})
     fb.setupOS2(sTypoAscender=UPM, sTypoDescender=0, sTypoLineGap=0,

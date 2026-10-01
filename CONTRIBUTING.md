@@ -86,6 +86,8 @@ Mostro's developers also run end-to-end suites with an internal tool (Mortsom). 
 
 A change that does not touch a trade (settings, account, a static screen) only needs the steps that reach the changed screen; it does not need a node and two wallets. The rules above still apply: it has a **Regression** step and, for a fix, a step marked **(fails on `main`)**.
 
+A change with no app flow (a CI workflow, a build or release script, tooling, or tests only) has no screen to reach. Its steps run what the change touches: the command, the script, or the workflow on the branch. Each `Expected:` line names what that run shows: its output, the workflow run and its conclusion, the file it produces. **Setup** says where it ran (OS, tool versions), and a step names who runs it instead of a trade actor. The same rules apply: a **Regression** step on a neighbouring command or job, and, for a fix, a step marked **(fails on `main`)**.
+
 Example, for a fix where privacy mode was lost on restart (#624):
 
 ```markdown
@@ -133,7 +135,8 @@ The regression test of a fix must **fail without the fix and pass with it**. It 
 - If the test needs a seam the code does not have yet (an injectable function, a `@visibleForTesting` entry point), add it in `refactor:` commits **before** the `test:` commit. Those commits must not change behaviour: with them and the `test:` commit on `main`, the test still fails.
 - The fix follows in one or more later commits.
 - The `test:` commit is a meaningful commit, not a fixup: do not squash it into the fix. It stays separate until merge; the maintainer may squash when merging.
-- Golden tests do not count as the red test: their reference images are generated only in CI. A visual fix adds a widget test that asserts the property (a colour, a visibility, a text) when one can be written, and relies on its screenshots otherwise.
+- Golden tests do not count as the red test: their reference images are generated only in CI. A visual fix adds a widget test that asserts the property (a colour, a visibility, a text) when one can be written.
+- When no Rust or Dart test can fail on `main` (a purely visual bug no widget test can observe, or one that only exists on iOS, Android or web), say why under **Automated tests**. A maintainer who agrees labels the pull request `quality:no-red-test`, which waives the `test:` commit and its check. The step marked **(fails on `main`)**, with its screenshots, is then the evidence that the bug exists.
 - Check it yourself before opening the pull request: with only the `refactor:` and `test:` commits applied on the current `main`, the new test fails; with the whole pull request, it passes.
 
 ## Reviewing Pull Requests

@@ -107,13 +107,17 @@ If you are an AI agent preparing a pull request, follow
   accepted issue, do not open the pull request; comment on the issue instead.
 - Fill in every section of `.github/pull_request_template.md`, including
   Manual testing: steps a person ran by hand in the app built from the
-  branch, against a Mostro node. Do not present steps nobody ran as results.
+  branch, against a Mostro node, or, for a change with no app flow (CI,
+  scripts, tooling, tests only), on the command or workflow it changes.
+  Do not present steps nobody ran as results.
   Mortsom is an internal tool of the Mostro developers; do not use or cite it.
 - Any visible change carries before and after screenshots; write
   `No visible change` only when that is true.
 - For a fix, the commits are, in order: `refactor:` commits only if the test
   needs a seam (no behaviour change), then a `test:` commit that adds a
-  regression test (Rust or Dart) that fails on `main`, then the fix.
+  regression test (Rust or Dart) that fails on `main`, then the fix. If no
+  test can fail on `main` (a purely visual or platform-only bug), say why
+  under Automated tests; a maintainer decides whether to waive it.
 - If you could not build or run the app, say so in the pull request instead
   of claiming results.
 
@@ -199,7 +203,8 @@ OS version). A change in platform code (`android/`, `ios/`, `web/`,
 
 <!-- Required. See CONTRIBUTING.md § Manual testing: numbered steps a
 reviewer can follow in the app to see this change work, each with its
-expected result. For a fix, one step must fail on `main`. -->
+expected result (with no app flow: on the command or workflow it changes).
+For a fix, one step must fail on `main`. -->
 
 ### Setup
 
@@ -219,7 +224,7 @@ change. A screen recording for a change in a flow. Write
 ## Automated tests
 
 <!-- The tests you added and what each proves. For a fix: the test that
-fails on `main` (CONTRIBUTING.md § Red test). -->
+fails on `main`, or why no test can (CONTRIBUTING.md § Red test). -->
 
 ## Checklist
 
@@ -302,6 +307,17 @@ A change that does not touch a trade (settings, account, a static
 screen) only needs the steps that reach the changed screen; it does not
 need a node and two wallets. The rules above still apply: it has a
 **Regression** step and, for a fix, a step marked **(fails on `main`)**.
+
+A change with no app flow (a CI workflow, a build or release script,
+tooling, or tests only) has no screen to reach. Its steps run what the
+change touches: the command, the script, or the workflow on the branch,
+and each `Expected:` line names what that run shows (its output, the
+workflow run and its conclusion, the file it produces). **Setup** says
+where it ran, and a step names who runs it instead of a trade actor.
+The same rules apply, including **Regression** and **(fails on `main`)**.
+Without this, a `ci` pull request could not describe its testing
+truthfully. The `manual-testing` check (§7.1) is unchanged: it counts
+steps and `Expected:` lines, not where they run.
 
 ### 6.2 Screenshots
 
@@ -411,6 +427,13 @@ A pull request skips `issue`, `template`, `manual-testing`,
 - every changed file is Markdown;
 - a maintainer applied the label `quality:exempt`.
 
+A maintainer's `quality:no-red-test` skips only `fix-has-test` and the
+red test (§8), for a fix no Rust or Dart test can show failing on `main`:
+a purely visual bug no widget test can observe, or one that only exists
+on iOS, Android or web. The author says why under **Automated tests**,
+and the step marked **(fails on `main`)**, with its screenshots, is the
+evidence instead. Every other check still applies.
+
 `signed`, `size`, `open-prs` and `automation-ids` still apply to
 everyone except bots.
 
@@ -468,7 +491,7 @@ The test is separated from its fix by commit, as in the daemon:
 ### 8.2 Algorithm
 
 On `pull_request` (read-only token, no secrets), for a pull request of
-type `fix`:
+type `fix` without `quality:no-red-test` (§7.3):
 
 1. Walk the pull request's commits from the first. Skip leading commits
    whose subject starts with `refactor:`; they are the **prefix**. The
@@ -616,6 +639,7 @@ If one is ever added, it only applies an informational label
 | `quality:needs-info` | Triage bot, verdict | At least one check fails; the comment says which |
 | `quality:would-close` | Stale job (shadow) | Would have been closed by §7.5 |
 | `quality:exempt` | Maintainer | Skip the content checks (§7.3) |
+| `quality:no-red-test` | Maintainer | A fix no Rust or Dart test can show failing on `main`; skip `fix-has-test` and §8 (§7.3) |
 | `automation:coordinated` | Maintainer | An automation-id change was agreed with the Mortsom owners |
 | `quality:bug-reproduced` | Verdict | The §8 test fails on `main` and passes on head |
 | `quality:bug-not-reproduced` | Verdict | The §8 test passes on `main` |
@@ -651,13 +675,15 @@ after screenshots are enough to close them with a clear, written reason.
 - **Golden tests cannot be red tests.** Reference images are generated
   only in CI (`docs/golden-tests.md`), so a golden test in a `test:`
   commit has no image to fail against on `main`. A visual fix proves
-  itself with before and after screenshots, and with a widget test that
-  asserts the property (a colour, a visibility, a text) when one can be
-  written.
+  itself with a widget test that asserts the property (a colour, a
+  visibility, a text) when one can be written, and otherwise with the
+  screenshots of its **(fails on `main`)** step under
+  `quality:no-red-test` (§7.3).
 - **Platform bugs.** A bug that only exists on iOS, Android or web
   cannot fail in a Linux CI job. The red test proves what the shared
   logic does; the Manual testing on that platform, with its screenshots,
-  is the evidence for the rest.
+  is the evidence for the rest, and for the whole of a bug no shared test
+  can reach (`quality:no-red-test`, §7.3).
 - **Seams can hide the fix.** The `refactor:` prefix of §8.1 is trusted
   not to change behaviour; the reviewer checks it.
 - **`fix-has-test` fails open on large diffs.** GitHub omits the patch of

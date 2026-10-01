@@ -38,7 +38,8 @@ OS version). A change in platform code (`android/`, `ios/`, `web/`,
 
 <!-- Required. See CONTRIBUTING.md § Manual testing: numbered steps a
 reviewer can follow in the app to see this change work, each with its
-expected result. For a fix, one step must fail on `main`. -->
+expected result (with no app flow: on the command or workflow it changes).
+For a fix, one step must fail on `main`. -->
 
 ### Setup
 
@@ -58,7 +59,7 @@ change. A screen recording for a change in a flow. Write
 ## Automated tests
 
 <!-- The tests you added and what each proves. For a fix: the test that
-fails on `main` (CONTRIBUTING.md § Red test). -->
+fails on `main`, or why no test can (CONTRIBUTING.md § Red test). -->
 
 ## Checklist
 

@@ -1815,12 +1815,6 @@ mod tests {
             db.save_trade(&persisted_trade(order_id, status))
                 .await
                 .unwrap();
-            db.set_setting(
-                &crate::db::settings_keys::dispute_admin(order_id),
-                stored_solver,
-            )
-            .await
-            .unwrap();
         }
         // `orphan`: opened by this side, never taken by a solver, then canceled
         // — only the origin marker exists for it.
@@ -1832,6 +1826,17 @@ mod tests {
             db.set_setting(&crate::db::settings_keys::dispute_mine(order_id), "1")
                 .await
                 .unwrap();
+        }
+        // The solvers last: the store is shared, and a parallel test's
+        // rehydration that saw a solver before its origin marker would restore
+        // `live` as opened by the peer, and this rehydration would skip it.
+        for order_id in [&live, &peer, &finished, &in_memory] {
+            db.set_setting(
+                &crate::db::settings_keys::dispute_admin(order_id),
+                stored_solver,
+            )
+            .await
+            .unwrap();
         }
 
         // The record that survived in memory — it must win over storage.
@@ -2128,15 +2133,17 @@ mod tests {
             db.save_trade(&persisted_trade(&order, OrderStatus::Dispute))
                 .await
                 .unwrap();
-            db.set_setting(&crate::db::settings_keys::dispute_admin(&order), solver)
-                .await
-                .unwrap();
+            // The time before the solver, which rehydration reads first: see
+            // `rehydration_restores_live_disputes_and_clears_finished_ones`.
             db.set_setting(
                 &crate::db::settings_keys::dispute_admin_at(&order),
                 &format!("200:{solver}"),
             )
             .await
             .unwrap();
+            db.set_setting(&crate::db::settings_keys::dispute_admin(&order), solver)
+                .await
+                .unwrap();
 
             let rehydrate = tokio::spawn(rehydrate_disputes_from_storage());
             let replay = tokio::spawn(apply_admin_took_dispute(
@@ -2211,16 +2218,17 @@ mod tests {
         db.save_trade(&persisted_trade(&order, OrderStatus::Dispute))
             .await
             .unwrap();
-        // The takeover's time landed, its pubkey write did not.
-        db.set_setting(&crate::db::settings_keys::dispute_admin(&order), serbero)
-            .await
-            .unwrap();
+        // The takeover's time landed, its pubkey write did not. The time is
+        // written first, as in the tests above: rehydration reads the solver.
         db.set_setting(
             &crate::db::settings_keys::dispute_admin_at(&order),
             &format!("200:{solver}"),
         )
         .await
         .unwrap();
+        db.set_setting(&crate::db::settings_keys::dispute_admin(&order), serbero)
+            .await
+            .unwrap();
 
         rehydrate_disputes_from_storage().await;
         apply_admin_took_dispute(order.clone(), solver.to_string(), Some(200))

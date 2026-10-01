@@ -708,9 +708,9 @@ after screenshots are enough to close them with a clear, written reason.
 
 ## 15. Open questions
 
-1. **Signed commits.** Phase 1 asks for them, as the daemon does, but
-   until the bot reports them (Phase 2) nobody checks. Should an unsigned
-   commit be a close reason before then?
+1. **Signed commits.** Phase 1 requires them, as the daemon does, and
+   maintainers check them by hand until the bot reports them (Phase 2).
+   Should an unsigned commit be a close reason before then?
 2. **A node for contributors.** Should the maintainers publish a
    testnet/signet Mostro node and relay for Manual testing, so
    contributors do not need to run a daemon?

@@ -327,8 +327,8 @@ created_at: i64
 
 ### NymIdentity
 ```text
-pseudonym: String         # Deterministic pseudonym (adjective-noun format)
-icon_index: u8            # Icon selector (0–36)
+pseudonym: String         # Deterministic pseudonym (adjective-animal format)
+icon_index: u8            # Fallback icon selector (0–36)
 color_hue: u16            # HSV hue (0–359) for avatar background
 ```
 
@@ -339,6 +339,14 @@ color_hue: u16            # HSV hue (0–359) for avatar background
 > (`Colors.white`) over the HSV-colored background circle. The v1 implementation
 > had a bug where the icon color matched the background, making it invisible.
 > v2 MUST always use white icon color regardless of `color_hue` (FR-011c).
+>
+> **The avatar draws the animal of the pseudonym**: its last word is one of
+> the 64 animals of `NOUNS` (`rust/src/crypto/nym.rs`), drawn as glyph
+> U+E000 + its index of the bundled NymAnimals font (Fluent Emoji High
+> Contrast, MIT; built by `tool/nym_animals/build_font.py`). `icon_index`
+> only draws a pseudonym that names no animal. Every noun must be an animal
+> with its own recognisable drawing; replacing one renames every pseudonym on
+> that index.
 
 ### LogEntry
 ```text

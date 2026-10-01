@@ -74,7 +74,7 @@ fn label_get_info_error(e: anyhow::Error) -> anyhow::Error {
 /// connectivity, and stores the client in memory.
 ///
 /// **Errors**: `InvalidNwcUri`, `WalletRejected`, `WalletUnsupported`,
-/// `WalletError`, `ConnectionFailed`, `Unsupported` (web).
+/// `WalletError`, `ConnectionFailed`.
 pub async fn connect_wallet(nwc_uri: String) -> Result<NwcWalletInfo> {
     // `NwcClient::new` labels its own failures: relabelling them all as
     // `InvalidNwcUri` told a user with a good URI to go and fix it.

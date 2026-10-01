@@ -2465,13 +2465,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get nwcWalletNotConnected => 'Not connected';
 
   @override
-  String get nwcUnavailableOnWeb => 'Not available on web';
-
-  @override
-  String get nwcUnsupportedOnWebMessage =>
-      'The web version cannot connect an NWC wallet yet. Use the Android or desktop app for that.';
-
-  @override
   String get nwcWalletUnreachableMessage =>
       'Could not reach your wallet. Check that it is online and try again.';
 
@@ -2486,6 +2479,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get nwcWalletErrorMessage =>
       'Your wallet answered with an error. Try again in a moment.';
+
+  @override
+  String get nwcRelayBlockedOnWebMessage =>
+      'This wallet\'s relay uses ws://, which a secure web page may not open. Use a wss:// relay, or the Android or desktop app.';
 
   @override
   String relaysConnectedOfTotal(int connected, int total) {

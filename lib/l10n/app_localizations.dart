@@ -4222,18 +4222,6 @@ abstract class AppLocalizations {
   /// **'Not connected'**
   String get nwcWalletNotConnected;
 
-  /// Settings value for the NWC wallet row on web, where the build cannot connect one
-  ///
-  /// In en, this message translates to:
-  /// **'Not available on web'**
-  String get nwcUnavailableOnWeb;
-
-  /// Snackbar shown when connecting an NWC wallet is attempted in the web build, which does not support it
-  ///
-  /// In en, this message translates to:
-  /// **'The web version cannot connect an NWC wallet yet. Use the Android or desktop app for that.'**
-  String get nwcUnsupportedOnWebMessage;
-
   /// Snackbar shown when neither the NWC relay nor the wallet answered
   ///
   /// In en, this message translates to:
@@ -4257,6 +4245,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your wallet answered with an error. Try again in a moment.'**
   String get nwcWalletErrorMessage;
+
+  /// Snackbar on web when every relay in the NWC URI is ws://, which an https page may not open
+  ///
+  /// In en, this message translates to:
+  /// **'This wallet\'s relay uses ws://, which a secure web page may not open. Use a wss:// relay, or the Android or desktop app.'**
+  String get nwcRelayBlockedOnWebMessage;
 
   /// Settings value: how many enabled relays are connected
   ///

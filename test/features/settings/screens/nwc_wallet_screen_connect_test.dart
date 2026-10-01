@@ -41,10 +41,6 @@ void main() {
   final cases = <(String, String Function(AppLocalizations))>[
     ('InvalidNwcUri: invalid URI', (l) => l.nwcConnectionFailedMessage),
     (
-      'Unsupported: NWC is not supported on web',
-      (l) => l.nwcUnsupportedOnWebMessage,
-    ),
-    (
       'WalletRejected: no wallet [UNAUTHORIZED]',
       (l) => l.nwcWalletRejectedMessage,
     ),

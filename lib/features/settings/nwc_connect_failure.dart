@@ -1,17 +1,22 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
-
-/// Whether this build can connect an NWC wallet at all. The web build's Rust
-/// core stubs the NWC client out (`rust/src/nwc/client.rs`), so every attempt
-/// there fails before the URI is even read.
-const bool nwcSupported = !kIsWeb;
+/// Whether a page at [page] can open none of the relays in [nwcUri]: an
+/// https page may not open a `ws://` socket (mixed content), except to the
+/// machine itself. Such a URI can never connect from the web app, however
+/// online the wallet is, so the screen says so instead of trying.
+bool relaysBlockedByPage(String nwcUri, Uri page) {
+  if (page.scheme != 'https') return false;
+  final relays = Uri.tryParse(nwcUri)?.queryParametersAll['relay'] ?? const [];
+  if (relays.isEmpty) return false;
+  return relays.every((relay) {
+    final url = Uri.tryParse(relay);
+    if (url == null || url.scheme.toLowerCase() != 'ws') return false;
+    return !const {'localhost', '127.0.0.1', '[::1]', '::1'}.contains(url.host);
+  });
+}
 
 /// Why `connectWallet` failed, as far as the user can act on it.
 enum NwcConnectFailure {
   /// The URI does not parse: the user has something to fix.
   invalidUri,
-
-  /// This build cannot do NWC: no URI will help.
-  unsupported,
 
   /// The wallet refused this connection (revoked, or not allowed): retrying
   /// will not help, a new connection URI from the wallet will.
@@ -39,7 +44,6 @@ final _leadingLabel = RegExp(r'^(?:AnyhowException\()?(\w+):');
 NwcConnectFailure classifyNwcConnectError(Object error) {
   return switch (_leadingLabel.firstMatch(error.toString())?.group(1)) {
     'InvalidNwcUri' => NwcConnectFailure.invalidUri,
-    'Unsupported' => NwcConnectFailure.unsupported,
     'WalletRejected' => NwcConnectFailure.rejected,
     'WalletUnsupported' => NwcConnectFailure.walletUnsupported,
     'WalletError' => NwcConnectFailure.walletError,

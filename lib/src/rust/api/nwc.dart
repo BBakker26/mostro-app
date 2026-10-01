@@ -18,7 +18,7 @@ import 'types.dart';
 /// connectivity, and stores the client in memory.
 ///
 /// **Errors**: `InvalidNwcUri`, `WalletRejected`, `WalletUnsupported`,
-/// `WalletError`, `ConnectionFailed`, `Unsupported` (web).
+/// `WalletError`, `ConnectionFailed`.
 Future<NwcWalletInfo> connectWallet({required String nwcUri}) =>
     RustLib.instance.api.crateApiNwcConnectWallet(nwcUri: nwcUri);
 

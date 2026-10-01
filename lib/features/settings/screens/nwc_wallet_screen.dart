@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -331,8 +332,18 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
 
   Future<void> _connect() async {
     if (_busy || !_isValid) return;
-    setState(() => _busy = true);
     final uri = _uriController.text.trim();
+    if (kIsWeb && relaysBlockedByPage(uri, Uri.base)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).nwcRelayBlockedOnWebMessage,
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _busy = true);
     try {
       final info = await nwc_api.connectWallet(nwcUri: uri);
       if (!mounted) return;
@@ -358,7 +369,6 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
       final l10n = AppLocalizations.of(context);
       final message = switch (classifyNwcConnectError(e)) {
         NwcConnectFailure.invalidUri => l10n.nwcConnectionFailedMessage,
-        NwcConnectFailure.unsupported => l10n.nwcUnsupportedOnWebMessage,
         NwcConnectFailure.rejected => l10n.nwcWalletRejectedMessage,
         NwcConnectFailure.walletUnsupported => l10n.nwcWalletUnsupportedMessage,
         NwcConnectFailure.walletError => l10n.nwcWalletErrorMessage,

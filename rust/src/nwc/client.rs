@@ -3,11 +3,10 @@
 // Uses `nostr-sdk` types for URI parsing, request/response construction,
 // NIP-04 encryption, and relay communication via the SDK's `Client`.
 //
-// Native-only: the relay transport depends on tokio + TCP which do not
-// compile to WASM.  All relay-dependent items are gated behind
-// `cfg(not(target_arch = "wasm32"))`.
+// One client for every target: on web the SDK reaches the wallet relay over
+// browser WebSockets, as the rest of the app reaches its relays, and every
+// timer goes through `crate::rt::time`.
 
-#[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::time::Duration;
 
@@ -101,6 +100,21 @@ mod native {
         } else {
             anyhow!("WalletError: {err}")
         }
+    }
+
+    /// How far before the request a response may be dated and still be read.
+    const RESPONSE_CLOCK_SLACK_SECS: u64 = 60;
+
+    /// Whether [resp] is the wallet's answer to the request [request_id]. A
+    /// relay can deliver anything, filter or not, so both are checked here:
+    /// the wallet's key (an event signed by anyone else still decrypts, ECDH
+    /// being symmetric, so a relay could slip in its own invoice) and the
+    /// request's id in the `e` tag (another tab or request on the same secret
+    /// must not take this one's answer).
+    pub(super) fn answers_request(resp: &Event, wallet: &PublicKey, request_id: EventId) -> bool {
+        resp.kind == Kind::WalletConnectResponse
+            && resp.pubkey == *wallet
+            && resp.tags.event_ids().any(|id| id == request_id)
     }
 
     /// Timeout for NIP-47 request → response round-trips.
@@ -243,10 +257,14 @@ mod native {
             //    BEFORE sending the request to avoid a race condition.
             let mut notifications = self.client.notifications();
 
+            // Kind and author only: some NWC relays (Primal) ignore `#e`
+            // filters and would send nothing; the loop below matches the
+            // request instead. The minute of slack covers a client clock
+            // ahead of the wallet's; the `e` tag check makes it harmless.
             let filter = Filter::new()
                 .kind(Kind::WalletConnectResponse)
                 .author(self.uri.public_key)
-                .since(event.created_at);
+                .since(event.created_at - RESPONSE_CLOCK_SLACK_SECS);
 
             let sub_output = self.client
                 .subscribe(filter)
@@ -273,7 +291,7 @@ mod native {
                         Ok(Some(ClientNotification::Event {
                             event: resp_event, ..
                         })) => {
-                            if resp_event.kind == Kind::WalletConnectResponse {
+                            if answers_request(&resp_event, &self.uri.public_key, event.id) {
                                 match parse_nip47_response(&self.uri, &resp_event, self.cipher) {
                                     Ok(resp) => return Ok(resp),
                                     Err(_) => continue,
@@ -485,50 +503,7 @@ mod native {
 
 // ── Public re-exports ────────────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use native::NwcClient;
-
-// ── WASM stub ────────────────────────────────────────────────────────────────
-
-/// On WASM targets, NWC is not supported (nostr-sdk relay transport requires
-/// tokio + TCP).  This stub allows the crate to compile for web while the API
-/// layer returns appropriate errors.
-#[cfg(target_arch = "wasm32")]
-pub struct NwcClient {
-    pub info: crate::api::types::NwcWalletInfo,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl NwcClient {
-    pub async fn new(_uri_str: &str) -> anyhow::Result<Self> {
-        // `Unsupported:` is what the connect screen keys on to say so, rather
-        // than blame the URI it never read.
-        anyhow::bail!("Unsupported: NWC is not supported on web")
-    }
-
-    pub async fn get_info(&mut self) -> anyhow::Result<crate::api::types::NwcWalletInfo> {
-        anyhow::bail!("NWC is not supported on web")
-    }
-
-    pub async fn get_balance(&self) -> anyhow::Result<Option<u64>> {
-        anyhow::bail!("NWC is not supported on web")
-    }
-
-    pub async fn pay_invoice(&self, _bolt11: &str) -> anyhow::Result<crate::api::types::PaymentResult> {
-        anyhow::bail!("NWC is not supported on web")
-    }
-
-    pub async fn make_invoice(
-        &self,
-        _amount_sats: u64,
-        _description: Option<String>,
-        _expiry_secs: Option<u64>,
-    ) -> anyhow::Result<String> {
-        anyhow::bail!("NWC is not supported on web")
-    }
-
-    pub async fn disconnect(&self) {}
-}
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -557,7 +532,6 @@ mod tests {
     /// NIP-47 encryption negotiation (CodeRabbit, PR #376): a wallet that
     /// lists `nip44_v2` gets NIP-44; one that lists only `nip04`, or nothing
     /// at all (legacy wallets predate the tag), gets NIP-04.
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn negotiation_prefers_nip44_and_falls_back_to_nip04() {
         use nostr_sdk::prelude::*;
@@ -595,7 +569,6 @@ mod tests {
 
     /// The label `get_info` puts on a wallet's error answer is what the app
     /// reads to tell the user what to do about it.
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_info_labels_a_wallet_error_by_what_helps() {
         use super::native::{get_info_error, Nip47Error};
@@ -620,9 +593,47 @@ mod tests {
         }
     }
 
+    /// Only the wallet's own answer to this request counts: not one signed by
+    /// another key, and not the wallet's answer to another request.
+    #[test]
+    fn only_the_wallets_answer_to_this_request_counts() {
+        use super::native::answers_request;
+        use nostr_sdk::prelude::*;
+
+        let wallet = Keys::generate();
+        let relay = Keys::generate();
+        let request = EventId::from_byte_array([0u8; 32]);
+        let other_request = EventId::from_byte_array([1u8; 32]);
+        let answer = |keys: &Keys, to: EventId| {
+            EventBuilder::new(Kind::WalletConnectResponse, "")
+                .tag(Tag::event(to))
+                .finalize(keys)
+                .unwrap()
+        };
+
+        assert!(answers_request(
+            &answer(&wallet, request),
+            &wallet.public_key(),
+            request
+        ));
+        assert!(!answers_request(
+            &answer(&relay, request),
+            &wallet.public_key(),
+            request
+        ));
+        assert!(!answers_request(
+            &answer(&wallet, other_request),
+            &wallet.public_key(),
+            request
+        ));
+        let untagged = EventBuilder::new(Kind::WalletConnectResponse, "")
+            .finalize(&wallet)
+            .unwrap();
+        assert!(!answers_request(&untagged, &wallet.public_key(), request));
+    }
+
     /// The `encryption` tag is read off the wallet's kind 13194 info event;
     /// an info event without it is the legacy case and yields `None`.
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn advertised_ciphers_are_read_from_the_info_event() {
         use nostr_sdk::prelude::*;

@@ -95,7 +95,9 @@ normative list):
     does not advance while the device is suspended), and
     `resubscribe_active_chats`, on every start and resume, closes a window
     that ended while the app was away (a relay that reconnected first may be
-    sent the expired REQ again; the CLOSE follows).
+    sent the expired REQ again; the CLOSE follows). A peer listener asks the
+    row right after it claims the chat, so a window that runs out while the
+    listener starts never leaves it running without a timer.
   - *UI.* `ChatRowState` decides from the persisted row (`TradeRow.rowStatus`
     and `completedAt`), as Rust does: the book's live status may run ahead
     of the row, and the composer must not drop out while it catches up.

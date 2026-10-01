@@ -1525,6 +1525,16 @@ pub(crate) async fn subscribe_incoming_chat(
         log::debug!("[messages] chat task already active order={order_id}");
         return;
     };
+    // A peer chat starts only while its row keeps it open (#642). Its grace
+    // window can run out between the decision to start this listener and
+    // this claim (key derivation, the spawn), and the timer that ends the
+    // window finds no task to stop then. Asked after the claim, so a close
+    // that comes later still finds the task.
+    if channel == ChatChannel::Peer && persisted_chat_closed(&order_id).await {
+        log::info!("[messages] chat over before its listener started order={order_id}");
+        release_and_close_chat(channel, &order_id, generation).await;
+        return;
+    }
 
     run_chat_subscription(
         channel,
@@ -1928,11 +1938,6 @@ pub(crate) async fn resubscribe_active_chats() {
     );
     for trade in relevant {
         let order_id = trade.order.id.clone();
-        // A completed trade within its window (#642): the chat closes at its
-        // end, which no status change will announce in this process.
-        if let Some(until) = chat_grace_ends_at(&trade) {
-            crate::api::orders::schedule_chat_grace_end(&order_id, until);
-        }
         crate::api::logging::blog_debug(
             "messages",
             format!(
@@ -1943,6 +1948,11 @@ pub(crate) async fn resubscribe_active_chats() {
             ),
         );
         spawn_peer_chat(&trade).await;
+        // A completed trade within its window (#642): the chat closes at its
+        // end, which no status change will announce in this process.
+        if let Some(until) = chat_grace_ends_at(&trade) {
+            crate::api::orders::schedule_chat_grace_end(&order_id, until);
+        }
     }
 }
 
@@ -2066,13 +2076,13 @@ pub(crate) fn chat_closed_at(trade: &crate::api::types::TradeInfo, now: i64) -> 
 /// the Mostro node) would be resurrected into a session with garbage keys.
 ///
 /// A cached session answers only while the row has not closed the chat
-/// ([`cached_chat_closed`]): nothing removes a session when its trade ends or
+/// ([`persisted_chat_closed`]): nothing removes a session when its trade ends or
 /// a completed trade's grace window runs out (#642), so a send after either —
 /// a late UI timer, a clock jump, a direct bridge call — would still publish.
 async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Session> {
     let mgr = crate::mostro::session::session_manager();
     if let Some(s) = mgr.get_session(trade_id).await {
-        if cached_chat_closed(trade_id).await {
+        if persisted_chat_closed(trade_id).await {
             log::info!("[messages] trade={trade_id}: its chat is over — local-only");
             return None;
         }
@@ -2102,11 +2112,12 @@ async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Se
     rebuild_session(&trade, &trade_keys).await
 }
 
-/// [`chat_closed_at`] on `trade_id`'s persisted row, now. No store, no row
-/// (a take's first reply caches its session before the row exists) or a read
-/// error close nothing, as the dispute chat's `persisted_order_is_finished`
-/// reads them.
-async fn cached_chat_closed(trade_id: &str) -> bool {
+/// [`chat_closed_at`] on `trade_id`'s persisted row, now: asked by a cached
+/// session before it sends, and by a peer listener right after its claim.
+/// No store, no row (a take's first reply caches its session and starts its
+/// chat before the row exists) or a read error close nothing, as the dispute
+/// chat's `persisted_order_is_finished` reads them.
+async fn persisted_chat_closed(trade_id: &str) -> bool {
     let Some(db) = crate::db::app_db::db() else {
         return false;
     };
@@ -3136,6 +3147,23 @@ mod tests {
             live.counterparty_pubkey = String::new();
             assert!(!chat_closed_at(&live, done_at), "{status:?}");
         }
+    }
+
+    /// #642 review: a grace window can run out between the decision to start
+    /// a peer listener and its claim. The listener asks the row right after
+    /// the claim, so the window's timer either finds the task or the task
+    /// finds the chat closed — never a listener left with no timer.
+    #[test]
+    fn a_peer_listener_asks_its_row_right_after_its_claim() {
+        let source = include_str!("messages.rs");
+        let start = source
+            .find("pub(crate) async fn subscribe_incoming_chat(")
+            .expect("the listener exists");
+        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+        let claim = body.find("let Some(generation) = claimed").expect("the claim");
+        let gate = body.find("persisted_chat_closed(&order_id)").expect("the row is asked");
+        let run = body.find("run_chat_subscription(").expect("the subscription");
+        assert!(claim < gate && gate < run, "claim, then the row, then the REQ");
     }
 
     /// #642 review: a cached session does not outlive the chat. Past the

@@ -154,6 +154,7 @@ class UserInformationTab extends StatelessWidget {
             Row(
               children: [
                 NymAvatar(
+                  pseudonym: peerHandle,
                   iconIndex: peerIconIndex,
                   colorHue: peerColorHue,
                   size: 56,

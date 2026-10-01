@@ -6,7 +6,7 @@ ChatRoomState _room({int at = 100, String? last = 'hola', int unread = 0}) =>
     ChatRoomState(
       orderId: 'o1',
       peerPubkey: 'peer',
-      peerHandle: 'used-jaguar',
+      peerHandle: 'used-elephant',
       peerIconIndex: 0,
       peerColorHue: 0,
       isSelling: true,

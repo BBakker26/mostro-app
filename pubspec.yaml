@@ -116,6 +116,7 @@ flutter:
     - assets/images/
     - assets/fonts/outfit/OFL.txt
     - assets/fonts/manrope/OFL.txt
+    - assets/fonts/nym_animals/LICENSE.txt
 
   # Brand typography (drawer and order-book handoffs), bundled so the app never
   # fetches fonts at runtime. Outfit is the UI face; Manrope sets the figures
@@ -140,6 +141,12 @@ flutter:
           weight: 600
         - asset: assets/fonts/manrope/Manrope-Bold.ttf
           weight: 700
+    # The animal of each pseudonym, drawn on the chat avatars: one glyph per
+    # entry of NOUNS in rust/src/crypto/nym.rs, built from Fluent Emoji High
+    # Contrast (MIT) by tool/nym_animals/build_font.py.
+    - family: NymAnimals
+      fonts:
+        - asset: assets/fonts/nym_animals/NymAnimals.ttf
 
 # Launcher icons. Mirrors the v1 app's configuration (MostroP2P/mobile) so both
 # apps ship the same artwork. Regenerate with:

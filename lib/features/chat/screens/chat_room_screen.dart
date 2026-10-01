@@ -724,6 +724,7 @@ class _AppBarTitle extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             NymAvatar(
+              pseudonym: room.peerHandle,
               iconIndex: room.peerIconIndex,
               colorHue: room.peerColorHue,
               size: 28,

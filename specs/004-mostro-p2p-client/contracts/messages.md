@@ -124,7 +124,12 @@ as the startup resubscription. Only when the row cannot serve it either
 (no row, peer not yet revealed, terminal row past its grace window,
 poisoned row) does
 the message degrade to local-only storage with a warning; a relay-pool
-failure also degrades to local-only.
+failure also degrades to local-only. A **cached** session is checked
+against the row too (#642): once the row says the chat is over — the
+trade ended, and not with a `success` still inside its grace window
+(`chat_closed_at`) — the send gets no session, cached or not, whatever a
+late UI timer still shows. No row yet, or a read error, keeps the cached
+session.
 
 **Errors**: `NoActiveTrade`, `TradeNotFound`, `MessageEmpty`.
 
@@ -201,8 +206,8 @@ Encrypt and upload an image or PDF, then send it in the P2P chat (#589).
 
 **Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
 `PeerUnknown`, `UploadFailed`, `SendFailed`, `SessionNotFound` (only when
-the session is absent AND the trade row cannot rebuild it — see
-`send_message`; #381).
+the session is absent AND the trade row cannot rebuild it, or the row says
+the chat is over — see `send_message`; #381, #642).
 
 ---
 

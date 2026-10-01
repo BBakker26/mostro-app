@@ -2042,6 +2042,17 @@ pub(crate) fn chat_still_relevant_at(trade: &crate::api::types::TradeInfo, now: 
     peer_known && (live || chat_grace_ends_at(trade).is_some_and(|end| now < end))
 }
 
+/// Whether `trade`'s peer chat is over at `now`: the trade ended, and not
+/// with a `success` whose grace window (#642) still runs — the line
+/// `ChatRowState` draws for the composer, on the same row. Positive evidence
+/// only: unlike [`chat_still_relevant_at`] it leaves the peer checks out, as
+/// it judges a cached session that already holds the peer, and the row's
+/// counterparty write is best-effort.
+pub(crate) fn chat_closed_at(trade: &crate::api::types::TradeInfo, now: i64) -> bool {
+    crate::mostro::status::is_hard_terminal(&trade.order.status)
+        && !chat_grace_ends_at(trade).is_some_and(|end| now < end)
+}
+
 /// Session lookup with a durable fallback (#381): a missing session is
 /// rebuilt from the persisted trade row before any chat function degrades
 /// (local-only send, `SessionNotFound`). Sessions are memory-only, so after
@@ -2053,11 +2064,18 @@ pub(crate) fn chat_still_relevant_at(trade: &crate::api::types::TradeInfo, now: 
 /// Gated by [`chat_still_relevant`], the same invariant guard the startup
 /// resubscription uses: without it, a poisoned pre-#334 row (counterparty =
 /// the Mostro node) would be resurrected into a session with garbage keys.
-/// On web the trades store is a stub (#233), the row lookup returns `None`
-/// and behavior is unchanged — the session remains replay-only there.
+///
+/// A cached session answers only while the row has not closed the chat
+/// ([`cached_chat_closed`]): nothing removes a session when its trade ends or
+/// a completed trade's grace window runs out (#642), so a send after either —
+/// a late UI timer, a clock jump, a direct bridge call — would still publish.
 async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Session> {
     let mgr = crate::mostro::session::session_manager();
     if let Some(s) = mgr.get_session(trade_id).await {
+        if cached_chat_closed(trade_id).await {
+            log::info!("[messages] trade={trade_id}: its chat is over — local-only");
+            return None;
+        }
         return Some(s);
     }
     let db = crate::db::app_db::db()?;
@@ -2082,6 +2100,24 @@ async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Se
         }
     };
     rebuild_session(&trade, &trade_keys).await
+}
+
+/// [`chat_closed_at`] on `trade_id`'s persisted row, now. No store, no row
+/// (a take's first reply caches its session before the row exists) or a read
+/// error close nothing, as the dispute chat's `persisted_order_is_finished`
+/// reads them.
+async fn cached_chat_closed(trade_id: &str) -> bool {
+    let Some(db) = crate::db::app_db::db() else {
+        return false;
+    };
+    match db.get_trade_by_order_id(trade_id).await {
+        Ok(Some(trade)) => chat_closed_at(&trade, unix_now()),
+        Ok(None) => false,
+        Err(e) => {
+            log::warn!("[messages] chat gate trade={trade_id}: row lookup failed: {e}");
+            false
+        }
+    }
 }
 
 /// The derivation half of [`session_or_rebuild`], split so tests can inject
@@ -3057,6 +3093,105 @@ mod tests {
         let mut no_peer = done;
         no_peer.counterparty_pubkey = String::new();
         assert!(!chat_still_relevant_at(&no_peer, done_at));
+    }
+
+    /// #642 review: a chat is over once its trade ended — a `success` only
+    /// once its grace window ran out — whatever the row says of the peer.
+    #[test]
+    fn a_chat_is_over_once_its_trade_ended_outside_the_window() {
+        use crate::api::types::*;
+        let done_at = 1_700_000_000;
+        let mut done = live_trade("order-closed", "peer", 1);
+        done.order.status = OrderStatus::Success;
+        done.completed_at = Some(done_at);
+        assert!(!chat_closed_at(&done, done_at + PEER_CHAT_GRACE_SECS - 1));
+        assert!(chat_closed_at(&done, done_at + PEER_CHAT_GRACE_SECS));
+
+        let mut unknown = done.clone();
+        unknown.completed_at = None;
+        assert!(chat_closed_at(&unknown, done_at), "completed at an unknown time");
+
+        for status in [
+            OrderStatus::Canceled,
+            OrderStatus::CooperativelyCanceled,
+            OrderStatus::Expired,
+            OrderStatus::CanceledByAdmin,
+            OrderStatus::SettledByAdmin,
+            OrderStatus::CompletedByAdmin,
+        ] {
+            let mut ended = done.clone();
+            ended.order.status = status.clone();
+            assert!(chat_closed_at(&ended, done_at), "{status:?}");
+        }
+        for status in [
+            OrderStatus::Active,
+            OrderStatus::FiatSent,
+            OrderStatus::SettledHoldInvoice,
+            OrderStatus::Dispute,
+            OrderStatus::WaitingTakerBond,
+            OrderStatus::WaitingMakerBond,
+        ] {
+            let mut live = done.clone();
+            live.order.status = status.clone();
+            live.counterparty_pubkey = String::new();
+            assert!(!chat_closed_at(&live, done_at), "{status:?}");
+        }
+    }
+
+    /// #642 review: a cached session does not outlive the chat. Past the
+    /// window, after any other ending, or completed at an unknown time, the
+    /// send paths get no session; inside the window, on a live trade, or
+    /// before the row exists, the cached one still serves.
+    #[tokio::test]
+    async fn a_cached_session_does_not_outlive_the_chat() {
+        use crate::api::types::OrderStatus;
+        let path = std::env::temp_dir().join(format!("mostro_chat_gate_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let now = unix_now();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let cached = |status: OrderStatus, completed_at: Option<i64>, saved: bool| {
+            let mut row = live_trade(&format!("gate-{}", uuid::Uuid::new_v4()), &peer, 3);
+            row.order.status = status;
+            row.completed_at = completed_at;
+            async move {
+                crate::mostro::session::session_manager()
+                    .create_session_with_peer(
+                        row.order.id.clone(),
+                        row.role.clone(),
+                        row.trade_key_index,
+                        row.order.clone(),
+                        row.counterparty_pubkey.clone(),
+                        [7; 32],
+                    )
+                    .await
+                    .expect("session cached");
+                if saved {
+                    db.save_trade(&row).await.expect("row saved");
+                }
+                row.order.id
+            }
+        };
+
+        let past = Some(now - PEER_CHAT_GRACE_SECS - 10);
+        for (status, at) in [
+            (OrderStatus::Success, past),
+            (OrderStatus::Success, None),
+            (OrderStatus::Canceled, None),
+            (OrderStatus::Expired, None),
+            (OrderStatus::SettledByAdmin, None),
+        ] {
+            let id = cached(status.clone(), at, true).await;
+            assert!(session_or_rebuild(&id).await.is_none(), "{status:?} {at:?}");
+        }
+        for (status, at, saved) in [
+            (OrderStatus::Success, Some(now - 60), true),
+            (OrderStatus::FiatSent, None, true),
+            (OrderStatus::Active, None, false),
+        ] {
+            let id = cached(status.clone(), at, saved).await;
+            assert!(session_or_rebuild(&id).await.is_some(), "{status:?} saved={saved}");
+        }
     }
 
     /// A live trade row shaped like the ones `take_order` persists after the

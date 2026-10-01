@@ -253,6 +253,16 @@ bridged by flutter_rust_bridge.
   means "taken, real state unknown", and a trade's status comes from daemon messages only
   (`wire_status_applies` guards both ingest paths). Treating it as `Active` offers actions the
   daemon rejects with `CantDo` (#203).
+- **A `success` keeps its peer chat for one hour, dated by the completion itself (#642).**
+  `completed_at` is written for `success` alone, before that status reaches the trade row, from
+  the `created_at` of what carried it — the buyer's `purchase-completed`, the
+  seller's Kind 38383 `success` revision (the seller never gets `purchase-completed`) — capped
+  at now, first write wins. Never date it from a now-dated emit or the local clock: a replayed
+  or restored history would reopen old chats. A `success` row without it is closed. A dispute
+  gets no window: the book's plain terminal never replaces an admin verdict
+  (`wire_status_applies`), and a verdict refines a replayed `success` in either order
+  (`status_write_blocked`). Dart decides the room on the persisted row (`TradeRow.rowStatus` +
+  `completedAt`), like `chat_still_relevant_at`, not on the live book status.
 - **Bond statuses never reach the wire book.** `WaitingTakerBond` publishes as `pending` (the
   order stays takeable by others until a bond locks) and `WaitingMakerBond` publishes nothing
   (the order is invisible until the maker's bond locks). Both exist only on the local trade row,

@@ -889,6 +889,22 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn mark_trade_completed(&self, order_id: &str, completed_at: i64) -> Result<()> {
+        // First write wins: a row that already has a time keeps it. The
+        // denormalised column follows the document.
+        let sql = "UPDATE trades SET data = json_set(\
+             data, '$.completed_at', json(?)), completed_at = ? \
+             WHERE json_extract(data, '$.order.id') = ? \
+             AND json_extract(data, '$.completed_at') IS NULL";
+        sqlx::query(sql)
+            .bind(completed_at.to_string())
+            .bind(completed_at)
+            .bind(order_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn set_cooperative_cancel_state(
         &self,
         order_id: &str,
@@ -1352,16 +1368,10 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// The durable rated marker (issue #339) round-trips as a JSON number, is
-    /// scoped to a single order id, and is absent until written.
-    #[tokio::test]
-    async fn mark_trade_rated_round_trips_by_order_id() {
+    /// A buyer's row on `order_id`, for the per-order marker tests.
+    fn trade_row(row_id: &str, order_id: &str) -> crate::api::types::TradeInfo {
         use crate::api::types::*;
-
-        let path = temp_db_path();
-        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
-
-        let trade = |row_id: &str, order_id: &str| TradeInfo {
+        TradeInfo {
             id: row_id.into(),
             order: OrderInfo {
                 id: order_id.into(),
@@ -1404,9 +1414,18 @@ mod tests {
             cashu_escrow_token: None,
             cashu_locked_at: None,
             cashu_rejected_escrow_tokens: Vec::new(),
-        };
-        storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
-        storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
+        }
+    }
+
+    /// The durable rated marker (issue #339) round-trips as a JSON number, is
+    /// scoped to a single order id, and is absent until written.
+    #[tokio::test]
+    async fn mark_trade_rated_round_trips_by_order_id() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        storage.save_trade(&trade_row("row-a", "order-a")).await.unwrap();
+        storage.save_trade(&trade_row("row-b", "order-b")).await.unwrap();
 
         // Absent until written.
         let a = storage
@@ -1433,6 +1452,47 @@ mod tests {
             .unwrap()
             .expect("order-b survives");
         assert_eq!(b.rated_at, None);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The completion time (issue #642) is a JSON number, scoped to one order,
+    /// and never moved once written: a replayed `success` keeps the first.
+    #[tokio::test]
+    async fn mark_trade_completed_keeps_the_first_time() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        storage
+            .save_trade(&trade_row("row-a", "order-a"))
+            .await
+            .unwrap();
+        storage
+            .save_trade(&trade_row("row-b", "order-b"))
+            .await
+            .unwrap();
+
+        storage
+            .mark_trade_completed("order-a", 1_700_000_000)
+            .await
+            .unwrap();
+        storage
+            .mark_trade_completed("order-a", 1_700_009_999)
+            .await
+            .unwrap();
+
+        let a = storage
+            .get_trade_by_order_id("order-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.completed_at, Some(1_700_000_000));
+        let b = storage
+            .get_trade_by_order_id("order-b")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(b.completed_at, None);
 
         drop(storage);
         let _ = std::fs::remove_file(&path);

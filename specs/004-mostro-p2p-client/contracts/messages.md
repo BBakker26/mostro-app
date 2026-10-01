@@ -62,6 +62,45 @@ normative list):
   subscription ids unsubscribed on every exit, no idle timeout, and
   automatic resubscription of persisted active trades when the relay pool
   comes online.
+- Grace window after completion (#642): a trade that completes with
+  `success` keeps its **peer** chat open for `PEER_CHAT_GRACE_SECS` (one
+  hour) — the parties thank each other and announce their ratings.
+  - *Dated by the completion itself.* The window runs from the row's
+    `completed_at` (`Storage::mark_trade_completed`: first write wins,
+    never later than now), recorded where the trade moves to `success` and
+    **before** that status reaches the trade row (the in-memory book can
+    show the public `success` first; the UI decides on the row), from the
+    `created_at` of what carried it: the buyer's `purchase-completed` (or a
+    row rebuilt from such a message), or — for the seller, who learns of it
+    only from the public book — the Kind 38383 `success` revision (d-tag
+    task, book feed, payout check, sweep; a taker's `settled-hold-invoice`
+    row seen `success` on the book feed goes through the payout path). Only
+    a `success` over a live, undisputed row counts (`completes_trade`); a
+    time that could not be fetched is never made up. So a replayed or
+    restored history never reopens an old trade's chat, and a `success` row
+    without `completed_at` (completed before #642, or at an unknown time)
+    is closed.
+  - *No window* for canceled, expired or admin-resolved trades, nor for a
+    dispute the book shows as `success`. The book's plain terminal never
+    replaces an admin verdict (`wire_status_applies`), and an admin verdict
+    refines a plain terminal whatever order a replay brings them in
+    (`status_write_blocked`): mostrod's `purchase-completed` follows its
+    `admin-settled`, and a newest-first replay delivers it first.
+  - *Lifecycle.* While the window runs, `chat_still_relevant` holds
+    (restart resubscription, session rebuild, reveal replays).
+    `release_finished_trade_subscriptions` keeps the peer chat — starting
+    it if this process does not run it — and releases the dispute chat and
+    every other subscription at once; `schedule_chat_grace_end` closes it
+    at the end, looking at the wall clock at least once a minute (a sleep
+    does not advance while the device is suspended), and
+    `resubscribe_active_chats`, on every start and resume, closes a window
+    that ended while the app was away (a relay that reconnected first may be
+    sent the expired REQ again; the CLOSE follows). A peer listener asks the
+    row right after it claims the chat, so a window that runs out while the
+    listener starts never leaves it running without a timer.
+  - *UI.* `ChatRowState` decides from the persisted row (`TradeRow.rowStatus`
+    and `completedAt`), as Rust does: the book's live status may run ahead
+    of the row, and the composer must not drop out while it catches up.
 - Isolation: chat runs on its own task and bounded channels; it can never
   block the order state machine, the daemon transport, or a dispute.
 - Push wake: once a peer message or attachment pointer reached the relays,
@@ -74,7 +113,8 @@ normative list):
 ### send_message(trade_id: String, content: String) → ChatMessage
 Send an encrypted message to the trade counterparty.
 
-**Validation**: `content` MUST not be empty. Trade MUST be active.
+**Validation**: `content` MUST not be empty. Trade MUST be active, or
+completed within its grace window (#642).
 
 **Side effects**: Wraps in the chat envelope (inner kind 1 signed by the
 trade key, outer kind 14 signed with `K_sign`), publishes to relays. The
@@ -83,9 +123,15 @@ identity. A missing session is first **rebuilt from the trade row** (the
 durable peer record, #381): index + counterparty from the row, ECDH
 re-derived, session re-cached — gated by the same liveness/poison guard
 as the startup resubscription. Only when the row cannot serve it either
-(no row, peer not yet revealed, terminal or poisoned row, web #233) does
+(no row, peer not yet revealed, terminal row past its grace window,
+poisoned row) does
 the message degrade to local-only storage with a warning; a relay-pool
-failure also degrades to local-only.
+failure also degrades to local-only. A **cached** session is checked
+against the row too (#642): once the row says the chat is over — the
+trade ended, and not with a `success` still inside its grace window
+(`chat_closed_at`) — the send gets no session, cached or not, whatever a
+late UI timer still shows. No row yet, or a read error, keeps the cached
+session.
 
 **Errors**: `NoActiveTrade`, `TradeNotFound`, `MessageEmpty`.
 
@@ -162,8 +208,8 @@ Encrypt and upload an image or PDF, then send it in the P2P chat (#589).
 
 **Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
 `PeerUnknown`, `UploadFailed`, `SendFailed`, `SessionNotFound` (only when
-the session is absent AND the trade row cannot rebuild it — see
-`send_message`; #381).
+the session is absent AND the trade row cannot rebuild it, or the row says
+the chat is over — see `send_message`; #381, #642).
 
 ---
 

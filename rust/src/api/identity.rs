@@ -942,6 +942,9 @@ mod tests {
         async fn mark_trade_rated(&self, _order_id: &str, _rated_at: i64) -> Result<()> {
             unimplemented!()
         }
+        async fn mark_trade_completed(&self, _order_id: &str, _completed_at: i64) -> Result<()> {
+            unimplemented!()
+        }
         async fn set_cooperative_cancel_state(
             &self,
             _order_id: &str,

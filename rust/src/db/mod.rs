@@ -415,6 +415,13 @@ pub trait Storage: Send + Sync {
     /// exists.
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
 
+    /// Record when the trade identified by `order.id` completed
+    /// (`$.completed_at`, unix seconds), unless it already has a time: the
+    /// first write wins, so a replayed `success` never moves it. It dates the
+    /// peer chat's grace window (issue #642). No-op when no matching trade
+    /// exists.
+    async fn mark_trade_completed(&self, order_id: &str, completed_at: i64) -> Result<()>;
+
     /// Record who asked to cancel an active trade cooperatively
     /// (`$.cooperative_cancel_state`) on the trade identified by `order.id`.
     /// The status is left alone: the protocol has no cancel-requested status,

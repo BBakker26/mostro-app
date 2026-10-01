@@ -76,8 +76,9 @@ If you are an AI agent preparing a pull request, follow
   Mortsom is an internal tool of the Mostro developers; do not use or cite it.
 - Any visible change carries before and after screenshots; write
   `No visible change` only when that is true.
-- For a fix, the first commit is `test:` and adds a regression test (Rust or
-  Dart) that fails on `main`.
+- For a fix, the commits are, in order: `refactor:` commits only if the test
+  needs a seam (no behaviour change), then a `test:` commit that adds a
+  regression test (Rust or Dart) that fails on `main`, then the fix.
 - If you could not build or run the app, say so in the pull request instead
   of claiming results.
 

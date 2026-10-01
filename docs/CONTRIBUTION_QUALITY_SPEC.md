@@ -106,12 +106,19 @@ If you are an AI agent preparing a pull request, follow
 - Link an issue labelled `status: accepted` (`Closes #N`). If there is no
   accepted issue, do not open the pull request; comment on the issue instead.
 - Fill in every section of `.github/pull_request_template.md`, including
-  Manual testing with steps a person ran by hand in the app built from the
-  branch, and Screenshots for any visible change.
-- For a fix, the first commit is `test:` and adds a regression test (Rust
-  or Dart) that fails on `main`.
+  Manual testing: steps a person ran by hand in the app built from the
+  branch, against a Mostro node. Do not present steps nobody ran as results.
+  Mortsom is an internal tool of the Mostro developers; do not use or cite it.
+- Any visible change carries before and after screenshots; write
+  `No visible change` only when that is true.
+- For a fix, the commits are, in order: `refactor:` commits only if the test
+  needs a seam (no behaviour change), then a `test:` commit that adds a
+  regression test (Rust or Dart) that fails on `main`, then the fix.
 - If you could not build or run the app, say so in the pull request instead
   of claiming results.
+
+A pull request that only changes Markdown files is exempt from the first
+four points (see the exemptions in that section); commits are still signed.
 ```
 
 `CLAUDE.md` gets one line pointing to that section, not a copy of it.
@@ -283,11 +290,18 @@ branch, against a running Mostro node. It serves three purposes:
   step that kills and relaunches the app, and says whether it was tested
   as an upgrade of an install made by `main`.
 - **Regression**: at least one step exercises a neighbouring flow named
-  in **Blast radius** and shows it behaves as before.
+  in **Blast radius** and shows it behaves as before. It is a step of its
+  own, apart from the steps that show the change, so every procedure has
+  at least two steps.
 - **Not covered** lists what the steps do not test and why (for example,
   "iOS: no Mac available", "the counterparty on v1").
 - A step that cannot be observed ("the provider is now more robust") is
   not a step.
+
+A change that does not touch a trade (settings, account, a static
+screen) only needs the steps that reach the changed screen; it does not
+need a node and two wallets. The rules above still apply: it has a
+**Regression** step and, for a fix, a step marked **(fails on `main`)**.
 
 ### 6.2 Screenshots
 
@@ -432,9 +446,10 @@ under `test/`.
 
 The test is separated from its fix by commit, as in the daemon:
 
-- A fix pull request **starts with a commit whose subject begins with
-  `test:`** and that only adds the regression test. The fix follows in
-  one or more later commits.
+- In a fix pull request, the **first commit that is not a `refactor:`
+  commit has a subject beginning with `test:`** and only adds the
+  regression test; without a seam (next point), it is the first commit.
+  The fix follows in one or more later commits.
 - **Seams go first.** Dart tests often need a seam the code does not
   have yet (an injectable function, a `@visibleForTesting` entry point),
   and a test that calls a seam `main` lacks does not compile there. The
@@ -656,8 +671,8 @@ after screenshots are enough to close them with a clear, written reason.
   not work a close reason.
 - **Manual testing needs a Mostro node and two wallets.** That is the
   real cost of testing a trade, and the reason §6.1 accepts any node
-  and network. A change that does not touch a trade (settings, account,
-  a static screen) only needs the steps that reach the changed screen.
+  and network. A change that does not touch a trade needs neither
+  (§6.1), but keeps its Regression step.
 - **The review load moves; it does not disappear.** Accepting issues
   (§4) is new work for maintainers. It is cheaper than reviewing diffs,
   but it is not free.

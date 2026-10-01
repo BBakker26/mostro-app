@@ -57,7 +57,7 @@ For now maintainers apply these rules by hand. Automated checks will first only 
 
 ### Issue before pull request
 
-Every pull request links an issue that a maintainer has labelled `status: accepted`. Discuss the bug or the feature in the issue first: there, "this is not a bug" or "this is not the design we want" costs one comment instead of a review of a whole diff.
+Every pull request that is not [exempt](#contribution-quality-bar) links an issue that a maintainer has labelled `status: accepted`. Discuss the bug or the feature in the issue first: there, "this is not a bug" or "this is not the design we want" costs one comment instead of a review of a whole diff.
 
 - Link it with a closing keyword in the description (`Closes #123`, `Fixes #123`). A plain mention does not count.
 - Only maintainers apply `status: accepted`, when they agree the problem is real and in scope. An issue opened minutes before the pull request is not accepted until a maintainer says so.
@@ -80,11 +80,11 @@ Mostro's developers also run end-to-end suites with an internal tool (Mortsom). 
 - **Steps** are numbered. Each step names one actor (maker, taker, buyer, seller, solver), one action in the UI, and an `Expected:` line with an observable result: the screen shown, a status or chip, a notification, a chat message, a button enabled or hidden, a payment received in the wallet, or, when the UI does not show it, the order status on the public event (kind 38383).
 - **For a fix**, one step is marked **(fails on `main`)** and also says what `main` does instead. If no step fails on `main`, the pull request has not shown that the bug exists.
 - **Restart and upgrade**: a change to anything persisted includes a step that quits and relaunches the app, and says whether it was tested as an upgrade of an install made by `main`.
-- **Regression**: at least one step exercises a neighbouring flow named in **Blast radius** and shows it behaves as before.
+- **Regression**: at least one step exercises a neighbouring flow named in **Blast radius** and shows it behaves as before. It is a step of its own, apart from the steps that show the change, so every procedure has at least two steps.
 - **Not covered** lists what the steps do not test and why (for example, "iOS: no Mac available").
 - A step that cannot be observed ("the provider is now more robust") is not a step.
 
-A change that does not touch a trade (settings, account, a static screen) only needs the steps that reach the changed screen; it does not need a node and two wallets.
+A change that does not touch a trade (settings, account, a static screen) only needs the steps that reach the changed screen; it does not need a node and two wallets. The rules above still apply: it has a **Regression** step and, for a fix, a step marked **(fails on `main`)**.
 
 Example, for a fix where privacy mode was lost on restart (#624):
 
@@ -129,7 +129,7 @@ If you could not build or run the app, say so in the pull request instead of cla
 
 The regression test of a fix must **fail without the fix and pass with it**. It can be a Rust test (next to the code, in `#[cfg(test)] mod tests`) or a Dart test (under `test/`). The test is separated from the fix by commit:
 
-- A fix pull request **starts with a commit whose subject begins with `test:`** and that only adds the regression test (inside `#[cfg(test)]` modules or under `test/`, no production code, no generated files).
+- In a fix pull request, **the first commit that is not a `refactor:` commit has a subject beginning with `test:`** and only adds the regression test (inside `#[cfg(test)]` modules or under `test/`, no production code, no generated files). Without a seam (next point), it is the pull request's first commit.
 - If the test needs a seam the code does not have yet (an injectable function, a `@visibleForTesting` entry point), add it in `refactor:` commits **before** the `test:` commit. Those commits must not change behaviour: with them and the `test:` commit on `main`, the test still fails.
 - The fix follows in one or more later commits.
 - The `test:` commit is a meaningful commit, not a fixup: do not squash it into the fix. It stays separate until merge; the maintainer may squash when merging.

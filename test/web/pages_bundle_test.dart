@@ -1,6 +1,7 @@
 @TestOn('vm')
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +71,96 @@ void main() {
     );
   });
 
+  // An installed web app shows the manifest's name, icons and colours on the
+  // home screen, in the task switcher and on its splash screen; on iOS it is
+  // also the only way to get web push (docs/PUSH_NOTIFICATIONS.md §2.6). The
+  // smoke test asks Chrome whether the bundle is installable at all.
+  group('web/manifest.json (installable app, #658)', () {
+    Map<String, dynamic> manifest() =>
+        jsonDecode(File('web/manifest.json').readAsStringSync())
+            as Map<String, dynamic>;
+
+    test("carries Mostro's identity, not Flutter's template", () {
+      // Arrange
+      final m = manifest();
+
+      // Act / Assert
+      expect(m['name'], 'Mostro');
+      expect(m['short_name'], 'Mostro');
+      expect(m['description'], isNot(contains('Flutter')));
+      expect(m['background_color'], isNot('#0175C2'));
+      expect(m['theme_color'], isNot('#0175C2'));
+    });
+
+    test('stays inside the deployed base path', () {
+      // Arrange
+      final m = manifest();
+
+      // Act / Assert — start_url and scope resolve against the manifest, so
+      // the same file works under /app/ and under a fork's sub-path; an
+      // absolute "/" would scope the installed app to the whole origin and
+      // start it on a 404.
+      for (final field in ['start_url', 'scope']) {
+        expect(m[field], './', reason: field);
+      }
+      expect(m['display'], 'standalone');
+      // No `id`: it resolves against the origin, not the manifest, so "./"
+      // would make every deployment on the origin one app at "/". Without it
+      // the id is the resolved start_url (/app/ in production), the identity
+      // installs already had before this manifest gained a name.
+      expect(m.containsKey('id'), isFalse);
+    });
+
+    test('lists plain and maskable icons at 192 and 512, all committed', () {
+      // Arrange
+      final icons = (manifest()['icons'] as List).cast<Map<String, dynamic>>();
+
+      // Act
+      String key(Map<String, dynamic> i) => '${i['purpose']} ${i['sizes']}';
+
+      // Assert — Chrome needs a 192 and a 512; Android masks maskable icons.
+      expect(
+        icons.map(key),
+        containsAll([
+          'any 192x192',
+          'any 512x512',
+          'maskable 192x192',
+          'maskable 512x512',
+        ]),
+      );
+      for (final icon in icons) {
+        expect(
+          File('web/${icon['src']}').existsSync(),
+          isTrue,
+          reason: icon['src'] as String,
+        );
+      }
+    });
+
+    test('index.html agrees with it for the browsers that ignore it', () {
+      // Arrange
+      final html = indexHtml.readAsStringSync();
+      final m = manifest();
+
+      // Act / Assert — iOS takes the home-screen title and icon from these
+      // tags, and the address bar colour comes from theme-color.
+      expect(html, contains('<link rel="manifest" href="manifest.json">'));
+      expect(html, contains('<title>${m['name']}</title>'));
+      expect(
+        html,
+        contains(
+          '<meta name="apple-mobile-web-app-title" '
+          'content="${m['short_name']}">',
+        ),
+      );
+      expect(
+        html,
+        contains('<meta name="theme-color" content="${m['theme_color']}">'),
+      );
+      expect(html, contains('<link rel="apple-touch-icon"'));
+    });
+  });
+
   group('vendored coi-serviceworker', () {
     test('is committed and non-empty', () {
       // Arrange / Act
@@ -132,6 +223,10 @@ void main() {
       // in a real browser before it is deployable.
       expect(yaml, contains('smoke.mjs'));
       expect(yaml, contains(r'BUNDLE_DIR'));
+      // ...and asked whether Chrome would install it (#658): a lost manifest
+      // link or icon leaves the page working and only removes the install.
+      expect(yaml, contains('SMOKE_INSTALLABLE: "1"'));
+      expect(smoke.readAsStringSync(), contains('Page.getInstallabilityErrors'));
     });
   });
 

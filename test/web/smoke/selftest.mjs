@@ -106,6 +106,20 @@ const CASES = [
     env: { SMOKE_PUSH_WORKER: '1' },
     what: 'a page that never registers the messaging worker fails the run',
   },
+  // The installability check (SMOKE_INSTALLABLE=1), from both sides:
+  // installable links a valid manifest, healthy links none.
+  {
+    fixture: 'installable',
+    expected: 0,
+    env: { SMOKE_INSTALLABLE: '1' },
+    what: 'a page Chrome can install passes',
+  },
+  {
+    fixture: 'healthy',
+    expected: 1,
+    env: { SMOKE_INSTALLABLE: '1' },
+    what: 'a page without a manifest fails the run',
+  },
 ];
 
 let failures = 0;

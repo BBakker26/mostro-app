@@ -226,10 +226,13 @@ Three facts shape the plan:
   service worker registration is unaffected); the Settings copy on web says so.
 
 Browser support: Chrome, Edge and Firefox on desktop and Android; Safari 16.4+ on
-macOS and iOS only for an installed (home-screen) PWA, which the deployed bundle is
-not today (`--pwa-strategy=none`). Safari is therefore "not available" until that
-changes, and the capability check reads the `Notification` and `PushManager` APIs,
-not the user agent.
+macOS and iOS only for an installed (home-screen) PWA. The deployed bundle is
+installable ([#658](https://github.com/MostroP2P/app/issues/658): manifest, icons and
+the iOS meta tags; `--pwa-strategy=none` only drops Flutter's offline cache, and the
+web smoke test asks Chrome whether it would install the bundle). Push from a
+home-screen Mostro on an iPhone is not yet verified on a device. The capability check
+reads the `Notification` and `PushManager` APIs, not the user agent, so a Safari tab
+that is not installed keeps showing push as unavailable.
 
 ---
 

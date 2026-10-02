@@ -107,7 +107,7 @@ is why the schema carries an expression index over it.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | **The row's own id, not the order's.** A take made on this device mints a fresh UUID here while `$.order.id` holds the id the daemon knows; a row rebuilt rather than taken — a replayed daemon message on a fresh device, a restored bond — reuses the order id for both. So the two may match or diverge, and neither case says whose row it is (`order.is_mine` and `role` carry that). Nothing looks a trade up by this: it exists so `save_trade` replaces a row instead of inserting a second one, which is why a rebuild carries it forward rather than minting a new one (issue #395) |
+| id | UUID | **The row's own id, not the order's.** A take made on this device mints a fresh UUID here while `$.order.id` holds the id the daemon knows; a row rebuilt rather than taken — a replayed daemon message on a fresh device, a restored bond — reuses the order id for both. So the two may match or diverge, and neither case says whose row it is (`order.is_mine` and `role` carry that). No trade lookup uses this field: it exists so `save_trade` replaces a row instead of inserting a second one, which is why a rebuild carries it forward rather than minting a new one (issue #395) |
 | order.id | UUID | The daemon's id for the order, inside `data`. **Every accessor keys on this** — read, update, delete, and the chat's `messages.trade_id` — whether or not it equals the row's `id`. `get_trade`, which keyed on the primary key and so missed the rows where they diverge, was removed |
 | role | Enum | `Buyer` or `Seller` |
 | counterparty_pubkey | String | Other party's public key |

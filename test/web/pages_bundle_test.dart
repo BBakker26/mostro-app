@@ -396,14 +396,20 @@ void main() {
       expect(yaml, contains('SMOKE_PUSH_WORKER: "1"'));
     });
 
-    test('CI builds with the VAPID define and keeps web push off', () {
+    test('CI takes the VAPID key and the web push switch from repository '
+        'variables', () {
       // Arrange
       final yaml = webBuild.readAsStringSync();
 
       // Act / Assert — the key is public and set per repository (forks use
-      // their own); the flag flips only when the push server accepts web.
+      // their own). The switch is a variable too, so turning web push on once
+      // the push server accepts web (mostro-push-server#44) is a settings
+      // change, and a fork whose push server does not accept web never gets
+      // it: an unset variable builds with the switch off.
       expect(yaml, contains('--dart-define=FCM_VAPID_KEY='));
-      expect(yaml, isNot(contains('PUSH_WEB_ENABLED')));
+      expect(yaml, contains(r'PUSH_WEB_ENABLED: ${{ vars.PUSH_WEB_ENABLED }}'));
+      expect(yaml, contains('--dart-define=PUSH_WEB_ENABLED='));
+      expect(yaml, isNot(contains('PUSH_WEB_ENABLED=true')));
       expect(yaml, contains('node --test test/web/push_worker/'));
     });
   });

@@ -127,17 +127,21 @@ jobs:
       #
       # FCM_VAPID_KEY is the Web Push public key of the repository's Firebase
       # project (a repository variable, public by design; forks set their own).
-      # Web push itself stays off: its switch is not passed until the push server
-      # accepts web (docs/PUSH_NOTIFICATIONS.md §3.5, T4.5).
+      # PUSH_WEB_ENABLED is web push's switch, also a repository variable: set
+      # it to `true` once the push server the app talks to accepts web
+      # (mostro-push-server#44, docs/PUSH_NOTIFICATIONS.md §3.5). Unset, as on
+      # a fork, the build has no web push.
       - name: Build Flutter web
         env:
           FCM_VAPID_KEY: ${{ vars.FCM_VAPID_KEY }}
+          PUSH_WEB_ENABLED: ${{ vars.PUSH_WEB_ENABLED }}
         run: |
           flutter build web \
             --release \
             --base-href "/${GITHUB_REPOSITORY#*/}/" \
             --pwa-strategy=none \
-            --dart-define=FCM_VAPID_KEY="${FCM_VAPID_KEY}"
+            --dart-define=FCM_VAPID_KEY="${FCM_VAPID_KEY}" \
+            --dart-define=PUSH_WEB_ENABLED="${PUSH_WEB_ENABLED}"
 
       # Guard the two silent-blank-page failure modes: the isolation shim must be
       # in the bundle and referenced by index.html, and Flutter's service worker

@@ -76,8 +76,10 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   `pages_bundle_test.dart` holds equal to `firebase_options.dart` and `firebase_core_web`; CI
   sets `SMOKE_PUSH_WORKER=1` to assert it activates without costing isolation. Web push stays
   off until the build passes `PUSH_WEB_ENABLED` (docs/PUSH_NOTIFICATIONS.md T4.5).
-- **The bundle is an installable app** (#658): `web/manifest.json` (relative `id`, `start_url`
-  and `scope`, so it follows the base path) plus the icons `flutter_launcher_icons` generates.
+- **The bundle is an installable app** (#658): `web/manifest.json` (relative `start_url` and
+  `scope`, so it follows the base path, and deliberately no `id`: an `id` resolves against the
+  origin, so "./" would be "/"; without one it is the resolved `start_url`) plus the icons
+  `flutter_launcher_icons` generates.
   `SMOKE_INSTALLABLE=1` asks Chrome itself (`Page.getInstallabilityErrors`); that needs the
   full Chromium build and a persistent profile, because the default headless shell calls
   every page installable and an incognito profile none.

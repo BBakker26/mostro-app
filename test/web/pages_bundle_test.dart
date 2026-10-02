@@ -96,13 +96,19 @@ void main() {
       // Arrange
       final m = manifest();
 
-      // Act / Assert — relative to the manifest, so the same file works under
-      // /app/ and under a fork's sub-path; an absolute "/" would scope the
-      // installed app to the whole origin and start it on a 404.
-      for (final field in ['id', 'start_url', 'scope']) {
+      // Act / Assert — start_url and scope resolve against the manifest, so
+      // the same file works under /app/ and under a fork's sub-path; an
+      // absolute "/" would scope the installed app to the whole origin and
+      // start it on a 404.
+      for (final field in ['start_url', 'scope']) {
         expect(m[field], './', reason: field);
       }
       expect(m['display'], 'standalone');
+      // No `id`: it resolves against the origin, not the manifest, so "./"
+      // would make every deployment on the origin one app at "/". Without it
+      // the id is the resolved start_url (/app/ in production), the identity
+      // installs already had before this manifest gained a name.
+      expect(m.containsKey('id'), isFalse);
     });
 
     test('lists plain and maskable icons at 192 and 512, all committed', () {

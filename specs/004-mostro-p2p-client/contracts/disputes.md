@@ -95,17 +95,63 @@ message (`localizedDaemonError`).
 ---
 
 ### submit_evidence(trade_id: String, text: String) → ChatMessage
-Submit text evidence for an open dispute. Delivered as an admin-type
-message.
+Send a text message to the solver of an open dispute, in the dispute chat
+envelope keyed to the solver. Returns it as stored: an admin-type message,
+`is_mine`, identified by its inner event id, so the relay echo dedups
+against it. This is the dispute chat's text send path (#143).
 
-**Validation**: `text` MUST not be empty. Dispute MUST be open.
+**Validation**: `text` MUST not be empty. The dispute MUST exist, not be
+resolved, and have a solver (`admin-took-dispute`).
 
-**Errors**: `NoOpenDispute`, `EvidenceEmpty`.
+**Errors**: `EvidenceEmpty`, `NoOpenDispute`, `AdminNotAssigned`,
+`TradeNotFound`.
+
+---
+
+### send_dispute_file(trade_id: String, file_bytes: Vec<u8>, file_name: String, upload_id: String) → ChatMessage
+Encrypt, upload and send an image or PDF to the solver (#589 phase 3). The
+same path as `send_file` in `contracts/messages.md` — checks, Blossom
+upload, v1 `image_encrypted` / `file_encrypted` message, progress on
+`on_attachment_progress(upload_id)` — with two differences: the file key is
+the raw ECDH between the trade key and the **solver's** pubkey (as v1
+encrypts dispute-chat files), and nobody is woken (the solver is not a push
+client). The file is checked before the dispute, so a file that could never
+be sent is refused as such. Returns an admin-type message. The peer cannot
+open these files; the solver cannot open the P2P chat's (FR-036).
+
+**Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
+`NoOpenDispute`, `AdminNotAssigned`, `TradeNotFound`, `UploadFailed`,
+`SendFailed`.
 
 ---
 
 ### get_dispute(trade_id: String) → Dispute?
 Get dispute details for a trade. Returns null if no dispute exists.
+
+---
+
+### solver_role(trade_id: String, solver_pubkey: String) → SolverRole
+Who a solver of `trade_id`'s dispute is, for the label the dispute chat
+shows (app#637): `Assistant` when **the dispute's own node** announces
+`solver_pubkey` as its Serbero in the info event (kind 38385,
+`["serbero", "<hex>"]`, mostro#1009), otherwise `Human`. Another node's
+announcement never counts: a key one node runs as its Serbero can be a
+person on another node's dispute.
+
+The dispute's node is the authenticated author of its `admin-took-dispute`,
+recorded under `dispute_node:<order_id>` (see Persistence and restart). A
+dispute with no node recorded — assigned before the app recorded it, until
+a replay does — shows `Human`. That node's announcement comes from its
+latest capability fetch, which wins (a fetch without the tag, or without an
+info event, retracts an older one), or else from its cached info event, so
+a dispute of a node the user switched away from keeps its label. A node
+outside the registry and not active (a removed custom node) vouches for
+nobody. The solver's own profile never counts.
+
+Read at display time rather than stored with a message: a history replay
+can land before the capability fetch, and the label corrects itself on the
+next read. The dispute chat labels each solver message by its sender, and
+shows a system line where a person took the dispute over from Serbero.
 
 ## Persistence and restart
 
@@ -113,7 +159,7 @@ The Dispute record is **in-memory by design** — its status and resolution come
 back from daemon events, and so, usually, does the solver assignment: the
 offline catch-up channel (`orders.rs`, no `since`) replays `admin-took-dispute`
 on every reconnect, which rebuilds the record and re-arms the dispute chat on
-its own. Two facts are persisted anyway:
+its own. These facts are persisted anyway:
 
 - the **origin** (whether this side opened the dispute), written by a successful
   `open_dispute` under `dispute_mine:<order_id>` (presence is the value). This
@@ -124,6 +170,13 @@ its own. Two facts are persisted anyway:
   replay is bounded by relay retention and by the per-subscription result cap,
   so a long dispute can outlive it. The stored copy is what re-arms the chat
   when the replay no longer covers the assignment.
+- **when that solver was assigned**, under `dispute_admin_at:<order_id>` as
+  `<time>:<pubkey>`, so a replayed older assignment is ignored after a restart
+  (see Solver takeover).
+- the dispute's **node** (hex), the authenticated author of its
+  `admin-took-dispute`, under `dispute_node:<order_id>`: only that node's
+  Serbero announcement labels the dispute's solvers (see `solver_role`), and
+  the user can switch nodes while the dispute lasts.
 
 **Rehydration**: on relay (re)connect, dispute records are rebuilt for persisted
 trades that have a stored solver, before dispute-chat listeners are re-armed and
@@ -136,9 +189,11 @@ memory win, enforced under the store's single write lock so a concurrent
 `get_dispute` non-null and `submit_evidence` work again after a restart.
 
 **Terminal states**: the *trade* status, not the dispute record, is the durable
-signal that a dispute is over — the daemon's `admin-settled` / `admin-canceled`
-are persisted by the order status-sync path without being routed into the
-dispute store. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
+signal that a dispute is over. The daemon's `admin-settled` / `admin-canceled`
+are persisted by the order status-sync path, which also routes them into the
+dispute store (`apply_admin_verdict`, #596) — that resolves the live record
+and tells `on_dispute_updated`, but the record is in memory and gone after a
+restart. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
 `CompletedByAdmin`, `Success`, `Canceled`, `CooperativelyCanceled` or
 `Expired`. Three places enforce it, and all three clear both keys:
 
@@ -149,19 +204,73 @@ dispute store. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
   replay would, one second after rehydration cleared the keys, recreate the
   record as `InReview`, write the solver key straight back and arm a listener
   nobody is on the other end of — on every startup;
-- a resolution reaching the dispute store clears them too. Today nothing routes
-  the daemon's verdicts there (`handle_admin_settled` / `handle_admin_canceled`
-  have no production caller), so in practice the two trade-status guards above
-  are what clean up; the resolution path is ready for when that wiring lands.
+- a resolution reaching the dispute store clears them too: the verdicts are
+  routed there since #596.
 
-**UI wiring**: this is the Rust layer only. Nothing in Dart consumes the
-rehydrated record yet — `get_dispute`, `submit_evidence` and
-`on_dispute_updated` have no callers outside the generated bindings — and the
-dispute chat has no UI: `chat_room_screen.dart` renders only peer messages and
-`send_message` has no channel parameter, so the solver can be read but not
-written to. What lands today is the re-armed listener: solver messages arrive
-and persist as `MessageType::Admin`. Repopulating the dispute screen and the
-admin chat are the tracked follow-ups. So is one-tap delivery of the P2P
+**Solver takeover**: a dispute can change solver. mostrod lets a write solver
+take over an `in-progress` dispute held by a read-only one (for example
+[Serbero](https://github.com/MostroP2P/serbero)), and sends both parties a new
+`admin-took-dispute` with the new pubkey. The record takes the new solver, and
+the dispute chat task, bound to the previous solver's conversation keys, is
+stopped before the new one is armed (the handover releases the claim, closes
+the old REQ and clears the cursor under the chat guard's lock, so no new task
+claims the chat half-way); the chat guard allows one task per order
+and channel, so without the stop the new solver's messages would never be read.
+The peer chat is not touched. The dispute chat's `since` cursor is cleared,
+since it dates the previous conversation and the new solver's clock may be
+behind it. A chat task only writes its cursor while it still owns the chat
+(checked under the guard's lock), so the stopped task, if it was handling an
+event, cannot restore the old cursor. Likewise a task installs its relay
+subscription only while it owns the chat: all tasks of a chat share one
+subscription id, and a task stopped between its claim and its REQ would
+otherwise overwrite the new solver's filter. A listener armed for the previous solver that has not claimed the
+chat yet (rehydration on reconnect) cannot claim it: the claim checks the
+dispute's current solver under the guard's lock.
+
+Each assignment's time (the event's `created_at`) is recorded, and an
+assignment of another solver that is not newer is ignored: the catch-up
+channel replays every `admin-took-dispute`, usually newest first, and the
+previous solver must not come back. Equal seconds cannot be ordered, so the
+current assignment is kept. The time is persisted under
+`dispute_admin_at:<order_id>` and seeded again by rehydration, so the replay
+order does not matter after a restart either. The persisted value names the
+solver it belongs to (`<time>:<pubkey>`), and rehydration ignores it for any
+other solver, since the pubkey and the time are separate best-effort writes.
+An assignment dated beyond the local clock's skew horizon
+(`MAX_CLOCK_SKEW_SECS`) is rejected, like a future-dated chat event: it
+cannot be ordered against the others. Deleting the identity forgets
+the recorded times with its disputes. Assignments are applied one at
+a time (a global lock): the global and per-trade notification tasks can
+dispatch two for the same order at once, and the check, the recorded time,
+the chat restart and the persisted solver must describe the same assignment.
+Rehydration restores each persisted solver and its time under the same lock,
+since a replayed older assignment applied half-way would install the previous
+solver with the newer time. A chat task's own cleanup likewise releases its
+claim and closes its REQ under the chat guard's lock, so a takeover's new task
+cannot install its subscription in between and lose it to the late close.
+
+**Unvouched cursor**: a persisted time recorded for the current solver is what
+vouches that the dispute chat cursor dates that solver's conversation. A
+release before takeover handling persisted the new solver and kept the
+previous conversation's cursor, with no time. So wherever a solver is found
+without a time recorded for it, the dispute chat is handed over as in a
+takeover (task stopped, REQ closed, cursor cleared; the peer chat is not
+touched), at the cost of one refetch of that conversation, deduplicated by
+event id. Both paths do it: rehydration, for a restored solver, and an
+assignment with a time, before it writes that time — the daemon feed opens
+before rehydration, so a replayed assignment can be the first to see that
+state, and the time it writes would otherwise certify the cursor for good. The
+recorded time ends it; it repeats only while no replay brings the assignment
+back to record it (rehydration on every restart).
+
+Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
+a resolved record or a finished trade is `NoOpenDispute`.
+
+**UI wiring**: the dispute chat screen (#143, #589 phase 3) reads the record
+with `get_dispute` when it opens and follows `on_dispute_updated`, shows the
+`MessageType::Admin` messages, and writes with `submit_evidence` and
+`send_dispute_file`. The disputes list is still fed on resume only (#397).
+Still to come: one-tap delivery of the P2P
 shared key to the solver (#415): Rust will send it over this channel behind an
 explicit confirmation in the UI, and the key is never exposed to Dart; that
 function and the `Dispute` state it adds are specified when it lands.
@@ -176,4 +285,6 @@ persistence on web.
 
 ### on_dispute_updated(trade_id: String) → Stream<Dispute>
 Emits when dispute status changes (opened, admin message received,
-resolved).
+resolved). A subscriber that falls behind the broadcast buffer gets the
+record as it stands in place of the updates it missed, so a resolution is
+never skipped (#596).

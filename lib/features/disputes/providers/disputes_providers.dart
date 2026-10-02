@@ -36,6 +36,8 @@ class DisputeMessage {
     required this.isAdmin,
     required this.createdAt,
     this.nostrEventId,
+    this.attachment,
+    this.senderPubkey,
   });
 
   final String id;
@@ -44,6 +46,14 @@ class DisputeMessage {
   final bool isAdmin;
   final int createdAt;
   final String? nostrEventId;
+
+  /// Who wrote it (hex). A solver's decides its label: Serbero or a person
+  /// (#637). A dispute can have two — Serbero, then who took it over.
+  final String? senderPubkey;
+
+  /// An image or file sent in the dispute chat (#589 phase 3); [content] is
+  /// then its file name.
+  final rust_types.AttachmentInfo? attachment;
 
   bool get isSystem => !isMine && !isAdmin;
 }
@@ -143,6 +153,42 @@ class DisputeNotifier extends StateNotifier<List<DisputeItem>> {
     }
   }
 
+  /// Apply what the bridge says about a dispute to the record the UI holds
+  /// for the same trade (#143): status, solver, resolution.
+  ///
+  /// Matched by trade — one dispute per trade — and the UI's own fields
+  /// survive: the read flag, the peer's identity and side, which come from
+  /// the trade rather than the dispute. The id too, so a screen opened on it
+  /// keeps finding it. A dispute the UI did not know is inserted as is.
+  void applyBridgeUpdate(DisputeItem fromBridge) {
+    final idx = state.indexWhere((d) => d.tradeId == fromBridge.tradeId);
+    if (idx < 0) {
+      state = [...state, fromBridge];
+      return;
+    }
+    final current = state[idx];
+    final updated = [...state];
+    // Built whole, not through `copyWith`: a field the bridge reports as
+    // null again (no solver, no resolution) must not keep the old value.
+    updated[idx] = DisputeItem(
+      id: current.id,
+      tradeId: current.tradeId,
+      status: fromBridge.status,
+      initiatedByMe: fromBridge.initiatedByMe,
+      openedAt: fromBridge.openedAt,
+      reason: fromBridge.reason,
+      adminPubkey: fromBridge.adminPubkey,
+      resolution: fromBridge.resolution,
+      resolvedAt: fromBridge.resolvedAt,
+      isRead: current.isRead,
+      peerHandle: current.peerHandle,
+      peerIconIndex: current.peerIconIndex,
+      peerColorHue: current.peerColorHue,
+      isSelling: current.isSelling,
+    );
+    state = updated;
+  }
+
   /// Mark a dispute as read.
   void markRead(String disputeId) {
     state = [
@@ -204,6 +250,13 @@ final disputeByTradeIdProvider = Provider.family<DisputeItem?, String>((
       .where((d) => d.tradeId == tradeId)
       .firstOrNull;
 });
+
+/// The bridge's dispute for a trade, or null. Its own provider so the trade
+/// screen's fallback lookup can be driven in tests without the bridge.
+final disputeLookupProvider =
+    Provider<Future<rust_types.Dispute?> Function(String tradeId)>(
+      (ref) => (tradeId) => disputes_api.getDispute(tradeId: tradeId),
+    );
 
 // ── Hydration (resume) ────────────────────────────────────────────────────────
 

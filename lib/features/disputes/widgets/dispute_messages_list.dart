@@ -2,20 +2,54 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/attachments/upload_controller.dart';
+import 'package:mostro/features/chat/widgets/encrypted_file_message.dart';
+import 'package:mostro/features/chat/widgets/encrypted_image_message.dart';
+import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 // ── DisputeMessagesList ───────────────────────────────────────────────────────
+
+/// Who a solver pubkey is (#637); `null` for a message without a sender.
+typedef SolverRoleOf = rust_types.SolverRole Function(String? solverPubkey);
+
+/// Where the "a resolver took over" line goes among [sorted] messages
+/// (#637): before the first message of the person who took the dispute over
+/// from Serbero, or last when they have not written yet. `null` while
+/// Serbero still holds it ([current]), or when Serbero never spoke.
+@visibleForTesting
+int? takeoverLineIndex(
+  List<DisputeMessage> sorted,
+  SolverRoleOf roleOf,
+  rust_types.SolverRole current,
+) {
+  if (current != rust_types.SolverRole.human) return null;
+  bool from(DisputeMessage m, rust_types.SolverRole role) =>
+      !m.isMine && m.isAdmin && roleOf(m.senderPubkey) == role;
+  final lastAssistant = sorted.lastIndexWhere(
+    (m) => from(m, rust_types.SolverRole.assistant),
+  );
+  if (lastAssistant < 0) return null;
+  final firstPerson = sorted.indexWhere(
+    (m) => from(m, rust_types.SolverRole.human),
+    lastAssistant + 1,
+  );
+  return firstPerson < 0 ? sorted.length : firstPerson;
+}
 
 /// Scrollable list of dispute messages with info card and optional banners.
 ///
 /// Slot order (always shown in this sequence):
 ///   1. [DisputeInfoCard] — always first
-///   2. "Admin assigned" banner — shown when status is `inReview` and no
-///      messages yet
+///   2. "Solver assigned" banner — shown when status is `inReview` and no
+///      messages yet; it names Serbero while Serbero holds the dispute
 ///   3. [DisputeMessageBubble] entries — sorted by `createdAt`, deduped by
-///      `nostrEventId` if present
-///   4. "Chat closed" lock banner — shown when status is resolved/closed
+///      `nostrEventId` if present, with a "resolver took over" line where a
+///      person took the dispute over from Serbero (#637)
+///   4. [UploadBubble]s — files still on their way to the solver
+///   5. "Chat closed" lock banner — shown when status is resolved/closed
 ///
 /// Auto-scrolls to bottom when new messages arrive.
 class DisputeMessagesList extends StatefulWidget {
@@ -23,10 +57,23 @@ class DisputeMessagesList extends StatefulWidget {
     super.key,
     required this.dispute,
     required this.messages,
+    this.uploads = const [],
+    this.onRetryUpload,
+    this.onDiscardUpload,
+    this.roleOf = _unknownIsAPerson,
   });
 
   final DisputeItem dispute;
   final List<DisputeMessage> messages;
+  final List<PendingUpload> uploads;
+  final ValueChanged<String>? onRetryUpload;
+  final ValueChanged<String>? onDiscardUpload;
+
+  /// Who a solver pubkey is, as Rust decided it (#637).
+  final SolverRoleOf roleOf;
+
+  static rust_types.SolverRole _unknownIsAPerson(String? _) =>
+      rust_types.SolverRole.human;
 
   @override
   State<DisputeMessagesList> createState() => _DisputeMessagesListState();
@@ -38,7 +85,8 @@ class _DisputeMessagesListState extends State<DisputeMessagesList> {
   @override
   void didUpdateWidget(DisputeMessagesList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.messages.length != oldWidget.messages.length) {
+    if (widget.messages.length != oldWidget.messages.length ||
+        widget.uploads.length != oldWidget.uploads.length) {
       _scrollToBottom();
     }
   }
@@ -76,6 +124,21 @@ class _DisputeMessagesListState extends State<DisputeMessagesList> {
 
     final isResolved = widget.dispute.status == DisputeStatus.resolved;
     final isInReview = widget.dispute.status == DisputeStatus.inReview;
+    final currentRole = widget.roleOf(widget.dispute.adminPubkey);
+    final takeoverAt = takeoverLineIndex(deduped, widget.roleOf, currentRole);
+    final entries = [...deduped];
+    if (takeoverAt != null) {
+      entries.insert(
+        takeoverAt,
+        DisputeMessage(
+          id: 'solver-took-over',
+          content: AppLocalizations.of(context).disputeSolverTookOver,
+          isMine: false,
+          isAdmin: false,
+          createdAt: 0,
+        ),
+      );
+    }
 
     return CustomScrollView(
       controller: _scrollController,
@@ -85,24 +148,43 @@ class _DisputeMessagesListState extends State<DisputeMessagesList> {
           child: DisputeInfoCard(dispute: widget.dispute, colors: colors),
         ),
 
-        // 2. "Admin assigned" banner (inReview + no messages)
+        // 2. "Solver assigned" banner (inReview + no messages)
         if (isInReview && deduped.isEmpty)
-          const SliverToBoxAdapter(
-            child: _AdminAssignedBanner(),
+          SliverToBoxAdapter(
+            child: _SolverAssignedBanner(
+              isAssistant: currentRole == rust_types.SolverRole.assistant,
+            ),
           ),
 
-        // 3. Message bubbles
+        // 3. Message bubbles, and the takeover line among them
         SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) => DisputeMessageBubble(
-              message: deduped[index],
+              message: entries[index],
               colors: colors,
+              solverRole: widget.roleOf(entries[index].senderPubkey),
             ),
-            childCount: deduped.length,
+            childCount: entries.length,
           ),
         ),
 
-        // 4. "Chat closed" lock banner (resolved state)
+        // 4. Files on their way out follow the history.
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final upload = widget.uploads[index];
+              return UploadBubble(
+                key: ValueKey(upload.id),
+                upload: upload,
+                onRetry: () => widget.onRetryUpload?.call(upload.id),
+                onDiscard: () => widget.onDiscardUpload?.call(upload.id),
+              );
+            },
+            childCount: widget.uploads.length,
+          ),
+        ),
+
+        // 5. "Chat closed" lock banner (resolved state)
         if (isResolved)
           SliverToBoxAdapter(
             child: _ChatClosedBanner(colors: colors),
@@ -230,15 +312,22 @@ class _IdRow extends StatelessWidget {
 /// - Own → right-aligned, purple (`colors.purpleButton`)
 /// - Admin → left-aligned, dark gray
 /// - System → centered italic
+///
+/// An image or a file shows the chat's own attachment widgets, which
+/// download and decrypt it with the solver's key (#589 phase 3).
 class DisputeMessageBubble extends StatelessWidget {
   const DisputeMessageBubble({
     super.key,
     required this.message,
     required this.colors,
+    this.solverRole = rust_types.SolverRole.human,
   });
 
   final DisputeMessage message;
   final AppColors colors;
+
+  /// Who wrote a solver's message: it is labelled Serbero or as a person.
+  final rust_types.SolverRole solverRole;
 
   @override
   Widget build(BuildContext context) {
@@ -264,6 +353,8 @@ class DisputeMessageBubble extends StatelessWidget {
     }
 
     final isMine = message.isMine;
+    final attachment = message.attachment;
+    final isImage = attachment?.fileType == rust_types.FileType.image;
     final bubbleColor = isMine
         ? colors.purpleButton
         : const Color(0xFF2D3142); // admin/peer dark gray
@@ -283,15 +374,18 @@ class DisputeMessageBubble extends StatelessWidget {
           );
 
     return GestureDetector(
-      onLongPress: () {
-        Clipboard.setData(ClipboardData(text: message.content));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(AppLocalizations.of(context).messageCopied),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
+      // An attachment's content is its file name: nothing worth copying.
+      onLongPress: attachment != null
+          ? null
+          : () {
+              Clipboard.setData(ClipboardData(text: message.content));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(AppLocalizations.of(context).messageCopied),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
       child: Padding(
         padding: EdgeInsets.only(
           left: isMine ? AppSpacing.xl : AppSpacing.lg,
@@ -305,10 +399,13 @@ class DisputeMessageBubble extends StatelessWidget {
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.72,
             ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
+            // An image fills its bubble; a thin frame keeps the colour.
+            padding: isImage
+                ? const EdgeInsets.all(4)
+                : const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
+                  ),
             decoration: BoxDecoration(
               color: bubbleColor,
               borderRadius: borderRadius,
@@ -318,18 +415,30 @@ class DisputeMessageBubble extends StatelessWidget {
               children: [
                 if (message.isAdmin && !message.isMine)
                   Text(
-                    AppLocalizations.of(context).adminLabel,
+                    solverRole == rust_types.SolverRole.assistant
+                        ? AppLocalizations.of(context).serberoLabel
+                        : AppLocalizations.of(context).solverLabel,
                     style: textTheme.bodySmall?.copyWith(
                       color: colors.tealAccent,
                       fontWeight: FontWeight.bold,
                       fontSize: 10,
                     ),
                   ),
-                Text(
-                  message.content,
-                  style: textTheme.bodyMedium
-                      ?.copyWith(color: Colors.white),
-                ),
+                switch (attachment) {
+                  null => Text(
+                      message.content,
+                      style: textTheme.bodyMedium
+                          ?.copyWith(color: Colors.white),
+                    ),
+                  _ when isImage => EncryptedImageMessage(
+                      messageId: message.id,
+                      attachment: attachment,
+                    ),
+                  _ => EncryptedFileMessage(
+                      messageId: message.id,
+                      attachment: attachment,
+                    ),
+                },
               ],
             ),
           ),
@@ -341,8 +450,11 @@ class DisputeMessageBubble extends StatelessWidget {
 
 // ── Banners ───────────────────────────────────────────────────────────────────
 
-class _AdminAssignedBanner extends StatelessWidget {
-  const _AdminAssignedBanner();
+class _SolverAssignedBanner extends StatelessWidget {
+  const _SolverAssignedBanner({required this.isAssistant});
+
+  /// Serbero holds the dispute, not a person.
+  final bool isAssistant;
 
   @override
   Widget build(BuildContext context) {
@@ -362,7 +474,9 @@ class _AdminAssignedBanner extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              AppLocalizations.of(context).disputeAdminAssigned,
+              isAssistant
+                  ? AppLocalizations.of(context).disputeSerberoAssigned
+                  : AppLocalizations.of(context).disputeSolverAssigned,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.statusActive.$2,
                   ),
@@ -390,12 +504,15 @@ class _ChatClosedBanner extends StatelessWidget {
         children: [
           Icon(Icons.lock_outline, size: 14, color: colors.textSubtle),
           const SizedBox(width: AppSpacing.xs),
-          Text(
-            AppLocalizations.of(context).disputeChatClosed,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSubtle,
-                  fontStyle: FontStyle.italic,
-                ),
+          // Wraps on a narrow phone instead of overflowing (PR #596).
+          Flexible(
+            child: Text(
+              AppLocalizations.of(context).disputeChatClosed,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSubtle,
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
           ),
         ],
       ),

@@ -232,6 +232,13 @@ class AutomationIds {
   /// Row of a trade in the My Trades list.
   static String tradesItem(String orderId) => 'trades.item.$orderId';
 
+  /// My Trades, loaded with nothing to show under the current filter.
+  static const String tradesEmpty = 'trades.empty';
+
+  /// My Trades could not be loaded. With neither this, [tradesEmpty] nor a
+  /// [tradesItem] row on screen, the list is still loading.
+  static const String tradesError = 'trades.error';
+
   // Buyer invoice (NWC generated or manual) and hold-invoice payment
   static const String invoiceNwcText = 'invoice.nwc.text';
   static const String invoiceManual = 'invoice.manual';
@@ -242,9 +249,20 @@ class AutomationIds {
   static const String invoiceScan = 'invoice.scan';
   static const String invoiceSubmit = 'invoice.submit';
 
+  /// Readout: the app's own verdict on what is in the invoice field, as a
+  /// stable word (`expires-too-soon`, `wrong-amount`, `valid`, …) — never the
+  /// row's translated sentence. Absent while the verdict is still open, which
+  /// is not the same as valid.
+  static const String invoiceCheck = 'invoice.check';
+
   /// Readout: the daemon's reason for refusing the last submitted invoice.
   /// Present only after a rejection, until the next submission.
   static const String invoiceError = 'invoice.error';
+
+  /// Readout: the last submission reached the relays and the node has not
+  /// answered yet (#615). Present until the screen leaves for the trade, or
+  /// the invoice field is edited, or a new submission starts.
+  static const String invoiceAwaiting = 'invoice.awaiting';
   static const String invoiceCancel = 'invoice.cancel';
   static const String payInvoiceText = 'pay.invoice.text';
 
@@ -254,6 +272,7 @@ class AutomationIds {
   static const String bondOrderId = 'bond.order_id';
   static const String bondExplainer = 'bond.explainer';
   static const String bondCancel = 'bond.cancel';
+  static const String bondRemoveFromDevice = 'bond.remove_from_device';
 
   // Payout claim on a slashed bond (docs/ANTI_ABUSE_BOND.md §6.4)
   static const String bondClaimOrderId = 'bond.claim.order_id';

@@ -62,6 +62,45 @@ normative list):
   subscription ids unsubscribed on every exit, no idle timeout, and
   automatic resubscription of persisted active trades when the relay pool
   comes online.
+- Grace window after completion (#642): a trade that completes with
+  `success` keeps its **peer** chat open for `PEER_CHAT_GRACE_SECS` (one
+  hour) — the parties thank each other and announce their ratings.
+  - *Dated by the completion itself.* The window runs from the row's
+    `completed_at` (`Storage::mark_trade_completed`: first write wins,
+    never later than now), recorded where the trade moves to `success` and
+    **before** that status reaches the trade row (the in-memory book can
+    show the public `success` first; the UI decides on the row), from the
+    `created_at` of what carried it: the buyer's `purchase-completed` (or a
+    row rebuilt from such a message), or — for the seller, who learns of it
+    only from the public book — the Kind 38383 `success` revision (d-tag
+    task, book feed, payout check, sweep; a taker's `settled-hold-invoice`
+    row seen `success` on the book feed goes through the payout path). Only
+    a `success` over a live, undisputed row counts (`completes_trade`); a
+    time that could not be fetched is never made up. So a replayed or
+    restored history never reopens an old trade's chat, and a `success` row
+    without `completed_at` (completed before #642, or at an unknown time)
+    is closed.
+  - *No window* for canceled, expired or admin-resolved trades, nor for a
+    dispute the book shows as `success`. The book's plain terminal never
+    replaces an admin verdict (`wire_status_applies`), and an admin verdict
+    refines a plain terminal whatever order a replay brings them in
+    (`status_write_blocked`): mostrod's `purchase-completed` follows its
+    `admin-settled`, and a newest-first replay delivers it first.
+  - *Lifecycle.* While the window runs, `chat_still_relevant` holds
+    (restart resubscription, session rebuild, reveal replays).
+    `release_finished_trade_subscriptions` keeps the peer chat — starting
+    it if this process does not run it — and releases the dispute chat and
+    every other subscription at once; `schedule_chat_grace_end` closes it
+    at the end, looking at the wall clock at least once a minute (a sleep
+    does not advance while the device is suspended), and
+    `resubscribe_active_chats`, on every start and resume, closes a window
+    that ended while the app was away (a relay that reconnected first may be
+    sent the expired REQ again; the CLOSE follows). A peer listener asks the
+    row right after it claims the chat, so a window that runs out while the
+    listener starts never leaves it running without a timer.
+  - *UI.* `ChatRowState` decides from the persisted row (`TradeRow.rowStatus`
+    and `completedAt`), as Rust does: the book's live status may run ahead
+    of the row, and the composer must not drop out while it catches up.
 - Isolation: chat runs on its own task and bounded channels; it can never
   block the order state machine, the daemon transport, or a dispute.
 - Push wake: once a peer message or attachment pointer reached the relays,
@@ -74,7 +113,8 @@ normative list):
 ### send_message(trade_id: String, content: String) → ChatMessage
 Send an encrypted message to the trade counterparty.
 
-**Validation**: `content` MUST not be empty. Trade MUST be active.
+**Validation**: `content` MUST not be empty. Trade MUST be active, or
+completed within its grace window (#642).
 
 **Side effects**: Wraps in the chat envelope (inner kind 1 signed by the
 trade key, outer kind 14 signed with `K_sign`), publishes to relays. The
@@ -83,9 +123,15 @@ identity. A missing session is first **rebuilt from the trade row** (the
 durable peer record, #381): index + counterparty from the row, ECDH
 re-derived, session re-cached — gated by the same liveness/poison guard
 as the startup resubscription. Only when the row cannot serve it either
-(no row, peer not yet revealed, terminal or poisoned row, web #233) does
+(no row, peer not yet revealed, terminal row past its grace window,
+poisoned row) does
 the message degrade to local-only storage with a warning; a relay-pool
-failure also degrades to local-only.
+failure also degrades to local-only. A **cached** session is checked
+against the row too (#642): once the row says the chat is over — the
+trade ended, and not with a `success` still inside its grace window
+(`chat_closed_at`) — the send gets no session, cached or not, whatever a
+late UI timer still shows. No row yet, or a read error, keeps the cached
+session.
 
 **Errors**: `NoActiveTrade`, `TradeNotFound`, `MessageEmpty`.
 
@@ -137,46 +183,61 @@ Emits when the global unread message count changes.
 
 ## File Attachment Functions
 
-### send_file(trade_id: String, file_bytes: Vec<u8>, file_name: String, mime_type: String) → ChatMessage
-Encrypt and upload a file attachment, then send as a chat message.
+### send_file(trade_id: String, file_bytes: Vec<u8>, file_name: String, upload_id: String) → ChatMessage
+Encrypt and upload an image or PDF, then send it in the P2P chat (#589).
 
 **Validation**:
-- File size MUST not exceed 25MB.
-- `mime_type` MUST be a supported type (image/*, application/pdf,
-  text/*, video/*).
-- Trade MUST be active.
+- JPEG, PNG or PDF, recognised by content; ≤ 25MB.
+- The counterpart must be known (the order was taken).
 
 **Flow**:
-1. Encrypt file with ChaCha20-Poly1305 (random nonce, key derived from
-   sharedKey for P2P messages or tradeKey for admin/dispute messages).
-2. Upload encrypted blob to Blossom server.
-3. Send Blossom URL + metadata as a JSON pointer payload (`type: "file"`)
-   through the same chat envelope as text messages.
+1. Images are decoded and re-encoded (orientation applied, EXIF dropped).
+2. Encrypt with ChaCha20-Poly1305: random nonce, key = raw ECDH x-coordinate
+   between our trade key and the peer's (v1's key; not the SHA-256 NIP-04 form).
+3. Upload the blob: `PUT {server}/upload`, `application/octet-stream`,
+   kind 24242 auth signed by a throwaway key. First accepting server of
+   v1's list wins; the URL is `{server}/{sha256}`. The blob is cached.
+4. Send v1's JSON message through the chat envelope:
+   `{"type":"image_encrypted","blossom_url","nonce","mime_type","original_size","width","height","filename","encrypted_size"}`
+   for images, `{"type":"file_encrypted","file_type":"document",…}` for PDFs.
 
-**Returns**: ChatMessage with `has_attachment: true` and attachment metadata.
+`on_attachment_progress(upload_id)` reports 0.1 prepared, 0.3 encrypted,
+0.9 uploaded, 1.0 sent.
 
-**Errors**: `FileTooLarge`, `UnsupportedFileType`, `UploadFailed`,
-`NoActiveTrade`, `SessionNotFound` (only when the session is absent AND
-the trade row cannot rebuild it — see `send_message`; #381).
+**Returns**: ChatMessage with `has_attachment: true`; `content` is the file name.
+
+**Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
+`PeerUnknown`, `UploadFailed`, `SendFailed`, `SessionNotFound` (only when
+the session is absent AND the trade row cannot rebuild it, or the row says
+the chat is over — see `send_message`; #381, #642).
 
 ---
 
-### download_attachment(message_id: String) → FileDownloadResult
-Download and decrypt a file attachment.
+### download_attachment(message_id: String) → AttachmentData
+Fetch and decrypt an attachment, in memory.
+
+The encrypted blob comes from the cache or from Blossom — verified against
+the hash in its URL, then cached (still encrypted). Decrypted with the key of
+the conversation it arrived in: the peer's (P2P chat) or the solver's
+(dispute chat) — for the solver's own messages, their authenticated sender,
+so a resolved dispute's history stays openable. Nothing decrypted is written
+to disk. The encrypted blob is cached only while the identity that started
+the transfer is still active: one deleted mid-transfer is not written back. The key is read from
+the trade row when no session is live, so a finished trade's attachments stay
+openable after a restart. Any failure sets the attachment's status to `Failed`.
 
 **Returns**:
 ```text
-FileDownloadResult {
-  local_path: String    # Path to decrypted file on device
-  file_name: String
-  mime_type: String
-  file_size: u64
+AttachmentData {
+  bytes: Vec<u8>        # The decrypted file
+  file_name: String     # Sanitized
+  mime_type: String     # Sniffed (JPEG/PNG/PDF), else the declared one
 }
 ```
 
-**Errors**: `AttachmentNotFound`, `DownloadFailed`, `DecryptionFailed`,
-`SessionNotFound` (only when the session is absent AND the trade row
-cannot rebuild it — see `send_message`; #381).
+**Errors**: `AttachmentNotFound`, `PeerUnknown`, `DownloadFailed`, `DecryptionFailed`,
+`SessionNotFound` (only when no session is live AND no trade row exists —
+the row is used whatever the trade's status, unlike `send_message`).
 
 ---
 
@@ -186,4 +247,5 @@ Get download status of an attachment.
 ## Attachment Streams
 
 ### on_attachment_progress(message_id: String) → Stream<f64>
-Emits download/upload progress (0.0 to 1.0).
+Emits progress (0.0 to 1.0): the download of `message_id`, or the send of the
+`upload_id` given to `send_file`.

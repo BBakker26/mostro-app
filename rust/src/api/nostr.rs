@@ -67,9 +67,26 @@ fn pool() -> Result<&'static Arc<RelayPool>> {
 /// user's removals of announced relays restored as the blacklist — and,
 /// when nothing is persisted yet, the compiled-in defaults (which are then
 /// seeded so later runs read them back).
+///
+/// A second call in the same process re-attaches to the pool it already has
+/// and returns `Ok`; `relays` is then ignored. That second call is not a
+/// mistake: Android can destroy the activity — and its Flutter engine — while
+/// the process lives on, and the next launch runs `main()` again against the
+/// same Rust statics. Failing here aborted startup before `runApp`, leaving
+/// the app on its splash screen until the user killed the process.
 pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
-    if POOL.get().is_some() {
-        return Err(anyhow::anyhow!("AlreadyInitialized"));
+    initialize_in(&POOL, relays).await
+}
+
+/// [`initialize`] against `cell` instead of the process-wide pool, so a
+/// test can exercise the re-attach path without creating the global one.
+async fn initialize_in(
+    cell: &'static OnceCell<Arc<RelayPool>>,
+    relays: Option<Vec<String>>,
+) -> Result<()> {
+    if cell.get().is_some() {
+        reattach_existing_pool();
+        return Ok(());
     }
 
     let urls: Vec<String> = relays
@@ -97,7 +114,7 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
 
     // get_or_try_init is atomic — only one caller creates the pool even if
     // two race past the is_some() guard above.
-    let pool_ref = POOL
+    let pool_ref = cell
         .get_or_try_init(|| async { RelayPool::new(urls).await })
         .await?;
 
@@ -110,7 +127,7 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
 
     // A REQ issued while a relay is down never exists on it, reconnect or
     // not (nostr-sdk 0.45): re-issue what each relay misses as it connects.
-    crate::nostr::live_subs::spawn_repair(POOL.get().unwrap());
+    crate::nostr::live_subs::spawn_repair(pool_ref);
 
     // Runs the Online sequence whenever the relay pool transitions to Online.
     // Subscribed *before* the state is read, and both before the task is
@@ -122,7 +139,6 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     // `Online` had no receiver — and with the state unchanged afterwards the
     // monitor never sends another, so the book, the capabilities and the
     // outbox waited for a relay to drop and come back.
-    let pool_ref = POOL.get().unwrap();
     let rx = pool_ref.subscribe_connection_state();
     let current = pool_ref.connection_state().await;
     crate::rt::spawn(watch_connection_state(rx, current, || {
@@ -135,6 +151,23 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     }));
 
     Ok(())
+}
+
+/// A new Flutter engine found the pool of an earlier one still running.
+///
+/// Everything the pool spawned (the status monitor, the subscription repair,
+/// the Online watcher) is still alive, so nothing is re-created. What the
+/// engine missed is the resume: the process sat idle, possibly for hours,
+/// and the Dart lifecycle latch only fires `resync()` after a `paused` this
+/// engine never saw. So it runs here, in the background — startup must not
+/// wait on relays.
+fn reattach_existing_pool() {
+    log::info!("[nostr] relay pool already running — re-attaching and resyncing");
+    crate::rt::spawn(async {
+        if let Err(e) = resync().await {
+            log::warn!("[nostr] resync after re-attach failed: {e}");
+        }
+    });
 }
 
 /// Call `on_online` for every `Online` on `rx` — and once up front when the
@@ -198,6 +231,10 @@ async fn on_pool_online() {
     fetch_and_set_node_capabilities().await;
     drop(capabilities_pending);
     let _ = flush_message_queue().await;
+    // A seller's escrow recorded but never confirmed (the app died or lost
+    // the relays mid-submission) is re-sent now, the same token, no second
+    // swap. Detached: it waits on the daemon, and nothing here may.
+    crate::rt::spawn(crate::api::cashu::resubmit_pending_escrows());
     // Rebuild chat listeners for persisted active trades — sessions are
     // in-memory, so after a restart nothing else would resubscribe.
     // Idempotent: orders with a live chat task are skipped by the
@@ -430,9 +467,11 @@ const RESYNC_CONNECT_WAIT: std::time::Duration = std::time::Duration::from_secs(
 /// SDK reconnects on its own schedule, and nothing else re-checks that every
 /// subscription survived or that the outbox drained. One pass, in order:
 ///
-/// 1. **Reconnect nudge.** `connect()` spawns a connection task for every
-///    relay that has none (a relay whose first attempt failed never got one)
-///    and is a no-op for the rest; the wait is bounded, and the pool's own
+/// 1. **Reconnect nudge.** Every relay the OS cut while the app was away is
+///    bounced so it reconnects now instead of after its retry interval
+///    (`relay_probe::reconnect_disconnected_now`). Then `connect()` spawns a
+///    connection task for every relay that has none (a relay whose first
+///    attempt failed never got one); the wait is bounded, and the pool's own
 ///    state is what gets reported.
 /// 2. **Subscriptions.** The bulk kind-14 filter is re-issued under its stable
 ///    id (the relay replaces it in place and replays the node's history; the
@@ -507,6 +546,16 @@ async fn run_resync() -> ResyncOutcome {
         };
     };
     let client = pool.client();
+    // Relays the OS cut while the app was away sit in their retry interval,
+    // which `connect()` cannot shorten: bounce them first, so a message the
+    // daemon sent meanwhile arrives now rather than 10–60 s from now.
+    let woken = crate::nostr::relay_probe::reconnect_disconnected_now(&client).await;
+    if woken > 0 {
+        crate::api::logging::blog_info(
+            "relay",
+            format!("resume: reconnecting {woken} dropped relay(s) now"),
+        );
+    }
     client.connect().and_wait(RESYNC_CONNECT_WAIT).await;
     let online = pool.connection_state().await == ConnectionState::Online;
     log::info!("[nostr] resync: reconnect nudge settled, online={online}");
@@ -845,6 +894,21 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
                 &mostro_pubkey_hex,
                 crate::mostro::bond_policy::parse_tags(&tags),
             );
+            // Its dispute assistant, so the dispute chat can tell Serbero from
+            // the person who takes a case over (#637). A fetch without the tag
+            // retracts an older announcement. See mostro::serbero.
+            crate::mostro::serbero::set_from_tags(&mostro_pubkey_hex, &tags);
+            // The service fee. Only Cashu mode needs it client-side — there the
+            // seller funds the whole fee as its own token — but it rides in the
+            // same event, so reading it here costs nothing.
+            if let Some(fee) = tags
+                .iter()
+                .find(|t| t.first().map(String::as_str) == Some("fee"))
+                .and_then(|t| t.get(1))
+                .and_then(|v| v.trim().parse::<f64>().ok())
+            {
+                crate::mostro::node_fee::set_fee(fee);
+            }
         }
         Ok(None) => {
             log::warn!("[nostr] no Kind 38385 event found — PoW defaults to 0");
@@ -853,6 +917,8 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
             // Lightning, and leave Cashu closed.
             escrow_mode::clear();
             crate::mostro::bond_policy::clear();
+            // Nor a Serbero: retract an older announcement of this node.
+            crate::mostro::serbero::set_from_tags(&mostro_pubkey_hex, &[]);
         }
         Err(e) => {
             log::warn!("[nostr] failed to fetch Kind 38385 for node capabilities: {e}");
@@ -999,6 +1065,25 @@ mod tests {
             .iter()
             .map(|(k, v)| vec![k.to_string(), v.to_string()])
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_second_initialize_in_the_same_process_reattaches_instead_of_failing() {
+        // Arrange: an earlier Flutter engine already built the pool; its
+        // activity was destroyed but the process, and this cell, lived on.
+        let cell: &'static OnceCell<Arc<RelayPool>> = Box::leak(Box::new(OnceCell::new()));
+        let running = RelayPool::new(Vec::new()).await.expect("empty pool");
+        assert!(cell.set(running.clone()).is_ok(), "cell was empty");
+
+        // Act: the new engine's `main()` initializes again.
+        let result = initialize_in(cell, Some(vec!["ws://127.0.0.1:1".to_string()])).await;
+
+        // Assert: startup goes on, against the pool that was already running —
+        // an error here left the app on its splash screen.
+        assert!(result.is_ok(), "re-initializing must not fail: {result:?}");
+        let current = cell.get().expect("pool still set");
+        assert!(Arc::ptr_eq(current, &running), "the running pool is kept");
+        assert!(current.get_relays().await.is_empty(), "the new relay list is ignored");
     }
 
     #[test]

@@ -34,9 +34,13 @@ pub(crate) fn status_for_action(action: &mostro_core::message::Action) -> Option
         Action::PayBondInvoice => Some(OrderStatus::WaitingTakerBond),
         Action::WaitingSellerToPay => Some(OrderStatus::WaitingPayment),
         Action::WaitingBuyerInvoice => Some(OrderStatus::WaitingBuyerInvoice),
+        // `cashu-escrow-locked` is the Cashu sibling of the hold invoice
+        // being accepted: the daemon stored the escrow and the trade is live,
+        // for both parties (phase C5).
         Action::BuyerTookOrder
         | Action::HoldInvoicePaymentAccepted
-        | Action::BuyerInvoiceAccepted => Some(OrderStatus::Active),
+        | Action::BuyerInvoiceAccepted
+        | Action::CashuEscrowLocked => Some(OrderStatus::Active),
         Action::FiatSentOk => Some(OrderStatus::FiatSent),
         Action::HoldInvoicePaymentSettled | Action::Released => {
             Some(OrderStatus::SettledHoldInvoice)
@@ -139,9 +143,22 @@ fn is_terminal_status(s: &OrderStatus) -> bool {
     )
 }
 
+/// Whether a public Kind 38383 status may overwrite the local one: it fills
+/// an unknown or still-pending status, or announces a terminal one (#203).
+///
+/// Never over an admin verdict, the mirror of [`admin_verdict_refines`]: the
+/// book shows an admin settle as `success` and an admin cancel as `canceled`,
+/// and a replay of that event must not erase the verdict — the dispute's
+/// history and a slashed bond's cause read from it, and a plain `success`
+/// would give the trade a completed trade's chat window (#642).
 pub(crate) fn wire_status_applies(local: Option<&OrderStatus>, wire: &OrderStatus) -> bool {
     match local {
         None | Some(OrderStatus::Pending) => true,
+        Some(
+            OrderStatus::SettledByAdmin
+            | OrderStatus::CanceledByAdmin
+            | OrderStatus::CompletedByAdmin,
+        ) => false,
         Some(_) => is_terminal_status(wire),
     }
 }
@@ -391,6 +408,23 @@ mod tests {
                 "a terminal wire status must reach {local:?}"
             );
             assert!(wire_status_applies(Some(&local), &S::Success));
+        }
+    }
+
+    /// The book shows an admin settle as `success` and an admin cancel as
+    /// `canceled`: replayed after the verdict, it must not erase it (#642 —
+    /// a plain `success` would open a completed trade's chat window).
+    #[test]
+    fn a_plain_public_terminal_never_replaces_an_admin_verdict() {
+        use OrderStatus as S;
+
+        for local in [S::SettledByAdmin, S::CanceledByAdmin, S::CompletedByAdmin] {
+            for wire in [S::Success, S::Canceled, S::Expired, S::InProgress, S::Pending] {
+                assert!(
+                    !wire_status_applies(Some(&local), &wire),
+                    "{wire:?} must not overwrite {local:?}"
+                );
+            }
         }
     }
 

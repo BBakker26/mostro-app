@@ -185,6 +185,29 @@ impl SqliteStorage {
     }
 }
 
+/// Most bytes of encrypted attachments kept on the device (#589): about a
+/// dozen full-size files, far more photos. Oldest evicted first.
+const ATTACHMENT_CACHE_BYTES: i64 = 300 * 1024 * 1024;
+
+impl SqliteStorage {
+    /// Keep the attachment cache within `cap` bytes: the newest blobs stay,
+    /// the oldest go. A miss only costs a download, so eviction is always safe.
+    async fn trim_attachment_blobs(&self, cap: i64) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM attachment_blobs WHERE sha256 IN (
+                 SELECT sha256 FROM (
+                     SELECT sha256, SUM(size) OVER (ORDER BY created_at DESC, rowid DESC) AS running
+                     FROM attachment_blobs
+                 ) WHERE running > ?
+             )",
+        )
+        .bind(cap)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
 impl Storage for SqliteStorage {
     async fn save_order(&self, order: &OrderInfo) -> Result<()> {
         let data = serde_json::to_string(order)?;
@@ -516,6 +539,7 @@ impl Storage for SqliteStorage {
             "DELETE FROM trades",
             "DELETE FROM messages",
             "DELETE FROM bond_claims",
+            "DELETE FROM attachment_blobs",
             "DELETE FROM queued_messages",
             "DELETE FROM orders",
         ] {
@@ -529,10 +553,15 @@ impl Storage for SqliteStorage {
                 .execute(&mut *tx)
                 .await?;
         }
-        sqlx::query("DELETE FROM settings WHERE key = ?")
-            .bind(settings_keys::BOND_CLAIM_RETAINED_NODES)
-            .execute(&mut *tx)
-            .await?;
+        for key in [
+            settings_keys::BOND_CLAIM_RETAINED_NODES,
+            settings_keys::RESTORE_SNAPSHOT,
+        ] {
+            sqlx::query("DELETE FROM settings WHERE key = ?")
+                .bind(key)
+                .execute(&mut *tx)
+                .await?;
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -695,6 +724,27 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn set_trade_range_slice(
+        &self,
+        order_id: &str,
+        fiat_amount: Option<f64>,
+        amount_sats: Option<u64>,
+    ) -> Result<()> {
+        // json(?) so a number stays a JSON number and `None` a JSON null.
+        let sql = "UPDATE trades SET data = json_set(\
+             data, \
+             '$.order.fiat_amount', json(?), \
+             '$.order.amount_sats', json(?)) \
+             WHERE json_extract(data, '$.order.id') = ?";
+        sqlx::query(sql)
+            .bind(serde_json::to_string(&fiat_amount)?)
+            .bind(serde_json::to_string(&amount_sats)?)
+            .bind(order_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn update_trade_peer_reputation(
         &self,
         order_id: &str,
@@ -793,6 +843,29 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn save_attachment_blob(&self, sha256: &str, blob: &[u8]) -> Result<()> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO attachment_blobs (sha256, data, size, created_at)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(sha256)
+        .bind(blob)
+        .bind(blob.len() as i64)
+        .bind(crate::rt::unix_now())
+        .execute(&self.pool)
+        .await?;
+        self.trim_attachment_blobs(ATTACHMENT_CACHE_BYTES).await
+    }
+
+    async fn get_attachment_blob(&self, sha256: &str) -> Result<Option<Vec<u8>>> {
+        let row: Option<(Vec<u8>,)> =
+            sqlx::query_as("SELECT data FROM attachment_blobs WHERE sha256 = ?")
+                .bind(sha256)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(data,)| data))
+    }
+
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()> {
         // Bind via json(?) so SQLite stores the timestamp as a JSON number, not
         // a string — a string would fail to deserialize back into Option<i64>.
@@ -801,6 +874,22 @@ impl Storage for SqliteStorage {
              WHERE json_extract(data, '$.order.id') = ?";
         sqlx::query(sql)
             .bind(rated_at.to_string())
+            .bind(order_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn mark_trade_completed(&self, order_id: &str, completed_at: i64) -> Result<()> {
+        // First write wins: a row that already has a time keeps it. The
+        // denormalised column follows the document.
+        let sql = "UPDATE trades SET data = json_set(\
+             data, '$.completed_at', json(?)), completed_at = ? \
+             WHERE json_extract(data, '$.order.id') = ? \
+             AND json_extract(data, '$.completed_at') IS NULL";
+        sqlx::query(sql)
+            .bind(completed_at.to_string())
+            .bind(completed_at)
             .bind(order_id)
             .execute(&self.pool)
             .await?;
@@ -1247,6 +1336,12 @@ mod tests {
             peer_days: None,
             rated_at: None,
             bond: None,
+            buyer_trade_pubkey: None,
+            seller_trade_pubkey: None,
+            cashu_mint_url: None,
+            cashu_escrow_token: None,
+            cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1318,6 +1413,12 @@ mod tests {
             peer_days: None,
             rated_at: None,
             bond: None,
+            buyer_trade_pubkey: None,
+            seller_trade_pubkey: None,
+            cashu_mint_url: None,
+            cashu_escrow_token: None,
+            cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1366,16 +1467,10 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// The durable rated marker (issue #339) round-trips as a JSON number, is
-    /// scoped to a single order id, and is absent until written.
-    #[tokio::test]
-    async fn mark_trade_rated_round_trips_by_order_id() {
+    /// A buyer's row on `order_id`, for the per-order marker tests.
+    fn trade_row(row_id: &str, order_id: &str) -> crate::api::types::TradeInfo {
         use crate::api::types::*;
-
-        let path = temp_db_path();
-        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
-
-        let trade = |row_id: &str, order_id: &str| TradeInfo {
+        TradeInfo {
             id: row_id.into(),
             order: OrderInfo {
                 id: order_id.into(),
@@ -1412,9 +1507,24 @@ mod tests {
             peer_days: None,
             rated_at: None,
             bond: None,
-        };
-        storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
-        storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
+            buyer_trade_pubkey: None,
+            seller_trade_pubkey: None,
+            cashu_mint_url: None,
+            cashu_escrow_token: None,
+            cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
+        }
+    }
+
+    /// The durable rated marker (issue #339) round-trips as a JSON number, is
+    /// scoped to a single order id, and is absent until written.
+    #[tokio::test]
+    async fn mark_trade_rated_round_trips_by_order_id() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        storage.save_trade(&trade_row("row-a", "order-a")).await.unwrap();
+        storage.save_trade(&trade_row("row-b", "order-b")).await.unwrap();
 
         // Absent until written.
         let a = storage
@@ -1441,6 +1551,47 @@ mod tests {
             .unwrap()
             .expect("order-b survives");
         assert_eq!(b.rated_at, None);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The completion time (issue #642) is a JSON number, scoped to one order,
+    /// and never moved once written: a replayed `success` keeps the first.
+    #[tokio::test]
+    async fn mark_trade_completed_keeps_the_first_time() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        storage
+            .save_trade(&trade_row("row-a", "order-a"))
+            .await
+            .unwrap();
+        storage
+            .save_trade(&trade_row("row-b", "order-b"))
+            .await
+            .unwrap();
+
+        storage
+            .mark_trade_completed("order-a", 1_700_000_000)
+            .await
+            .unwrap();
+        storage
+            .mark_trade_completed("order-a", 1_700_009_999)
+            .await
+            .unwrap();
+
+        let a = storage
+            .get_trade_by_order_id("order-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.completed_at, Some(1_700_000_000));
+        let b = storage
+            .get_trade_by_order_id("order-b")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(b.completed_at, None);
 
         drop(storage);
         let _ = std::fs::remove_file(&path);
@@ -1491,6 +1642,12 @@ mod tests {
             peer_days: None,
             rated_at: None,
             bond: None,
+            buyer_trade_pubkey: None,
+            seller_trade_pubkey: None,
+            cashu_mint_url: None,
+            cashu_escrow_token: None,
+            cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
@@ -1568,6 +1725,12 @@ mod tests {
             peer_days: None,
             rated_at: None,
             bond: None,
+            buyer_trade_pubkey: None,
+            seller_trade_pubkey: None,
+            cashu_mint_url: None,
+            cashu_escrow_token: None,
+            cashu_locked_at: None,
+            cashu_rejected_escrow_tokens: Vec::new(),
         };
         // Maker-shaped row (empty peer) and a poisoned pre-fix row (daemon
         // pubkey seeded by the old take path).
@@ -2095,6 +2258,30 @@ mod tests {
     }
 
     /// Issue #533: a new user must find the app as a fresh install leaves it.
+    /// The attachment cache (#589): blobs come back as stored, the newest
+    /// survive the size cap, and a new identity starts with none.
+    #[tokio::test]
+    async fn attachment_blobs_are_cached_bounded_and_wiped_with_the_identity() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        assert_eq!(storage.get_attachment_blob("a").await.unwrap(), None);
+
+        storage.save_attachment_blob("a", &[1u8; 10]).await.unwrap();
+        storage.save_attachment_blob("b", &[2u8; 10]).await.unwrap();
+        storage.save_attachment_blob("c", &[3u8; 10]).await.unwrap();
+        assert_eq!(storage.get_attachment_blob("b").await.unwrap(), Some(vec![2u8; 10]));
+
+        // Room for two: the oldest goes, the two newest stay.
+        storage.trim_attachment_blobs(25).await.unwrap();
+        assert_eq!(storage.get_attachment_blob("a").await.unwrap(), None);
+        assert!(storage.get_attachment_blob("b").await.unwrap().is_some());
+        assert!(storage.get_attachment_blob("c").await.unwrap().is_some());
+
+        storage.clear_identity_data().await.unwrap();
+        assert_eq!(storage.get_attachment_blob("c").await.unwrap(), None);
+        let _ = std::fs::remove_file(path);
+    }
+
     /// Everything the identity produced goes; what belongs to the device —
     /// relays, the node choice, preferences — stays.
     #[tokio::test]
@@ -2146,6 +2333,12 @@ mod tests {
                 peer_days: None,
                 rated_at: None,
                 bond: None,
+                buyer_trade_pubkey: None,
+                seller_trade_pubkey: None,
+                cashu_mint_url: None,
+                cashu_escrow_token: None,
+                cashu_locked_at: None,
+                cashu_rejected_escrow_tokens: Vec::new(),
             })
             .await
             .unwrap();
@@ -2185,6 +2378,7 @@ mod tests {
             settings_keys::invoice_step_start("order-a"),
             settings_keys::trade_wiped("order-a"),
             settings_keys::BOND_CLAIM_RETAINED_NODES.to_string(),
+            settings_keys::RESTORE_SNAPSHOT.to_string(),
         ] {
             storage.set_setting(&key, "1").await.unwrap();
         }
@@ -2217,6 +2411,7 @@ mod tests {
             settings_keys::invoice_step_start("order-a"),
             settings_keys::trade_wiped("order-a"),
             settings_keys::BOND_CLAIM_RETAINED_NODES.to_string(),
+            settings_keys::RESTORE_SNAPSHOT.to_string(),
         ] {
             assert_eq!(
                 storage.get_setting(&key).await.unwrap(),

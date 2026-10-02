@@ -10,6 +10,7 @@ import 'package:mostro/features/order/models/bond_rules.dart'
 import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
+import 'package:mostro/features/trades/models/trade_status.dart';
 import 'package:mostro/features/trades/models/trades_list_rules.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
@@ -23,6 +24,7 @@ class TradeRow {
   const TradeRow({
     required this.orderId,
     required this.status,
+    required this.rowStatus,
     required this.state,
     required this.isSelling,
     required this.isMaker,
@@ -35,6 +37,7 @@ class TradeRow {
     required this.paymentMethod,
     required this.startedAt,
     required this.peerHandle,
+    this.completedAt,
     this.claimBadge = TradeClaimBadge.none,
     this.claimOnly = false,
   });
@@ -44,6 +47,12 @@ class TradeRow {
   /// Live when the order is still moving, else the persisted status — see
   /// [shownTradeStatus], which the trade screen shares.
   final rust_types.OrderStatus status;
+
+  /// The persisted row's own status, whatever the book says: the one the
+  /// conversation's liveness is decided on, as Rust's `chat_still_relevant_at`
+  /// does. [status] can run ahead of it: a `success` from the book before the
+  /// row has its own, and its [completedAt].
+  final rust_types.OrderStatus rowStatus;
   final TradeRowState state;
   final bool isSelling;
 
@@ -66,18 +75,16 @@ class TradeRow {
   /// or while its pseudonym resolves.
   final String? peerHandle;
 
+  /// Unix seconds when Rust recorded the trade's completion, null otherwise;
+  /// it dates the conversation's grace window (#642).
+  final int? completedAt;
+
   /// The payout claim on this order, if any (docs/ANTI_ABUSE_BOND.md §8.3).
   final TradeClaimBadge claimBadge;
 
   /// Built from the claim store alone: the trade row is gone.
   final bool claimOnly;
 }
-
-const _successes = {
-  rust_types.OrderStatus.success,
-  rust_types.OrderStatus.settledByAdmin,
-  rust_types.OrderStatus.completedByAdmin,
-};
 
 /// Every trade of the user as a [TradeRow], unfiltered.
 ///
@@ -129,6 +136,7 @@ TradeRow _claimRow(rust_types.BondClaim claim, TradeClaimBadge badge) =>
     TradeRow(
       orderId: claim.orderId,
       status: rust_types.OrderStatus.canceled,
+      rowStatus: rust_types.OrderStatus.canceled,
       state: claimOnlyRowState(badge),
       isSelling: false,
       isMaker: false,
@@ -161,14 +169,19 @@ TradeRow _row(
             : ref.watch(tradeStatusProvider(order.id)).valueOrNull,
     isTake: !order.isMine,
   );
+  final isSelling = trade.role == rust_types.TradeRole.seller;
+  // Only a trade at its rating step watches the rating: a seller from the
+  // release on (#586), anyone from success.
   final ratedByMe =
       trade.ratedAt != null ||
-      (_successes.contains(status) && ref.watch(ratedByMeProvider(order.id)));
-  final isSelling = trade.role == rust_types.TradeRole.seller;
+      (tradeStatusFor(status, isBuyer: !isSelling) ==
+              TradeStatus.pendingRating &&
+          ref.watch(ratedByMeProvider(order.id)));
   final peer = trade.counterpartyPubkey;
   return TradeRow(
     orderId: order.id,
     status: status,
+    rowStatus: persisted,
     state: applyClaimBadge(
       TradeRowState.of(
         status: status,
@@ -192,6 +205,10 @@ TradeRow _row(
         peer.isEmpty
             ? null
             : ref.watch(peerNymProvider(peer)).valueOrNull?.pseudonym,
+    completedAt:
+        trade.completedAt == null
+            ? null
+            : platformInt64ToInt(trade.completedAt!),
     claimBadge: claimBadge,
   );
 }

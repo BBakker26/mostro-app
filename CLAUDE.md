@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-09-17
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
-- nostr-sdk 0.45+, mostro-core 0.14.6, flutter_rust_bridge 2.11.1, Riverpod (state),
+- nostr-sdk 0.45+, mostro-core 0.16.0, flutter_rust_bridge 2.11.1, Riverpod (state),
   go_router (navigation), sqlx (SQLite, native) / indexed_db_futures (IndexedDB, web),
   sembast (Dart UI-layer state), bip32/bip39 (keys), chacha20poly1305 (file encryption)
 - Sembast (Dart, all platforms) for UI-layer state; SQLite via `sqlx` (Rust, native) /
@@ -65,6 +65,9 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (no-op off web) — rename that flag on one side only and the check silently never fires.
   The CI run also sets `SMOKE_BOND_STORE=1`: it seeds bond rows (`test/web/smoke/seed/`) into
   IndexedDB, reloads, and compares them with what `lib/core/web/store_probe.dart` read back.
+  And `SMOKE_ATTACHMENTS=1`: it serves a Blossom endpoint on a **second origin** and waits for
+  `lib/core/web/attachment_probe.dart` to report an encrypted upload, verified download and
+  IndexedDB cache round trip — the one check that a CORS fetch from the isolated page works.
 - **The FCM messaging worker is a second service worker**, `web/firebase-messaging-sw.js`,
   registered from `web/index.html` and `web_push_web.dart` **relative to the base path** under
   the scope `firebase-cloud-messaging-push-scope` — Firebase's default is the origin root, a 404
@@ -172,6 +175,12 @@ bridged by flutter_rust_bridge.
   `fix(phaseX): review round N`). Not big-bang.
 - Conventional commits (`feat/fix/docs/refactor/chore(scope)`), branches `type/kebab-desc`,
   everything via **PR to `main`** (gh CLI) + CodeRabbit review.
+- **Before opening a PR, read and follow `CONTRIBUTING.md § Contribution quality bar`**
+  (summarised in `AGENTS.md § Before opening a pull request`): accepted issue, every section
+  of `.github/pull_request_template.md`, Manual testing a person actually ran, screenshots for
+  visible changes, and for a fix a `test:` commit that fails on `main`, first after any
+  `refactor:` seam commits. Exemptions (Markdown-only, maintainers, bots, `quality:exempt`) and the
+  `quality:no-red-test` waiver are in that section.
 
 ## Releases (`docs/RELEASING.md`)
 - **A pushed tag `vX.Y.Z` is the release.** `.github/workflows/release.yml` builds two signed
@@ -232,8 +241,9 @@ bridged by flutter_rust_bridge.
   user's session. The stores are process-wide and tests run in parallel, which is why the
   identity lifecycle test calls `delete_identity_inner(false)`.
 - **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
-  the NIP-69 `created_at` tag (mostro#971), capped at the event's time and falling back to it on
-  older nodes. The event's own `created_at` moves on every revision of the addressable event, so
+  the NIP-69 `published_at` tag (mostro#1000), then the legacy `created_at` tag (daemon builds
+  between mostro#971 and #1000), then the event's time on older nodes; a tag value is capped at
+  the event's time. The event's own `created_at` moves on every revision of the addressable event, so
   anything that must pick the **newest revision** has to read the event, not the order —
   `node_stats::dedup_latest` carries it alongside as `Revision`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
@@ -244,6 +254,16 @@ bridged by flutter_rust_bridge.
   means "taken, real state unknown", and a trade's status comes from daemon messages only
   (`wire_status_applies` guards both ingest paths). Treating it as `Active` offers actions the
   daemon rejects with `CantDo` (#203).
+- **A `success` keeps its peer chat for one hour, dated by the completion itself (#642).**
+  `completed_at` is written for `success` alone, before that status reaches the trade row, from
+  the `created_at` of what carried it — the buyer's `purchase-completed`, the
+  seller's Kind 38383 `success` revision (the seller never gets `purchase-completed`) — capped
+  at now, first write wins. Never date it from a now-dated emit or the local clock: a replayed
+  or restored history would reopen old chats. A `success` row without it is closed. A dispute
+  gets no window: the book's plain terminal never replaces an admin verdict
+  (`wire_status_applies`), and a verdict refines a replayed `success` in either order
+  (`status_write_blocked`). Dart decides the room on the persisted row (`TradeRow.rowStatus` +
+  `completedAt`), like `chat_still_relevant_at`, not on the live book status.
 - **Bond statuses never reach the wire book.** `WaitingTakerBond` publishes as `pending` (the
   order stays takeable by others until a bond locks) and `WaitingMakerBond` publishes nothing
   (the order is invisible until the maker's bond locks). Both exist only on the local trade row,

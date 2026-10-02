@@ -190,6 +190,45 @@ void main() {
     });
   });
 
+  group('invoiceCheckWord', () {
+    // `invoice.check` is what automation reads instead of the row's
+    // translated sentence, so a problem shipped without a word leaves a
+    // scenario asserting on a field that never appears.
+    test('every problem has a distinct kebab-case word', () {
+      final words = {
+        for (final problem in InvoiceProblem.values)
+          problem: invoiceCheckWord(InvoiceCheckError(problem)),
+      };
+
+      expect(words[InvoiceProblem.expiresTooSoon], 'expires-too-soon');
+      expect(words[InvoiceProblem.wrongAmount], 'wrong-amount');
+      expect(words[InvoiceProblem.wrongNetwork], 'wrong-network');
+      expect(words[InvoiceProblem.expired], 'expired');
+      expect(words[InvoiceProblem.malformed], 'malformed');
+      expect(words[InvoiceProblem.unrecognized], 'unrecognized');
+
+      for (final word in words.values) {
+        expect(word, isNotNull);
+        expect(word, matches(RegExp(r'^[a-z]+(-[a-z]+)*$')), reason: '$word');
+      }
+      expect(words.values.toSet(), hasLength(InvoiceProblem.values.length));
+    });
+
+    test('the two accepted inputs carry a word of their own', () {
+      expect(invoiceCheckWord(const InvoiceCheckValid(250)), 'valid');
+      expect(invoiceCheckWord(const InvoiceCheckAddress()), 'address');
+    });
+
+    // The screen draws the row for exactly the states that have a word, so
+    // absence means "still judging" — never "fine". A harness that read it
+    // as a boolean would call an unjudged invoice good.
+    test('an open verdict has no word', () {
+      expect(invoiceCheckWord(const InvoiceCheckNone()), isNull);
+      expect(invoiceCheckWord(const InvoiceCheckPending()), isNull);
+      expect(invoiceCheckWord(const InvoiceCheckUnverified()), isNull);
+    });
+  });
+
   group('normalizeInvoiceInput', () {
     test('strips whitespace and the lightning scheme', () {
       expect(normalizeInvoiceInput('  lightning:lnbc1abc \n'), 'lnbc1abc');
@@ -220,6 +259,19 @@ void main() {
     test('is null for a counterpart with no rated trade', () {
       expect(counterpartStars(0, 0), isNull);
       expect(counterpartStars(null, null), isNull);
+    });
+  });
+
+  group('nwcInvoiceExpirySecs', () {
+    // Left to the wallet, an NWC invoice may expire inside the node's
+    // `invoice_expiration_window` and be refused by the check on every
+    // try, with nothing the buyer can do about it.
+    test('outlives the node window by the margin', () {
+      expect(nwcInvoiceExpirySecs(600), 600 + kNwcInvoiceExpiryMarginSecs);
+    });
+
+    test('an unknown window still asks for the margin', () {
+      expect(nwcInvoiceExpirySecs(null), kNwcInvoiceExpiryMarginSecs);
     });
   });
 }

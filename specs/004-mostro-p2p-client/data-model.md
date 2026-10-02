@@ -46,7 +46,7 @@ A buy or sell offer on the Mostro network.
 | payment_method | String | Fiat payment method description |
 | premium | f64 | Price premium/discount percentage |
 | creator_pubkey | String | Public key of order creator |
-| created_at | Timestamp | When order was created |
+| created_at | Timestamp | When order was created: the Kind 38383 `published_at` tag, else the legacy `created_at` tag, else the event's `created_at`; a tag value is capped at the event's `created_at` |
 | expires_at | Timestamp? | Expiration time (null if no expiry) |
 | nostr_event_id | String? | Kind 38383 event ID on relay |
 | is_mine | bool | Whether current user created this order |
@@ -119,7 +119,7 @@ is why the schema carries an expression index over it.
 | cooperative_cancel_state | Enum? | `RequestedByMe`, `RequestedByPeer`, `Accepted`, null |
 | timeout_at | Timestamp? | When current state times out (set on take: `now + 900`; used by the stale-state sweep as its age gate) |
 | started_at | Timestamp | When trade began |
-| completed_at | Timestamp? | When trade finished (null if active) |
+| completed_at | Timestamp? | When the trade completed with `success` (issue #642): recorded (`db.mark_trade_completed`, first write wins, never later than now) before the `success` is written, from the `created_at` of what carried it — the buyer's `purchase-completed`, or the Kind 38383 `success` revision for the seller. Null while active, for every other ending, and for a `success` completed before #642 or at an unknown time; an admin verdict that later refines a replayed `success` leaves it in place. Dates the peer chat's one-hour grace window, which only a `success` row opens (`contracts/messages.md`) |
 | outcome | Enum? | `Success`, `Canceled`, `Expired`, `DisputeWon`, `DisputeLost` |
 | rated_at | Timestamp? | When the local user rated the counterparty; durable marker written by `db.mark_trade_rated` after `submit_rating` publishes (issue #339). "Did I rate this trade" is local knowledge nothing on the wire can rebuild, so the in-memory `RATING_STORE` rehydrates from this on restart — the store stays the cache, this is authoritative on load. The score itself is not persisted (the rated UI shows only a label) |
 | bond | BondInfo? | Anti-abuse bond the node required for this trade (`docs/ANTI_ABUSE_BOND.md` §7.1): `role` (`Maker`/`Taker`), `amount_sats`, `invoice` (the bond bolt11, `None` after a fresh-device restore), `state` (`Requested`/`Locked`/`Released`/`Slashed`), `requested_at`, `expires_at` (decoded from the bolt11), `locked_at`. Null on nodes without bonds and on rows written before the field |
@@ -330,27 +330,33 @@ A Nostr Wallet Connect wallet connection for automatic invoice payment.
 
 ### FileAttachment
 
-An encrypted file sent or received in trade chat.
+An encrypted file sent or received in trade chat (#589). Stored inside its
+`Message` (`AttachmentInfo`), read from v1's JSON message; nothing about the
+key is stored — it is re-derived (raw ECDH with the counterpart) when needed.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
-| message_id | UUID | FK → Message |
 | file_type | Enum | `Image`, `Document`, `Video` |
-| mime_type | String | MIME type (e.g., "image/jpeg") |
-| file_name | String | Original file name |
-| file_size | u64 | Size in bytes (max 25MB) |
-| blossom_url | String | URL on Blossom server |
-| encryption_nonce | Bytes | 12-byte nonce for ChaCha20-Poly1305 |
-| encryption_key_encrypted | Bytes | Symmetric key encrypted at rest (wrapped by the device master key; plaintext key is ephemeral and held only in memory during encrypt/decrypt) |
-| key_wrapping_id | String | Identifier of the wrapping key used to encrypt `encryption_key_encrypted` |
+| mime_type | String | As declared by the sender (a label; the bytes are sniffed after decrypting) |
+| file_name | String | Sanitized: last path component, no control characters |
+| file_size | u64 | Size before encryption, in bytes (max 25MB) |
+| blossom_url | String | `https://…/<sha256>` |
+| sha256 | String | Hex SHA-256 of the encrypted blob, from the URL |
+| encrypted_size | u64 | `file_size` + 28 (nonce + tag) |
+| width / height | u32? | Pixel size, images only |
 | download_status | Enum | `Pending`, `Downloading`, `Downloaded`, `Failed` |
-| local_path | String? | Path to decrypted file on device (null if not downloaded) |
-| created_at | Timestamp | When attachment was created |
+
+The encrypted blob itself is cached in `attachment_blobs` (keyed by
+`sha256`, still ciphertext, 300 MB cap, oldest evicted first,
+wiped with the identity). On the web it is the IndexedDB store of the same
+name, with an `attachment_blob_index` store of `{sha256, size, created_at}`
+entries the eviction reads instead of the blobs; the cap there is 100 MB,
+since the origin's quota is shared with the rest of the app's data.
 
 **Validation rules**:
 - `file_size` MUST not exceed 26,214,400 bytes (25MB).
-- `file_type` determined from `mime_type`.
+- Only `https://` URLs naming a 64-hex blob hash are accepted; anything else
+  keeps the message as text.
 - Images auto-download; documents and videos are download-on-demand.
 
 ---

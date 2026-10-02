@@ -16,8 +16,10 @@ import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/core/test_environment.dart';
 import 'package:mostro/core/lifecycle/app_lifecycle_service.dart';
 import 'package:mostro/core/lifecycle/resume_resync.dart';
+import 'package:mostro/core/web/attachment_probe.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/core/web/store_probe.dart';
+import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/walkthrough/providers/first_run_provider.dart';
@@ -36,6 +38,7 @@ import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show BondClaimPhase, BondClaimUpdate, BondSlashedEvent, SlashCause;
+import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show rawTradesProvider;
@@ -94,6 +97,9 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Before any startup work below, so a failure in it is captured at the
   // verbosity the user asked for rather than the default.
   await settings_api.setLoggingEnabled(enabled: savedSettings.loggingEnabled);
+  // The Rust settings store starts empty at every launch, and the take flow
+  // reads the address from it.
+  await syncLightningAddressToCore(savedSettings.defaultLightningAddress);
 
   // Initialize the persistent store (SQLite file off the web, IndexedDB
   // database on it). Must come before any trade / order operations that read
@@ -153,6 +159,10 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     // it seeds bond rows and checks they come back through the bridge — see
     // lib/core/web/store_probe.dart. A normal launch skips it entirely.
     if (kIsWeb && storeProbeRequested()) unawaited(publishStoreProbe());
+    // Likewise for SMOKE_ATTACHMENTS=1: an encrypted upload and read-back
+    // against the smoke test's own Blossom endpoint (attachment_probe.dart).
+    final probeServer = kIsWeb ? attachmentProbeServer() : null;
+    if (probeServer != null) unawaited(publishAttachmentProbe(probeServer));
   } catch (e) {
     debugPrint('[main] rehydrate active Mostro node failed: $e');
     markBridgeFailed(e);
@@ -197,14 +207,23 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Initialize the Nostr relay pool. `null` means the compiled-in defaults
   // (config.rs); a non-empty seed list replaces them entirely.
   // This must happen before any Nostr/order API calls.
-  await nostr_api.initialize(relays: seedRelays.isEmpty ? null : seedRelays);
+  //
+  // Guarded like the steps above: this runs before `runApp`, and an escaping
+  // error here left the app on its splash screen for good. A launch that
+  // reuses a live process (Android destroyed the activity, not the process)
+  // finds the pool already running; Rust re-attaches to it rather than fail.
+  try {
+    await nostr_api.initialize(relays: seedRelays.isEmpty ? null : seedRelays);
 
-  // Log initial relay state for diagnostics.
-  final relays = await nostr_api.getRelays();
-  final connState = await nostr_api.getConnectionState();
-  debugPrint(
-    '[main] relay pool initialized — state=$connState relays=${relays.map((r) => '${r.url}:${r.status}').join(', ')}',
-  );
+    // Log initial relay state for diagnostics.
+    final relays = await nostr_api.getRelays();
+    final connState = await nostr_api.getConnectionState();
+    debugPrint(
+      '[main] relay pool initialized — state=$connState relays=${relays.map((r) => '${r.url}:${r.status}').join(', ')}',
+    );
+  } catch (e, st) {
+    debugPrint('[main] relay pool init failed: $e\n$st');
+  }
 
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();
@@ -243,6 +262,8 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     isEnabled: (event) => prefs.getBool(event.prefsKey) ?? true,
     identityCreatedAt: IdentityService.createdAt,
     currentLocation: _currentLocation,
+    disputeIdForTrade:
+        (tradeId) => container.read(disputeByTradeIdProvider(tradeId))?.id,
   );
   pumpEvents('trade-cards', tradeUpdateStream.next, eventCards.onTradeUpdate);
   pumpEvents('chat-cards', chatMessageStream.next, eventCards.onChatMessage);
@@ -252,6 +273,18 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // the first suspension is observed too.
   AppLifecycleService(
     onResume: ResumeResync(container: container).run,
+  ).attach();
+
+  // Copies of attachments handed to another app ("open with…", share):
+  // whatever an earlier run left behind goes now, and a resume clears those
+  // past their lifetime — a younger one may still be read (#589).
+  final attachmentLauncher = container.read(attachmentLauncherProvider);
+  unawaited(attachmentLauncher.sweep());
+  AppLifecycleService(
+    onResume:
+        () => attachmentLauncher.sweep(
+          olderThan: attachmentLauncher.copyLifetime,
+        ),
   ).attach();
 
   runApp(

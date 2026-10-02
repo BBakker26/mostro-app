@@ -1202,44 +1202,7 @@ mod tests {
         // daemon's. Nothing below is allowed to use the former.
         let row_id = "11111111-1111-4111-8111-111111111111";
         let order_id = "22222222-2222-4222-8222-222222222222";
-        let mut trade = TradeInfo {
-            id: row_id.into(),
-            order: OrderInfo {
-                id: order_id.into(),
-                kind: OrderKind::Sell,
-                status: OrderStatus::WaitingBuyerInvoice,
-                amount_sats: None,
-                fiat_amount: Some(100.0),
-                fiat_amount_min: None,
-                fiat_amount_max: None,
-                fiat_code: "CUP".into(),
-                payment_method: "bank".into(),
-                premium: 0.0,
-                creator_pubkey: "maker".into(),
-                created_at: 1,
-                expires_at: None,
-                is_mine: false,
-                rating: 0.0,
-                total_reviews: 0,
-                days_active: 0,
-            },
-            role: TradeRole::Buyer,
-            counterparty_pubkey: String::new(),
-            current_step: TradeStep::Buyer(BuyerStep::OrderTaken),
-            hold_invoice: None,
-            buyer_invoice: None,
-            trade_key_index: 1,
-            cooperative_cancel_state: None,
-            timeout_at: None,
-            started_at: 1,
-            completed_at: None,
-            outcome: None,
-            peer_rating: None,
-            peer_reviews: None,
-            peer_days: None,
-            rated_at: None,
-            bond: None,
-        };
+        let mut trade = trade_row(row_id, order_id);
         storage.save_trade(&trade).await.unwrap();
 
         // Read.

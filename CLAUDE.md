@@ -49,6 +49,13 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (`--base-href` for the sub-path, `--pwa-strategy=none` so Flutter's service worker does not
   take the isolation shim's scope). Every one of these, when wrong, yields a **blank page** —
   `test/web/pages_bundle_test.dart` guards them statically.
+- **No Rust runs on a web worker.** FRB's default handler would run every non-async API function
+  on a worker pool and every async one on the main thread (`spawn_local`); a `std::sync` lock
+  contended across the two traps the page with "Atomics.wait cannot be called in this context"
+  (#294), and the lock behind every opaque object is one of them. `rust/src/api/bridge_handler.rs`
+  defines `FLUTTER_RUST_BRIDGE_HANDLER`, which on web runs both kinds on the main thread, and
+  `bridge_does_not_use_the_default_handler` fails if codegen ever goes back to the default.
+  Don't hand work to `FLUTTER_RUST_BRIDGE_HANDLER.thread_pool()` either.
 - `cargo check --target wasm32-unknown-unknown` is **not** a substitute for `build-web.sh`: two
   wasm-only requirements fail later than type-checking. `getrandom` (0.2 via bip32/k256, 0.4 via
   nostr's `rand`) needs its JS backend feature enabled in `rust/Cargo.toml`, and nostr 0.45's

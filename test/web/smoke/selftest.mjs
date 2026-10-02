@@ -39,7 +39,9 @@ const CASES = [
   {
     fixture: 'page-error',
     expected: 1,
-    what: 'one uncaught page error fails the run',
+    what: 'one uncaught page error fails the run — and its stack is printed',
+    // The message alone never named the Rust lock behind #294; the frames do.
+    reports: /\[pageerror\] synthetic uncaught page error[^\n]*\n\s+at /,
   },
   // The locale check is the one assertion "the view mounted" cannot make for
   // itself: with a mixed list, a sanitizer that keeps "es-AR" and one that
@@ -124,7 +126,7 @@ const CASES = [
 
 let failures = 0;
 
-for (const { fixture, expected, what, env } of CASES) {
+for (const { fixture, expected, what, env, reports } of CASES) {
   const result = spawnSync(process.execPath, [join(here, 'smoke.mjs')], {
     cwd: here,
     encoding: 'utf8',
@@ -141,8 +143,12 @@ for (const { fixture, expected, what, env } of CASES) {
   });
 
   const actual = result.status;
-  const ok = actual === expected;
-  console.log(`${ok ? '✓' : '✗'} ${what} — exit ${actual}, expected ${expected}`);
+  const reported = !reports || reports.test(`${result.stdout}${result.stderr}`);
+  const ok = actual === expected && reported;
+  console.log(
+    `${ok ? '✓' : '✗'} ${what} — exit ${actual}, expected ${expected}` +
+      (reported ? '' : `; output does not match ${reports}`),
+  );
 
   if (!ok) {
     failures += 1;

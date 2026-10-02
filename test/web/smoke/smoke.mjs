@@ -12,6 +12,7 @@
 //   3. a Rust bridge call returned        (the FRB worker pool survived)
 //  3b. seeded bond rows read back         (opt-in: SMOKE_BOND_STORE=1)
 //  3d. an attachment upload + read-back   (opt-in: SMOKE_ATTACHMENTS=1)
+//  3e. Chrome would install it as an app (opt-in: SMOKE_INSTALLABLE=1)
 //   4. nothing errored along the way      (console + uncaught page errors)
 //   5. every asset the page asked for was served (catches --base-href breakage)
 //
@@ -30,7 +31,8 @@
 
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -585,6 +587,17 @@ async function main() {
       console.log('✓ attachment uploaded, downloaded, cached and decrypted');
     }
 
+    // 3e. Chrome would install the page as an app (#658). Opt-in:
+    //     SMOKE_INSTALLABLE=1. A broken manifest link, a missing icon or a
+    //     scope that excludes the start URL all leave the page working and
+    //     only take away the install prompt, and with it web push on iOS,
+    //     which Safari only allows for a home-screen app.
+    if (process.env.SMOKE_INSTALLABLE === '1') {
+      const reasons = await installabilityErrors(url);
+      if (reasons.length) await fail(`Chrome would not install the page: ${reasons.join(', ')}`);
+      console.log('✓ installable as an app');
+    }
+
     // 4/5. Anything the page complained about, and anything it asked for that
     //      this server could not serve.
     if (ignored.length) {
@@ -604,6 +617,36 @@ async function main() {
     server.close();
     blossom?.closeAllConnections();
     blossom?.close();
+  }
+}
+
+/**
+ * Chrome's own reasons not to install the page at [url], as error ids; empty
+ * when it would. Asks Chrome (`Page.getInstallabilityErrors`) instead of
+ * re-implementing its criteria. Two things make the answer mean something:
+ * the full Chromium build, because the default headless shell reports every
+ * page installable, and a persistent profile, because an incognito one never
+ * is. Polled briefly, since the manifest and its icons load after the page.
+ */
+async function installabilityErrors(url) {
+  const profile = await mkdtemp(join(tmpdir(), 'smoke-install-'));
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chromium' });
+  try {
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: 'load' });
+    const cdp = await context.newCDPSession(page);
+    const deadline = Date.now() + Math.min(TIMEOUT_MS, 15_000);
+    let reasons;
+    do {
+      const { installabilityErrors } = await cdp.send('Page.getInstallabilityErrors');
+      reasons = installabilityErrors.map((e) => e.errorId);
+      if (!reasons.length) return reasons;
+      await new Promise((ok) => setTimeout(ok, 500));
+    } while (Date.now() < deadline);
+    return reasons;
+  } finally {
+    await context.close().catch(() => {});
+    await rm(profile, { recursive: true, force: true }).catch(() => {});
   }
 }
 

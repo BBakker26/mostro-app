@@ -79,4 +79,20 @@ mod tests {
     fn app_version_carries_no_build_number() {
         assert!(!get_app_version().contains('+'));
     }
+
+    /// flutter_rust_bridge's default handler runs every non-async API function
+    /// on a web-worker pool, while async ones run on the browser's main thread.
+    /// Both reach the same `std::sync` locks, including the one behind every
+    /// opaque object, and a contended lock on the main thread traps with
+    /// "Atomics.wait cannot be called in this context" — a blank page or a
+    /// dead bridge (#294). The bridge must go through this crate's handler.
+    #[test]
+    fn bridge_does_not_use_the_default_handler() {
+        let generated = include_str!("../frb_generated.rs");
+        assert!(
+            !generated.contains("frb_generated_default_handler!"),
+            "frb_generated.rs installs flutter_rust_bridge's default handler, which runs \
+             non-async API functions on web workers (#294)"
+        );
+    }
 }

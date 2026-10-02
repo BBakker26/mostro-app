@@ -214,5 +214,65 @@ void main() {
 
       expect(helper.container.read(bookPaymentMethodsProvider), ['Wise']);
     });
+
+    test('only the picked currencies\' orders offer their methods', () async {
+      final helper = await bookWith([
+        fakeOrder(
+          id: 'eur',
+          kind: 'sell',
+          fiatCode: 'EUR',
+          paymentMethod: 'SEPA instant',
+        ),
+        fakeOrder(
+          id: 'ars',
+          kind: 'sell',
+          fiatCode: 'ARS',
+          paymentMethod: 'Efectivo',
+        ),
+      ]);
+      helper.setTab(OrderType.buy);
+      expect(helper.container.read(bookPaymentMethodsProvider), [
+        'Efectivo',
+        'SEPA instant',
+      ]);
+
+      await helper.filter(const OrderFilters(currencies: ['EUR']));
+
+      expect(helper.container.read(bookPaymentMethodsProvider), [
+        'SEPA instant',
+      ]);
+    });
+
+    test(
+      'every method the book offers finds the orders that carry it',
+      () async {
+        final helper = await bookWith([
+          fakeOrder(
+            id: 'a',
+            kind: 'sell',
+            paymentMethod: ' Wise , sepa instant',
+          ),
+          fakeOrder(
+            id: 'b',
+            kind: 'sell',
+            paymentMethod: 'SEPA Instant,,Bizum',
+          ),
+          fakeOrder(id: 'c', kind: 'sell', paymentMethod: 'Pix;Zelle'),
+        ]);
+        helper.setTab(OrderType.buy);
+
+        for (final method in helper.container.read(
+          bookPaymentMethodsProvider,
+        )) {
+          await helper.filter(OrderFilters(paymentMethods: [method]));
+
+          expect(
+            helper.ids(),
+            isNotEmpty,
+            reason: '"$method" is offered but finds no order',
+          );
+        }
+      },
+    );
   });
 }

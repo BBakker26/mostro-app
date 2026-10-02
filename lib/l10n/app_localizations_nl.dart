@@ -2562,7 +2562,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get pushWebStopsWithTab =>
-      'Stopt 48 uur nadat dit tabblad Mostro voor het laatst draaide';
+      'Stopt 30 tot 48 uur nadat dit tabblad Mostro voor het laatst draaide';
 
   @override
   String get pushStatusOff =>

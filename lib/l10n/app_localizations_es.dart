@@ -2564,7 +2564,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get pushWebStopsWithTab =>
-      'Se detiene 48 h después de la última vez que esta pestaña abrió Mostro';
+      'Se detiene entre 30 y 48 h después de la última vez que esta pestaña abrió Mostro';
 
   @override
   String get pushStatusOff =>

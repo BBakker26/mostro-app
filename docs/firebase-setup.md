@@ -117,7 +117,8 @@ After a `flutterfire configure`, copy the new web values into the worker's
 
 A closed tab does not refresh the **push server registration**: the server forgets it
 48 h after the last `/api/register`, and only a tab running the app sends another, so
-reopening the app is what refreshes it (§2.6), and Settings says so under the push
-toggle on the web. The browser's service worker is separate and does not expire with it.
+reopening the app is what refreshes it (§2.6). A running tab renews a registration
+once it is 12 to 18 h old, so push stops 30 to 48 h after the tab last ran, and
+Settings says so under the push toggle on the web. The browser's service worker is separate and does not expire with it.
 Safari offers push only to an installed (home-screen) app; in a plain Safari tab push
 reads as unsupported.

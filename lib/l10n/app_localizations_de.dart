@@ -2575,7 +2575,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get pushWebStopsWithTab =>
-      'Endet 48 h, nachdem Mostro zuletzt in diesem Tab lief';
+      'Endet 30 bis 48 h, nachdem Mostro zuletzt in diesem Tab lief';
 
   @override
   String get pushStatusOff => 'Aus – nichts ist beim Push-Server registriert';

@@ -2570,7 +2570,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pushWebStopsWithTab =>
-      'S’arrête 48 h après la dernière ouverture de Mostro dans cet onglet';
+      'S’arrête 30 à 48 h après la dernière ouverture de Mostro dans cet onglet';
 
   @override
   String get pushStatusOff =>

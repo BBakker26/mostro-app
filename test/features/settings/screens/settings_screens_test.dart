@@ -518,8 +518,9 @@ void main() {
     );
 
     // Web has no OS job to refresh the registration once the tab is closed,
-    // and the push server forgets it 48 h after the last one
-    // (docs/PUSH_NOTIFICATIONS.md §2.6, §9.1).
+    // and the push server forgets it 48 h after the last one, which a running
+    // tab sent 12 to 18 h earlier at most (docs/PUSH_NOTIFICATIONS.md §2.6,
+    // §9.1).
     testWidgets('on the web the toggle says when push stops', (tester) async {
       await _pump(
         tester,
@@ -528,7 +529,7 @@ void main() {
       );
 
       expect(
-        find.text('Stops 48 h after this tab last ran Mostro'),
+        find.text('Stops 30 to 48 h after this tab last ran Mostro'),
         findsOneWidget,
       );
     });
@@ -544,7 +545,7 @@ void main() {
 
       expect(_masterToggle, findsOneWidget);
       expect(
-        find.text('Stops 48 h after this tab last ran Mostro'),
+        find.text('Stops 30 to 48 h after this tab last ran Mostro'),
         findsNothing,
       );
     });

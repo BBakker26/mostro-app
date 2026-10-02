@@ -2564,7 +2564,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pushWebStopsWithTab =>
-      'Si ferma 48 h dopo l’ultima volta che questa scheda ha aperto Mostro';
+      'Si ferma tra 30 e 48 h dopo l’ultima volta che questa scheda ha aperto Mostro';
 
   @override
   String get pushStatusOff => 'Disattivate: nulla è registrato sul server push';

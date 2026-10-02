@@ -82,6 +82,17 @@ const IGNORABLE = [/WebSocket connection to 'wss:\/\//i, /favicon\.ico/i];
 
 const isIgnorable = (text) => IGNORABLE.some((re) => re.test(text));
 
+/** Frames printed per uncaught error; a wasm trap's culprit sits near the top. */
+const MAX_STACK_FRAMES = 25;
+
+/** The `at …` lines of an error's stack, without the message line it repeats. */
+const stackFrames = (stack) =>
+  (stack ?? '')
+    .split('\n')
+    .filter((line) => /^\s+at /.test(line))
+    .slice(0, MAX_STACK_FRAMES)
+    .map((line) => line.trim());
+
 /**
  * Serves BUNDLE_DIR under BASE_PATH, cross-origin isolated.
  *
@@ -350,13 +361,20 @@ async function main() {
       }, forcedLanguages.split(','));
     }
 
-    const record = (origin, text) => {
-      (isIgnorable(text) ? ignored : errors).push(`[${origin}] ${text}`);
+    // `frames` only adds context to the report: whether an error is ignorable
+    // is still decided on its message alone.
+    const record = (origin, text, frames = []) => {
+      const entry = [`[${origin}] ${text}`, ...frames].join('\n    ');
+      (isIgnorable(text) ? ignored : errors).push(entry);
     };
     page.on('console', (msg) => {
       if (msg.type() === 'error') record('console', msg.text());
     });
-    page.on('pageerror', (err) => record('pageerror', err.message));
+    // The stack is what names the culprit: "Atomics.wait cannot be called in
+    // this context" alone does not say which Rust lock blocked (#294).
+    page.on('pageerror', (err) =>
+      record('pageerror', err.message, stackFrames(err.stack)),
+    );
 
     // Collected but never fatal on its own: a cancelled preload is routine,
     // while a blocked CDN fetch is not, and only the surrounding failure says

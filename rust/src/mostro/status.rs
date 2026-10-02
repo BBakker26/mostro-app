@@ -231,7 +231,9 @@ pub(crate) fn add_invoice_sync(
 /// `since` (Unix seconds of the first trade, truncated to its UTC day start)
 /// supersedes the deprecated `operating_days`; it is `None` from daemons that
 /// predate it, for users without a date, and for a value that is not a
-/// positive `i64`, and the UI then falls back to `operating_days`.
+/// positive number of seconds Dart's `DateTime` can hold
+/// (`reputation::since_from_wire`), and the UI then falls back to
+/// `operating_days`.
 pub(crate) fn peer_reputation(
     payload: &Option<mostro_core::message::Payload>,
 ) -> Option<(f64, u32, u32, Option<i64>)> {
@@ -245,9 +247,7 @@ pub(crate) fn peer_reputation(
                 u.rating,
                 u.reviews.clamp(0, u32::MAX as i64) as u32,
                 u.operating_days.min(u32::MAX as u64) as u32,
-                u.since
-                    .filter(|&since| since > 0)
-                    .and_then(|since| i64::try_from(since).ok()),
+                u.since.and_then(crate::mostro::reputation::since_from_wire),
             )
         }),
         _ => None,

@@ -192,11 +192,10 @@ fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32, Option<i64>) {
             .and_then(|v| v.as_u64())
             .and_then(|value| u32::try_from(value).ok())
             .unwrap_or(0),
-        // A positive whole number of seconds, or no date at all.
+        // A positive whole number of seconds Dart can hold, or no date at all.
         obj.get("since")
             .and_then(|v| v.as_u64())
-            .filter(|&since| since > 0)
-            .and_then(|since| i64::try_from(since).ok()),
+            .and_then(crate::mostro::reputation::since_from_wire),
     )
 }
 

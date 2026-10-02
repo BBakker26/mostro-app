@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -31,17 +34,14 @@ void main() {
     });
 
     test('every declared identifier is attached to a control', () {
-      final source = _librarySources();
-      final unattached = <String>[];
-      for (final member in _declaredMembers()) {
-        // The declaration itself lives in automation_ids.dart; a member used
-        // nowhere else names nothing.
-        final uses = source.entries
-            .where((e) => !e.key.endsWith('automation_ids.dart'))
-            .where((e) => _attachment(member).hasMatch(e.value))
-            .length;
-        if (uses == 0) unattached.add(member);
-      }
+      final unattached = _unattached(
+        _declaredMembers(),
+        _librarySources()
+            // The declaration itself lives in automation_ids.dart; a member
+            // used nowhere else names nothing.
+            .where((f) => !f.path.endsWith('automation_ids.dart'))
+            .map((f) => f.readAsStringSync()),
+      );
       expect(
         unattached,
         isEmpty,
@@ -51,38 +51,57 @@ void main() {
   });
 
   // What the check above counts as a use depends entirely on this, and the
-  // two are read apart: a filter that quietly kept comments would restore
-  // the false negative the whole group exists to prevent.
-  group('the source filter', () {
-    test('drops a comment however it is spaced', () {
-      for (final line in [
-        'case 1:// AutomationIds.tradeRate',
-        'case 1: // AutomationIds.tradeRate',
-        '/// AutomationIds.tradeRate',
+  // two are read apart: a reader that counted prose or text would restore the
+  // false negative the whole group exists to prevent.
+  group('what counts as a use', () {
+    List<String> unattachedIn(String body,
+            [List<String> members = const ['tradeRate']]) =>
+        _unattached(members, ['void f() {\n$body\n}']);
+
+    test('a member reference or helper call in code', () {
+      expect(unattachedIn('tag(AutomationIds.tradeRate);'), isEmpty);
+      expect(unattachedIn(r"tag('row-${AutomationIds.tradeRate}');"), isEmpty);
+      expect(
+        unattachedIn('tag(AutomationIds.tradeRateStar(1));', ['tradeRateStar']),
+        isEmpty,
+      );
+    });
+
+    test('a longer member is not a use of a name it starts with', () {
+      expect(
+        unattachedIn('tag(AutomationIds.tradeRateSubmit);',
+            ['tradeRate', 'tradeRateSubmit']),
+        ['tradeRate'],
+      );
+    });
+
+    test('a name in a comment is not a use, however it is written', () {
+      for (final body in [
+        'switch (x) { case 1:// AutomationIds.tradeRate\n}',
+        '/// AutomationIds.tradeRate\nbuild();',
         '/* AutomationIds.tradeRate */ build();',
+        '/* outer /* inner */ AutomationIds.tradeRate */ build();',
+        "connect('wss://x'); // AutomationIds.tradeRate",
       ]) {
-        expect(_withoutComments(line), isNot(contains('AutomationIds')),
-            reason: line);
+        expect(unattachedIn(body), ['tradeRate'], reason: body);
+      }
+    });
+
+    test('a name in a string is not a use', () {
+      for (final body in [
+        "const note = 'AutomationIds.tradeRate';",
+        "const note = '''\nAutomationIds.tradeRate\n''';",
+      ]) {
+        expect(unattachedIn(body), ['tradeRate'], reason: body);
       }
     });
 
     test('a url is not a comment, and neither is the code after it', () {
-      const line =
-          "connect('wss://relay.mostro.network'); tag(AutomationIds.tradeRate);";
-      expect(_withoutComments(line), contains('wss://'));
-      expect(_withoutComments(line), contains('AutomationIds.tradeRate'));
-    });
-
-    test('a url inside a triple-quoted block is not a comment either', () {
-      const block = "const license = '''\n"
-          'see <https://www.gnu.org/licenses/>\n'
-          "''';\ntag(AutomationIds.tradeRate);";
-      expect(_withoutComments(block), contains('AutomationIds.tradeRate'));
-    });
-
-    test('a comment following a url on one line still goes', () {
-      const line = "connect('wss://x'); // AutomationIds.tradeRate";
-      expect(_withoutComments(line), isNot(contains('AutomationIds')));
+      expect(
+        unattachedIn("connect('wss://relay.mostro.network'); "
+            'tag(AutomationIds.tradeRate);'),
+        isEmpty,
+      );
     });
   });
 
@@ -306,54 +325,57 @@ List<String> _declaredIdentifiers() {
       .toList();
 }
 
-/// Matches a use of [member] and not of a longer member it prefixes.
-///
-/// A plain substring search reports `tradeRate` as attached because
-/// `AutomationIds.tradeRateSubmit` contains it, which is how `trade.rate`
-/// outlived the button it named. Thirteen members prefix another one, so
-/// whatever follows the name has to be something that cannot continue it.
-RegExp _attachment(String member) =>
-    RegExp('AutomationIds\\.${RegExp.escape(member)}(?![A-Za-z0-9_])');
+/// The hand-written sources under lib/.
+Iterable<File> _librarySources() => Directory('lib')
+    .listSync(recursive: true)
+    .whereType<File>()
+    .where((f) => f.path.endsWith('.dart'))
+    // Generated code never attaches identifiers.
+    .where((f) => !f.path.startsWith('lib/src/'))
+    .where((f) => !f.path.startsWith('lib/generated/'))
+    .where((f) => !f.path.startsWith('lib/l10n/'));
 
-Map<String, String> _librarySources() {
-  final files = Directory('lib')
-      .listSync(recursive: true)
-      .whereType<File>()
-      .where((f) => f.path.endsWith('.dart'))
-      // Generated code never attaches identifiers.
-      .where((f) => !f.path.startsWith('lib/src/'))
-      .where((f) => !f.path.startsWith('lib/generated/'))
-      .where((f) => !f.path.startsWith('lib/l10n/'));
-  return {for (final f in files) f.path: _withoutComments(f.readAsStringSync())};
+/// The [members] that no source in [sources] references in code.
+List<String> _unattached(Iterable<String> members, Iterable<String> sources) {
+  final attached = {for (final source in sources) ..._attachedMembers(source)};
+  return members.where((m) => !attached.contains(m)).toList();
 }
 
-/// A string literal or a comment, whichever starts first.
+/// The registry members [source] references in code.
 ///
-/// The alternation is ordered: both triple-quoted forms before their
-/// single-quoted counterparts, and every string form before `//`. A `//`
-/// inside a string is therefore consumed as part of that string and never
-/// looks like a comment — which is the whole point, since a relay url
-/// (`ws://…`) is indistinguishable from one by shape alone.
-final _stringOrComment = RegExp("r?'''[\\s\\S]*?'''"
-    '|r?"""[\\s\\S]*?"""'
-    "|r?'(?:[^'\\\\\\n]|\\\\.)*'"
-    '|r?"(?:[^"\\\\\\n]|\\\\.)*"'
-    r'|//[^\n]*'
-    r'|/\*[\s\S]*?\*/');
+/// Reads the parsed syntax tree, not the text, so a name mentioned only in a
+/// comment or a string is attached to nothing — however the comment nests or
+/// whatever the string holds — while one inside an interpolation still counts.
+/// A member counts only when its name matches exactly, so
+/// `AutomationIds.tradeRateSubmit` is no use of `tradeRate`: a substring
+/// search once let `trade.rate` outlive the button it named.
+Set<String> _attachedMembers(String source) {
+  final references = _RegistryReferences();
+  parseString(content: source, throwIfDiagnostics: false)
+      .unit
+      .accept(references);
+  return references.members;
+}
 
-/// [source] with its comments dropped and its strings left whole.
-///
-/// A member named only in prose is attached to nothing, and `lib/` holds two
-/// such mentions today — a docstring example and a note pointing back at the
-/// registry. Counting them would let a removed control keep its identifier
-/// alive on the strength of a comment about it.
-///
-/// Telling the two apart needs the strings, not a rule about what a comment
-/// looks like: `case 1:// …` is a comment and `'ws://…'` is not, and no test
-/// of the characters around `//` separates them. Scanning strings and
-/// comments together, first match wins, decides it by position instead.
-String _withoutComments(String source) =>
-    source.replaceAllMapped(_stringOrComment, (match) {
-      final token = match[0]!;
-      return token.startsWith('//') || token.startsWith('/*') ? '' : token;
-    });
+class _RegistryReferences extends RecursiveAstVisitor<void> {
+  final members = <String>{};
+
+  // `AutomationIds.tradeRate`
+  @override
+  void visitPrefixedIdentifier(PrefixedIdentifier node) {
+    if (node.prefix.name == 'AutomationIds') {
+      members.add(node.identifier.name);
+    }
+    super.visitPrefixedIdentifier(node);
+  }
+
+  // `AutomationIds.tradeRateStar(star)`
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    final target = node.target;
+    if (target is SimpleIdentifier && target.name == 'AutomationIds') {
+      members.add(node.methodName.name);
+    }
+    super.visitMethodInvocation(node);
+  }
+}

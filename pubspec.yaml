@@ -102,6 +102,8 @@ dev_dependencies:
   build_runner: ^2.4.13
   # Generates the iOS/Android launcher icons from assets/images/launcher-icon.png
   flutter_launcher_icons: ^0.14.2
+  # Parses lib/ in the automation contract test, so only code counts as a use
+  analyzer: ^7.7.1
 
 flutter:
   uses-material-design: true

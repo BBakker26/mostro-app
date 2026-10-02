@@ -605,6 +605,19 @@ mod tests {
     }
 
     #[test]
+    fn rating_tag_since_at_the_dart_date_limit_is_kept() {
+        // The last second Dart's `DateTime` can hold is still a date.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":12,"total_rating":4.5,"days":10,"since":8640000000000}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.maker_since, Some(8_640_000_000_000));
+    }
+
+    #[test]
     fn rating_tag_without_since_keeps_the_day_count() {
         // A daemon that predates `since`: the deprecated `days` is the
         // fallback, so it must still be read.
@@ -621,7 +634,16 @@ mod tests {
     fn invalid_rating_tag_since_is_absent() {
         // Zero, negative, string and fractional values are not a date; each
         // leaves `since` absent without touching the other fields.
-        for since in ["0", "-1699920000", r#""1699920000""#, "1699920000.5"] {
+        // Past 8_640_000_000_000 s the date is outside what Dart's `DateTime`
+        // can hold, and building one throws instead of falling back.
+        for since in [
+            "0",
+            "-1699920000",
+            r#""1699920000""#,
+            "1699920000.5",
+            "8640000000001",
+            "9223372036854775807",
+        ] {
             let order = parse_order_event(
                 &order_event_with_rating(&format!(
                     r#"{{"total_reviews":12,"total_rating":4.5,"days":10,"since":{since}}}"#

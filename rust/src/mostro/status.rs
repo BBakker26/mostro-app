@@ -594,6 +594,20 @@ mod tests {
             peer_reputation(&Some(peer(Some(u64::MAX)))),
             Some((4.5, 12, 10, None))
         );
+        // Past what Dart's `DateTime` can hold, building the date would throw
+        // instead of falling back; the last representable second still counts.
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(i64::MAX as u64)))),
+            Some((4.5, 12, 10, None))
+        );
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(8_640_000_000_001)))),
+            Some((4.5, 12, 10, None))
+        );
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(8_640_000_000_000)))),
+            Some((4.5, 12, 10, Some(8_640_000_000_000)))
+        );
     }
 
     /// The hard-terminal set must match protocol finality: statuses mostrod

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/features/home/providers/order_book_feed.dart';
 import 'package:mostro/features/home/providers/order_filters_provider.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
+import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -84,6 +85,7 @@ class OrderItem {
     this.rating = 0.0,
     this.tradeCount = 0,
     this.daysActive = 0,
+    this.makerSince,
     this.status = OrderStatus.pending,
     this.amountSats,
     this.isMine = false,
@@ -113,7 +115,19 @@ class OrderItem {
   final DateTime? expiresAt;
   final double rating;
   final int tradeCount;
+
+  /// The rating tag's deprecated day count, frozen when the daemon published
+  /// the event. Display [makerDaysOnMostro] instead; this is its fallback.
   final int daysActive;
+
+  /// The maker's first trade (the rating tag's `since`, a UTC day start), or
+  /// `null` from daemons that predate it.
+  final DateTime? makerSince;
+
+  /// Days the maker has been on Mostro, computed now from [makerSince] when
+  /// present, otherwise [daysActive].
+  int get makerDaysOnMostro =>
+      daysOnMostro(makerSince, fallbackDays: daysActive);
 
   /// Current order status from the Mostro protocol.
   final OrderStatus status;
@@ -178,6 +192,7 @@ class OrderItem {
           other.rating == rating &&
           other.tradeCount == tradeCount &&
           other.daysActive == daysActive &&
+          other.makerSince == makerSince &&
           other.status == status &&
           other.amountSats == amountSats &&
           other.isMine == isMine;
@@ -198,6 +213,7 @@ class OrderItem {
     rating,
     tradeCount,
     daysActive,
+    makerSince,
     status,
     amountSats,
     isMine,
@@ -229,6 +245,7 @@ class OrderItem {
     rating: info.rating,
     tradeCount: info.totalReviews,
     daysActive: info.daysActive,
+    makerSince: reputationSince(info.makerSince),
   );
 }
 

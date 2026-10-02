@@ -174,9 +174,16 @@ outcome: TradeOutcome?
 peer_rating: f64?
 peer_reviews: u32?
 peer_days: u32?
+peer_since: i64?
 rated_at: i64?
 bond: BondInfo?
 ```
+
+`peer_since` is the counterparty's first trade (`UserInfo.since` in the Peer
+DM, Unix seconds truncated to the UTC day start), `None` from daemons that
+predate it. Like `order.maker_since` for the maker, the UI computes the age
+from it at display time and falls back to `peer_days`, a count frozen when
+the daemon sent it.
 
 `bond` is set when the node required an anti-abuse bond for this trade, and
 `None` otherwise (and on rows written before the field existed).

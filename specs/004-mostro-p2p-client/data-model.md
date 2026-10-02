@@ -53,14 +53,15 @@ A buy or sell offer on the Mostro network.
 | cached_at | Timestamp | When this order was last fetched/updated locally |
 | rating | f64 | Maker reputation from the Kind 38383 `rating` tag (`total_rating`, 0–5; 0.0 = no reputation: full privacy (`none`), missing tag, or malformed/invalid data) |
 | total_reviews | u32 | Number of reviews behind `rating` (`total_reviews`) |
-| days_active | u32 | Days the maker has been active on the node (`days`) |
+| days_active | u32 | Days the maker has been active on the node (`days`, deprecated on the wire; the display fallback when `maker_since` is absent) |
+| maker_since | i64? | The maker's first trade (`since`): Unix seconds, truncated to the UTC day start. Null from daemons that predate it. The UI shows the age computed at display time (now − `maker_since`, whole days, never negative) and falls back to `days_active` |
 
 **Validation rules**:
 - `fiat_code` MUST be a valid ISO 4217 code.
 - Either `fiat_amount` OR both `fiat_amount_min` and `fiat_amount_max` MUST be provided, but NOT both. If `fiat_amount` is present, `fiat_amount_min` and `fiat_amount_max` MUST be absent; if `fiat_amount_min`/`fiat_amount_max` are present, `fiat_amount` MUST be absent.
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`.
 - `premium` is a signed float (negative = discount).
-- `rating` MUST be within 0–5. Each reputation field (`rating`, `total_reviews`, `days_active`) is validated independently: an out-of-range, non-integer, or malformed value degrades that field alone to 0, and the order is never rejected because of its `rating` tag.
+- `rating` MUST be within 0–5. Each reputation field (`rating`, `total_reviews`, `days_active`) is validated independently: an out-of-range, non-integer, or malformed value degrades that field alone to 0, and the order is never rejected because of its `rating` tag. `maker_since` is likewise validated alone: anything but a positive integer that fits i64 leaves it null.
 
 **State machine** (15 mostro-core states):
 ```text

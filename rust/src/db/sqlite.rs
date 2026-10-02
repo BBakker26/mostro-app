@@ -760,21 +760,25 @@ impl Storage for SqliteStorage {
         rating: f64,
         reviews: u32,
         days: u32,
+        since: Option<i64>,
     ) -> Result<()> {
-        // Layer the three scalars with json_set in one statement. Bind rating
+        // Layer the four scalars with json_set in one statement. Bind rating
         // via json(?) so SQLite stores it as a JSON number, not a string — a
         // string would fail to deserialize back into `Option<f64>`. reviews and
-        // days go through json(?) for the same reason (they map to Option<u32>).
+        // days go through json(?) for the same reason (they map to Option<u32>),
+        // and since too: `json('null')` stores a JSON null, read back as None.
         let sql = "UPDATE trades SET data = json_set(\
              data, \
              '$.peer_rating', json(?), \
              '$.peer_reviews', json(?), \
-             '$.peer_days', json(?)) \
+             '$.peer_days', json(?), \
+             '$.peer_since', json(?)) \
              WHERE json_extract(data, '$.order.id') = ?";
         sqlx::query(sql)
             .bind(rating.to_string())
             .bind(reviews.to_string())
             .bind(days.to_string())
+            .bind(serde_json::to_string(&since)?)
             .bind(order_id)
             .execute(&self.pool)
             .await?;
@@ -1264,6 +1268,7 @@ mod tests {
                 rating: 0.0,
                 total_reviews: 0,
                 days_active: 0,
+                maker_since: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1279,6 +1284,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -1341,6 +1347,7 @@ mod tests {
                 rating: 0.0,
                 total_reviews: 0,
                 days_active: 0,
+                maker_since: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1356,6 +1363,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -1368,9 +1376,10 @@ mod tests {
         storage.save_trade(&trade("row-a", "order-a")).await.unwrap();
         storage.save_trade(&trade("row-b", "order-b")).await.unwrap();
 
-        // The reproduction's numbers: rating 4.375, 4 reviews, 64 days.
+        // The reproduction's numbers: rating 4.375, 4 reviews, 64 days, plus
+        // the first-trade date a current daemon sends next to the day count.
         storage
-            .update_trade_peer_reputation("order-a", 4.375, 4, 64)
+            .update_trade_peer_reputation("order-a", 4.375, 4, 64, Some(1699920000))
             .await
             .unwrap();
 
@@ -1382,6 +1391,7 @@ mod tests {
         assert_eq!(a.peer_rating, Some(4.375));
         assert_eq!(a.peer_reviews, Some(4));
         assert_eq!(a.peer_days, Some(64));
+        assert_eq!(a.peer_since, Some(1699920000));
 
         // The sibling row is untouched — the update is scoped by order id.
         let b = storage
@@ -1392,11 +1402,13 @@ mod tests {
         assert_eq!(b.peer_rating, None);
         assert_eq!(b.peer_reviews, None);
         assert_eq!(b.peer_days, None);
+        assert_eq!(b.peer_since, None);
 
         // A brand-new taker persists as all-zeros, not as absent — the UI
-        // shows the raw numbers rather than guessing "new user".
+        // shows the raw numbers rather than guessing "new user". A daemon
+        // that predates `since` sends none: it lands as a JSON null.
         storage
-            .update_trade_peer_reputation("order-b", 0.0, 0, 0)
+            .update_trade_peer_reputation("order-b", 0.0, 0, 0, None)
             .await
             .unwrap();
         let b = storage
@@ -1407,6 +1419,29 @@ mod tests {
         assert_eq!(b.peer_rating, Some(0.0));
         assert_eq!(b.peer_reviews, Some(0));
         assert_eq!(b.peer_days, Some(0));
+        assert_eq!(b.peer_since, None);
+        let since_type: Option<String> = sqlx::query_scalar(
+            "SELECT json_type(data, '$.peer_since') FROM trades \
+             WHERE json_extract(data, '$.order.id') = 'order-b'",
+        )
+        .fetch_one(&storage.pool)
+        .await
+        .unwrap();
+        assert_eq!(since_type.as_deref(), Some("null"));
+
+        // A row written before `peer_since` existed has no such key at all;
+        // `serde(default)` must still load it, with the day count intact.
+        sqlx::query("UPDATE trades SET data = json_remove(data, '$.peer_since')")
+            .execute(&storage.pool)
+            .await
+            .unwrap();
+        let a = storage
+            .get_trade_by_order_id("order-a")
+            .await
+            .unwrap()
+            .expect("a row without peer_since still loads");
+        assert_eq!(a.peer_days, Some(64));
+        assert_eq!(a.peer_since, None);
 
         drop(storage);
         let _ = std::fs::remove_file(&path);
@@ -1435,6 +1470,7 @@ mod tests {
                 rating: 0.0,
                 total_reviews: 0,
                 days_active: 0,
+                maker_since: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1450,6 +1486,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -1570,6 +1607,7 @@ mod tests {
                 rating: 0.0,
                 total_reviews: 0,
                 days_active: 0,
+                maker_since: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1585,6 +1623,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -1653,6 +1692,7 @@ mod tests {
                 rating: 0.0,
                 total_reviews: 0,
                 days_active: 0,
+                maker_since: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: counterparty.into(),
@@ -1668,6 +1708,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -2256,6 +2297,7 @@ mod tests {
             rating: 0.0,
             total_reviews: 0,
             days_active: 0,
+            maker_since: None,
         };
         storage.save_order(&order).await.unwrap();
         storage
@@ -2276,6 +2318,7 @@ mod tests {
                 peer_rating: None,
                 peer_reviews: None,
                 peer_days: None,
+                peer_since: None,
                 rated_at: None,
                 bond: None,
                 buyer_trade_pubkey: None,

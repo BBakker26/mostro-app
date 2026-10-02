@@ -928,6 +928,7 @@ mod tests {
             _rating: f64,
             _reviews: u32,
             _days: u32,
+            _since: Option<i64>,
         ) -> Result<()> {
             unimplemented!()
         }

@@ -33,9 +33,6 @@ firebase.initializeApp({
 firebase.messaging().onBackgroundMessage((payload) => {
   const notice = pushWorkerLogic.noticeFor(payload, self.navigator.languages);
   if (!notice) return undefined;
-  return self.registration.showNotification(notice.title, {
-    body: notice.body,
-    tag: 'mostro-chat',
-    icon: 'icons/Icon-192.png',
-  });
+  const { title, ...options } = notice;
+  return self.registration.showNotification(title, options);
 });

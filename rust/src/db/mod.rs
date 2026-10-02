@@ -390,13 +390,16 @@ pub trait Storage: Send + Sync {
     /// Persist the counterparty (taker) reputation snapshot on a trade
     /// identified by `order.id` (issue #305). No-op when no matching trade
     /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no
-    /// snapshot, so this is only called when one was carried.
+    /// snapshot, so this is only called when one was carried. `since` is the
+    /// Unix timestamp of the taker's first trade (`None` from daemons that
+    /// predate it), stored as `peer_since` next to `peer_days`.
     async fn update_trade_peer_reputation(
         &self,
         order_id: &str,
         rating: f64,
         reviews: u32,
         days: u32,
+        since: Option<i64>,
     ) -> Result<()>;
 
     /// Replace the anti-abuse bond attached to a trade (`$.bond`), keeping

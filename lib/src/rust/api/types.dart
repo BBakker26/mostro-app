@@ -1432,7 +1432,15 @@ class OrderInfo {
   final int totalReviews;
 
   /// Days the maker has been active on this Mostro node (`days`).
+  /// Deprecated on the wire in favour of [`Self::maker_since`]; kept as the
+  /// fallback for daemons that do not publish `since`.
   final int daysActive;
+
+  /// Unix timestamp (seconds) of the maker's first trade, truncated to its
+  /// UTC day start (the `rating` tag's `since`). `None` from daemons that
+  /// predate it and for users without a date. The UI computes the age at
+  /// display time (now − since) and falls back to [`Self::days_active`].
+  final PlatformInt64? makerSince;
 
   const OrderInfo({
     required this.id,
@@ -1452,6 +1460,7 @@ class OrderInfo {
     required this.rating,
     required this.totalReviews,
     required this.daysActive,
+    this.makerSince,
   });
 
   @override
@@ -1472,7 +1481,8 @@ class OrderInfo {
       isMine.hashCode ^
       rating.hashCode ^
       totalReviews.hashCode ^
-      daysActive.hashCode;
+      daysActive.hashCode ^
+      makerSince.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1495,7 +1505,8 @@ class OrderInfo {
           isMine == other.isMine &&
           rating == other.rating &&
           totalReviews == other.totalReviews &&
-          daysActive == other.daysActive;
+          daysActive == other.daysActive &&
+          makerSince == other.makerSince;
 }
 
 /// Shared types exposed to Flutter via flutter_rust_bridge.
@@ -1898,6 +1909,13 @@ class TradeInfo {
   final int? peerReviews;
   final int? peerDays;
 
+  /// Unix timestamp (seconds) of the counterparty's first trade, truncated
+  /// to its UTC day start (`UserInfo.since` in the Peer DM). `None` from
+  /// daemons that predate it and for users without a date. The UI computes
+  /// the age at display time (now − since) and falls back to
+  /// [`Self::peer_days`].
+  final PlatformInt64? peerSince;
+
   /// Durable "the local user rated this trade" marker (unix seconds), set
   /// after `submit_rating` publishes (issue #339).
   ///
@@ -1968,6 +1986,7 @@ class TradeInfo {
     this.peerRating,
     this.peerReviews,
     this.peerDays,
+    this.peerSince,
     this.ratedAt,
     this.bond,
     this.buyerTradePubkey,
@@ -1996,6 +2015,7 @@ class TradeInfo {
       peerRating.hashCode ^
       peerReviews.hashCode ^
       peerDays.hashCode ^
+      peerSince.hashCode ^
       ratedAt.hashCode ^
       bond.hashCode ^
       buyerTradePubkey.hashCode ^
@@ -2026,6 +2046,7 @@ class TradeInfo {
           peerRating == other.peerRating &&
           peerReviews == other.peerReviews &&
           peerDays == other.peerDays &&
+          peerSince == other.peerSince &&
           ratedAt == other.ratedAt &&
           bond == other.bond &&
           buyerTradePubkey == other.buyerTradePubkey &&

@@ -309,8 +309,16 @@ pub struct OrderInfo {
     #[serde(default)]
     pub total_reviews: u32,
     /// Days the maker has been active on this Mostro node (`days`).
+    /// Deprecated on the wire in favour of [`Self::maker_since`]; kept as the
+    /// fallback for daemons that do not publish `since`.
     #[serde(default)]
     pub days_active: u32,
+    /// Unix timestamp (seconds) of the maker's first trade, truncated to its
+    /// UTC day start (the `rating` tag's `since`). `None` from daemons that
+    /// predate it and for users without a date. The UI computes the age at
+    /// display time (now − since) and falls back to [`Self::days_active`].
+    #[serde(default)]
+    pub maker_since: Option<i64>,
 }
 
 /// Parameters for creating a new order via the Mostro protocol.
@@ -359,6 +367,13 @@ pub struct TradeInfo {
     pub peer_reviews: Option<u32>,
     #[serde(default)]
     pub peer_days: Option<u32>,
+    /// Unix timestamp (seconds) of the counterparty's first trade, truncated
+    /// to its UTC day start (`UserInfo.since` in the Peer DM). `None` from
+    /// daemons that predate it and for users without a date. The UI computes
+    /// the age at display time (now − since) and falls back to
+    /// [`Self::peer_days`].
+    #[serde(default)]
+    pub peer_since: Option<i64>,
     /// Durable "the local user rated this trade" marker (unix seconds), set
     /// after `submit_rating` publishes (issue #339).
     ///
@@ -544,6 +559,9 @@ pub struct TradeUpdate {
 /// below it is already inside the snapshot; applying it could resurrect an
 /// order that was removed since. On [`OrderDelta::Resync`], read a fresh
 /// snapshot and carry on with the same rule.
+// Nearly every delta is an `Upserted`, so boxing the order would add an
+// allocation per delta without making the typical value any smaller.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum OrderDelta {
     /// `order` was added or changed.

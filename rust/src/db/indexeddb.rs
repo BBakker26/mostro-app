@@ -665,9 +665,10 @@ impl Storage for IndexedDbStorage {
         rating: f64,
         reviews: u32,
         days: u32,
+        since: Option<i64>,
     ) -> Result<()> {
         self.patch_trade_by_order_id(order_id, |doc| {
-            trade_json::set_peer_reputation(doc, rating, reviews, days)
+            trade_json::set_peer_reputation(doc, rating, reviews, days, since)
         })
         .await
     }

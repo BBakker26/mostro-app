@@ -154,7 +154,19 @@ creator_pubkey: String
 created_at: i64 (unix timestamp)
 expires_at: i64?
 is_mine: bool
+rating: f64
+total_reviews: u32
+days_active: u32
+maker_since: i64?
 ```
+
+`rating`, `total_reviews`, `days_active` and `maker_since` are the maker's
+reputation from the Kind 38383 `rating` tag; `0`/`None` without one (no
+reputation yet, or full privacy). `maker_since` is the maker's first trade
+(the tag's `since`, Unix seconds truncated to the UTC day start), `None` from
+daemons that predate it and for a value Dart's `DateTime` cannot hold
+(above 8_640_000_000_000 s). The UI computes the age from it at display time
+and falls back to `days_active`, a count frozen when the daemon published.
 
 ### TradeInfo
 ```text
@@ -181,7 +193,8 @@ bond: BondInfo?
 
 `peer_since` is the counterparty's first trade (`UserInfo.since` in the Peer
 DM, Unix seconds truncated to the UTC day start), `None` from daemons that
-predate it. Like `order.maker_since` for the maker, the UI computes the age
+predate it and for a value Dart's `DateTime` cannot hold. Like
+`order.maker_since` for the maker, the UI computes the age
 from it at display time and falls back to `peer_days`, a count frozen when
 the daemon sent it.
 

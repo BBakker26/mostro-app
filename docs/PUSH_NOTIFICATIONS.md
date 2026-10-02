@@ -193,7 +193,10 @@ tab is open, backgrounded or closed. What the worker may do is narrow by design:
   block, and Chrome requires a push event to end in a visible notification or it
   revokes the subscription after a few silent ones. The worker therefore shows its own
   content-free "New message" for `chat_wake` — the one place the client renders a push
-  itself.
+  itself. Every wake uses one tag (`mostro-chat`), so a new one replaces the last
+  instead of piling up, and sets `renotify: true`, so that replacement alerts again:
+  without it the browser swaps the notice silently, and a user who left the first one
+  unopened never hears about the next message.
 - **Tap.** The worker focuses an existing tab (or opens one) at the app's
   notifications route under the deployed base path (`/app/#/notifications`), and
   the tab's resume path does the rest. The worker never routes on payload fields:

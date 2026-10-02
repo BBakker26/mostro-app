@@ -1,6 +1,7 @@
 @TestOn('vm')
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +71,90 @@ void main() {
     );
   });
 
+  // An installed web app shows the manifest's name, icons and colours on the
+  // home screen, in the task switcher and on its splash screen; on iOS it is
+  // also the only way to get web push (docs/PUSH_NOTIFICATIONS.md §2.6). The
+  // smoke test asks Chrome whether the bundle is installable at all.
+  group('web/manifest.json (installable app, #658)', () {
+    Map<String, dynamic> manifest() =>
+        jsonDecode(File('web/manifest.json').readAsStringSync())
+            as Map<String, dynamic>;
+
+    test("carries Mostro's identity, not Flutter's template", () {
+      // Arrange
+      final m = manifest();
+
+      // Act / Assert
+      expect(m['name'], 'Mostro');
+      expect(m['short_name'], 'Mostro');
+      expect(m['description'], isNot(contains('Flutter')));
+      expect(m['background_color'], isNot('#0175C2'));
+      expect(m['theme_color'], isNot('#0175C2'));
+    });
+
+    test('stays inside the deployed base path', () {
+      // Arrange
+      final m = manifest();
+
+      // Act / Assert — relative to the manifest, so the same file works under
+      // /app/ and under a fork's sub-path; an absolute "/" would scope the
+      // installed app to the whole origin and start it on a 404.
+      for (final field in ['id', 'start_url', 'scope']) {
+        expect(m[field], './', reason: field);
+      }
+      expect(m['display'], 'standalone');
+    });
+
+    test('lists plain and maskable icons at 192 and 512, all committed', () {
+      // Arrange
+      final icons = (manifest()['icons'] as List).cast<Map<String, dynamic>>();
+
+      // Act
+      String key(Map<String, dynamic> i) => '${i['purpose']} ${i['sizes']}';
+
+      // Assert — Chrome needs a 192 and a 512; Android masks maskable icons.
+      expect(
+        icons.map(key),
+        containsAll([
+          'any 192x192',
+          'any 512x512',
+          'maskable 192x192',
+          'maskable 512x512',
+        ]),
+      );
+      for (final icon in icons) {
+        expect(
+          File('web/${icon['src']}').existsSync(),
+          isTrue,
+          reason: icon['src'] as String,
+        );
+      }
+    });
+
+    test('index.html agrees with it for the browsers that ignore it', () {
+      // Arrange
+      final html = indexHtml.readAsStringSync();
+      final m = manifest();
+
+      // Act / Assert — iOS takes the home-screen title and icon from these
+      // tags, and the address bar colour comes from theme-color.
+      expect(html, contains('<link rel="manifest" href="manifest.json">'));
+      expect(html, contains('<title>${m['name']}</title>'));
+      expect(
+        html,
+        contains(
+          '<meta name="apple-mobile-web-app-title" '
+          'content="${m['short_name']}">',
+        ),
+      );
+      expect(
+        html,
+        contains('<meta name="theme-color" content="${m['theme_color']}">'),
+      );
+      expect(html, contains('<link rel="apple-touch-icon"'));
+    });
+  });
+
   group('vendored coi-serviceworker', () {
     test('is committed and non-empty', () {
       // Arrange / Act
@@ -132,6 +217,13 @@ void main() {
       // in a real browser before it is deployable.
       expect(yaml, contains('smoke.mjs'));
       expect(yaml, contains(r'BUNDLE_DIR'));
+      // ...and asked whether Chrome would install it (#658): a lost manifest
+      // link or icon leaves the page working and only removes the install.
+      expect(yaml, contains('SMOKE_INSTALLABLE: "1"'));
+      expect(
+        smoke.readAsStringSync(),
+        contains('Page.getInstallabilityErrors'),
+      );
     });
   });
 
@@ -279,24 +371,26 @@ void main() {
     final worker = File('web/firebase-messaging-sw.js');
     final logic = File('web/push_worker_logic.js');
 
-    test('index.html registers it, relative to the base path, after the shim',
-        () {
-      // Arrange
-      final html = indexHtml.readAsStringSync();
+    test(
+      'index.html registers it, relative to the base path, after the shim',
+      () {
+        // Arrange
+        final html = indexHtml.readAsStringSync();
 
-      // Act
-      final shimAt = html.indexOf('<script src="coi-serviceworker.min.js">');
-      final registerAt = html.indexOf("register('$messagingWorkerScript'");
-      final bootstrapAt = html.indexOf('flutter_bootstrap.js');
+        // Act
+        final shimAt = html.indexOf('<script src="coi-serviceworker.min.js">');
+        final registerAt = html.indexOf("register('$messagingWorkerScript'");
+        final bootstrapAt = html.indexOf('flutter_bootstrap.js');
 
-      // Assert — Firebase's default is the origin root, which under /app/ is
-      // a 404; a relative URL resolves against <base href>. After the shim,
-      // which must stay the first script.
-      expect(registerAt, greaterThan(shimAt));
-      expect(registerAt, lessThan(bootstrapAt));
-      expect(html, contains("scope: '$messagingWorkerScope'"));
-      expect(html, isNot(contains("'/$messagingWorkerScript'")));
-    });
+        // Assert — Firebase's default is the origin root, which under /app/ is
+        // a 404; a relative URL resolves against <base href>. After the shim,
+        // which must stay the first script.
+        expect(registerAt, greaterThan(shimAt));
+        expect(registerAt, lessThan(bootstrapAt));
+        expect(html, contains("scope: '$messagingWorkerScope'"));
+        expect(html, isNot(contains("'/$messagingWorkerScript'")));
+      },
+    );
 
     test('routes on no payload field and carries no placeholder config', () {
       // Arrange
@@ -320,10 +414,10 @@ void main() {
       final js = worker.readAsStringSync();
 
       // Act
-      final values = RegExp(r"(apiKey|appId|messagingSenderId|projectId): '([^']+)'")
-          .allMatches(web)
-          .map((m) => (m.group(1)!, m.group(2)!))
-          .toList();
+      final values =
+          RegExp(
+            r"(apiKey|appId|messagingSenderId|projectId): '([^']+)'",
+          ).allMatches(web).map((m) => (m.group(1)!, m.group(2)!)).toList();
 
       // Assert
       expect(values, hasLength(4));
@@ -336,21 +430,25 @@ void main() {
       // Arrange — firebase_core_web pins the SDK the page imports; a worker
       // on another version is a second SDK talking to the same push scope.
       final config = File('.dart_tool/package_config.json').readAsStringSync();
-      final root = RegExp(
-        r'"name": "firebase_core_web",\s*"rootUri": "file://([^"]+)"',
-      ).firstMatch(config)!.group(1)!;
-      final pinned = RegExp(r"supportedFirebaseJsSdkVersion = '([^']+)'")
-          .firstMatch(
-            File('$root/lib/src/firebase_sdk_version.dart').readAsStringSync(),
-          )!
-          .group(1)!;
+      final root =
+          RegExp(
+            r'"name": "firebase_core_web",\s*"rootUri": "file://([^"]+)"',
+          ).firstMatch(config)!.group(1)!;
+      final pinned =
+          RegExp(r"supportedFirebaseJsSdkVersion = '([^']+)'")
+              .firstMatch(
+                File(
+                  '$root/lib/src/firebase_sdk_version.dart',
+                ).readAsStringSync(),
+              )!
+              .group(1)!;
       final js = worker.readAsStringSync();
 
       // Act
-      final imported = RegExp(r'firebasejs/([0-9.]+)/')
-          .allMatches(js)
-          .map((m) => m.group(1))
-          .toSet();
+      final imported =
+          RegExp(
+            r'firebasejs/([0-9.]+)/',
+          ).allMatches(js).map((m) => m.group(1)).toSet();
 
       // Assert
       expect(imported, {pinned});
@@ -361,20 +459,26 @@ void main() {
       // worker cannot, so it carries a copy for every locale. The locales
       // come from the translation files, so a new one cannot be missed here.
       final js = logic.readAsStringSync();
-      final locales = Directory('lib/l10n')
-          .listSync()
-          .map((f) => RegExp(r'app_([a-z]{2})\.arb$').firstMatch(f.path)?.group(1))
-          .whereType<String>()
-          .toList()
-        ..sort();
+      final locales =
+          Directory('lib/l10n')
+              .listSync()
+              .map(
+                (f) => RegExp(
+                  r'app_([a-z]{2})\.arb$',
+                ).firstMatch(f.path)?.group(1),
+              )
+              .whereType<String>()
+              .toList()
+            ..sort();
       expect(locales, isNotEmpty);
 
       // Act / Assert
       for (final locale in locales) {
         final arb = File('lib/l10n/app_$locale.arb').readAsStringSync();
-        final body = RegExp(r'"pushNewMessageBody": "([^"]+)"')
-            .firstMatch(arb)!
-            .group(1)!;
+        final body =
+            RegExp(
+              r'"pushNewMessageBody": "([^"]+)"',
+            ).firstMatch(arb)!.group(1)!;
         expect(js, contains("$locale: '$body'"), reason: locale);
       }
     });
@@ -382,9 +486,10 @@ void main() {
     test('Dart, index.html, the smoke test and CI agree on the worker', () {
       // Arrange — Dart registers the same script and scope index.html does;
       // a mismatch is a second registration the token is never bound to.
-      final dart = File(
-        'lib/features/notifications/services/web_push_web.dart',
-      ).readAsStringSync();
+      final dart =
+          File(
+            'lib/features/notifications/services/web_push_web.dart',
+          ).readAsStringSync();
       final js = smoke.readAsStringSync();
       final yaml = webBuild.readAsStringSync();
 

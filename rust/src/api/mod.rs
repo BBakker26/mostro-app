@@ -1,4 +1,5 @@
 pub mod bond;
+pub mod bridge_handler;
 pub mod cashu;
 pub mod disputes;
 pub mod escrow;

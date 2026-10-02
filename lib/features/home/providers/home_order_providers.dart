@@ -128,12 +128,22 @@ class OrderItem {
 
   bool get isRange => fiatAmountMin != null && fiatAmountMax != null;
 
-  /// [paymentMethod] as the payment-method filter compares it: its
-  /// comma-separated entries, trimmed and lower-cased. Computed on first use
-  /// and kept — an order's methods never change, and the filter walks the
-  /// whole book on every emission and every filter change.
-  late final Set<String> paymentTokens =
-      paymentMethod.split(',').map((t) => t.trim().toLowerCase()).toSet();
+  /// [paymentMethod]'s entries as the maker wrote them: comma-separated,
+  /// trimmed, empty ones dropped. The one place the filter splits the field,
+  /// so the chips it offers ([bookPaymentMethodsProvider]) and the tokens it
+  /// compares ([paymentTokens]) cannot drift apart: a chip that matches no
+  /// order is the bug the book-derived chips exist to fix.
+  List<String> get paymentLabels => [
+    for (final entry in paymentMethod.split(','))
+      if (entry.trim().isNotEmpty) entry.trim(),
+  ];
+
+  /// [paymentLabels] as the payment-method filter compares them: lower-cased.
+  /// Computed on first use and kept — an order's methods never change, and
+  /// the filter walks the whole book on every emission and every filter change.
+  late final Set<String> paymentTokens = {
+    for (final label in paymentLabels) label.toLowerCase(),
+  };
 
   String get displayAmount {
     if (isRange) {
@@ -313,6 +323,35 @@ final tabHasOrdersProvider = Provider.autoDispose<bool>((ref) {
       ref.watch(orderBookProvider).valueOrNull ?? const <OrderItem>[];
   final tab = ref.watch(homeOrderTypeProvider);
   return orders.any((order) => _isListedOnTab(order, tab));
+});
+
+/// The payment methods the active tab's orders carry, as the filter dialog
+/// offers them: one entry per method however makers cased it, spelled the
+/// way it first appears, sorted alphabetically. With currencies picked, only
+/// those currencies' orders count: a method no order of theirs carries would
+/// leave the book empty.
+///
+/// Taken from the book rather than a fixed list, because the filter matches
+/// a method exactly: a catalogue chip "SEPA" found no order that says
+/// "SEPA instant" — the name the order form itself offers for EUR.
+final bookPaymentMethodsProvider = Provider.autoDispose<List<String>>((ref) {
+  final orders =
+      ref.watch(orderBookProvider).valueOrNull ?? const <OrderItem>[];
+  final tab = ref.watch(homeOrderTypeProvider);
+  final currencies = ref.watch(
+    orderFiltersProvider.select((filters) => filters.currencies),
+  );
+  final byToken = <String, String>{};
+  for (final order in orders) {
+    if (!_isListedOnTab(order, tab)) continue;
+    if (currencies.isNotEmpty && !currencies.contains(order.fiatCode)) continue;
+    for (final label in order.paymentLabels) {
+      byToken.putIfAbsent(label.toLowerCase(), () => label);
+    }
+  }
+  final methods = byToken.values.toList();
+  methods.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return methods;
 });
 
 /// Filtered orders based on active tab, all filter providers and the selected

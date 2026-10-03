@@ -41,26 +41,39 @@ class NwcWalletState {
       );
 }
 
+/// Where the NWC URI is kept between launches.
+class NwcUriStore {
+  NwcUriStore({required SharedPreferences prefs}) : _prefs = prefs;
+
+  final SharedPreferences _prefs;
+
+  Future<void> write(String uri) => _prefs.setString(kNwcUriKey, uri);
+
+  Future<void> delete() => _prefs.remove(kNwcUriKey);
+
+  Future<String?> load() async => _prefs.getString(kNwcUriKey);
+}
+
 // ── Notifier ───────────────────────────────────────────────────────────────────
 
 class NwcNotifier extends StateNotifier<NwcWalletState?> {
-  NwcNotifier({SharedPreferences? prefs}) : _prefs = prefs, super(null);
+  NwcNotifier({NwcUriStore? store}) : _store = store, super(null);
 
-  final SharedPreferences? _prefs;
+  final NwcUriStore? _store;
 
   /// Store wallet state after a successful `connect_wallet` call.
   /// Persists the NWC URI so it survives app restarts.
-  void setConnected(NwcWalletState wallet, {String? nwcUri}) {
+  Future<bool> setConnected(NwcWalletState wallet, {String? nwcUri}) async {
     state = wallet;
-    if (nwcUri != null) {
-      _prefs?.setString(kNwcUriKey, nwcUri);
-    }
+    if (nwcUri != null) await _store?.write(nwcUri);
+    return true;
   }
 
   /// Clear wallet state after `disconnect_wallet`.
-  void setDisconnected() {
+  Future<bool> setDisconnected() async {
     state = null;
-    _prefs?.remove(kNwcUriKey);
+    await _store?.delete();
+    return true;
   }
 
   /// Update balance from a `get_balance` result.

@@ -393,6 +393,23 @@ void main() {
       expect(html, isNot(contains("'/$messagingWorkerScript'")));
     });
 
+    test('adds its tap listener before it imports the Firebase SDK', () {
+      // Arrange
+      final js = worker.readAsStringSync();
+
+      // Act
+      final listenerAt = js.indexOf("addEventListener('notificationclick'");
+      final firstImportAt = js.indexOf('importScripts(');
+
+      // Assert — the SDK's own listener stops propagation for the notices it
+      // rendered (every trade_update), and Firebase documents registering a
+      // custom one before importing it: an SDK that added its listener at
+      // import time would leave this one never running.
+      expect(listenerAt, isNonNegative);
+      expect(firstImportAt, isNonNegative);
+      expect(listenerAt, lessThan(firstImportAt));
+    });
+
     test('routes on no payload field and carries no placeholder config', () {
       // Arrange
       final js = worker.readAsStringSync() + logic.readAsStringSync();

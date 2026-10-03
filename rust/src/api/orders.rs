@@ -14032,9 +14032,6 @@ mod tests {
                 }
             }
         }
-        async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
-            unimplemented!()
-        }
         async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>> {
             unimplemented!()
         }

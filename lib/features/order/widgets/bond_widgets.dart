@@ -244,8 +244,8 @@ class BondExplainerBody extends StatelessWidget {
 }
 
 /// 14b's compact amount row: the label and figure on the left, the amber
-/// time pill on the right. The hero shrinks when the reader is reading, not
-/// scanning.
+/// time pill on the right. The hero shrinks to make room for the
+/// explanation; the QR stays under it.
 class BondAmountRow extends StatelessWidget {
   const BondAmountRow({
     super.key,
